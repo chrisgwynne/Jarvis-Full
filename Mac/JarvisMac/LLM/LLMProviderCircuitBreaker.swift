@@ -49,7 +49,7 @@ final class LLMProviderCircuitBreaker {
     }
 
     var allCircuitsOpen: Bool {
-        let known = ["minimax", "lm_studio"]
+        let known = ["minimax", "llama_cpp"]
         return !known.isEmpty && known.allSatisfy { isOpen($0) }
     }
 

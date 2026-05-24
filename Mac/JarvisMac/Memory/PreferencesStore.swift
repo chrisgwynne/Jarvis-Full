@@ -291,9 +291,9 @@ struct Preferences: Codable, Equatable {
     var miniMaxEnabled: Bool
     var miniMaxBaseURL: String
     var miniMaxModel: String
-    var lmStudioEnabled: Bool
-    var lmStudioBaseURL: String
-    var lmStudioModel: String
+    var llamaCppEnabled: Bool
+    var llamaCppBaseURL: String
+    var llamaCppModel: String
 
     // ── Gemini (Google generative-language) ──────────────────────────────────
     /// Whether the Gemini text provider participates in `LLMRouter`.
@@ -396,9 +396,9 @@ struct Preferences: Codable, Equatable {
         miniMaxEnabled: false,
         miniMaxBaseURL: "https://api.minimax.io/v1",
         miniMaxModel: "MiniMax-M2.7",
-        lmStudioEnabled: false,
-        lmStudioBaseURL: "http://localhost:1234/v1",
-        lmStudioModel: "google/gemma-3n-e4b-it"
+        llamaCppEnabled: false,
+        llamaCppBaseURL: "http://localhost:8080/v1",
+        llamaCppModel: ""
     )
 
     init(userName: String?,
@@ -430,9 +430,9 @@ struct Preferences: Codable, Equatable {
          miniMaxEnabled: Bool,
          miniMaxBaseURL: String,
          miniMaxModel: String,
-         lmStudioEnabled: Bool,
-         lmStudioBaseURL: String,
-         lmStudioModel: String) {
+         llamaCppEnabled: Bool,
+         llamaCppBaseURL: String,
+         llamaCppModel: String) {
         self.userName = userName
         self.preferredMicrophoneUID = preferredMicrophoneUID
         self.preferredCameraUID = preferredCameraUID
@@ -462,9 +462,9 @@ struct Preferences: Codable, Equatable {
         self.miniMaxEnabled = miniMaxEnabled
         self.miniMaxBaseURL = miniMaxBaseURL
         self.miniMaxModel = miniMaxModel
-        self.lmStudioEnabled = lmStudioEnabled
-        self.lmStudioBaseURL = lmStudioBaseURL
-        self.lmStudioModel = lmStudioModel
+        self.llamaCppEnabled = llamaCppEnabled
+        self.llamaCppBaseURL = llamaCppBaseURL
+        self.llamaCppModel   = llamaCppModel
     }
 
     /// Tolerant decoder — anything missing from older preference files falls
@@ -549,9 +549,21 @@ struct Preferences: Codable, Equatable {
             miniMaxBaseURL = "https://api.minimax.io/v1"
         }
         miniMaxModel       = try c.decodeIfPresent(String.self, forKey: .miniMaxModel)    ?? "MiniMax-M2.7"
-        lmStudioEnabled    = try c.decodeIfPresent(Bool.self,   forKey: .lmStudioEnabled)    ?? false
-        lmStudioBaseURL    = try c.decodeIfPresent(String.self, forKey: .lmStudioBaseURL)    ?? "http://localhost:1234/v1"
-        lmStudioModel      = try c.decodeIfPresent(String.self, forKey: .lmStudioModel)      ?? "google/gemma-3n-e4b-it"
+        // Migration: try new llamaCpp keys first; fall back to legacy lmStudio keys for
+        // existing installs, resetting the base URL to the llama.cpp default (port 8080).
+        let legacyC = try? decoder.container(keyedBy: LegacyLMStudioCodingKeys.self)
+        llamaCppEnabled = try c.decodeIfPresent(Bool.self,   forKey: .llamaCppEnabled)
+            ?? (try? legacyC?.decodeIfPresent(Bool.self, forKey: .lmStudioEnabled))
+            ?? false
+        if let saved = try c.decodeIfPresent(String.self, forKey: .llamaCppBaseURL) {
+            llamaCppBaseURL = saved
+        } else {
+            // Old lmStudioBaseURL was localhost (LM Studio default). Reset to llama.cpp default.
+            llamaCppBaseURL = "http://localhost:8080/v1"
+        }
+        llamaCppModel = try c.decodeIfPresent(String.self, forKey: .llamaCppModel)
+            ?? (try? legacyC?.decodeIfPresent(String.self, forKey: .lmStudioModel))
+            ?? ""
 
         // Gemini — defaults documented on the stored properties.
         xaiEnabled         = try c.decodeIfPresent(Bool.self,   forKey: .xaiEnabled)         ?? false
@@ -896,4 +908,14 @@ final class PreferencesStore {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                ofItemAtPath: url.path)
     }
+}
+
+// MARK: - Migration keys for lmStudio → llamaCpp rename
+
+/// Used only in Preferences.init(from:) to read old JSON keys written by
+/// pre-llama.cpp Jarvis builds. Never written back to disk.
+private enum LegacyLMStudioCodingKeys: String, CodingKey {
+    case lmStudioEnabled
+    case lmStudioBaseURL
+    case lmStudioModel
 }

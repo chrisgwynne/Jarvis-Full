@@ -19,14 +19,14 @@ final class LLMRouter {
     let xai:     XAIProvider
     let miniMax: MiniMaxProvider
     let gemini:  GeminiProvider
-    let lmStudio: LLMProvider
+    let local:   LLMProvider
 
     init(xai: XAIProvider, miniMax: MiniMaxProvider,
-         gemini: GeminiProvider, lmStudio: LLMProvider) {
-        self.xai      = xai
-        self.miniMax  = miniMax
-        self.gemini   = gemini
-        self.lmStudio = lmStudio
+         gemini: GeminiProvider, local: LLMProvider) {
+        self.xai     = xai
+        self.miniMax = miniMax
+        self.gemini  = gemini
+        self.local   = local
     }
 
     /// Whether at least one provider is enabled and looks reachable.
@@ -37,7 +37,7 @@ final class LLMRouter {
         if await xai.isAvailable()     { return true }
         if await miniMax.isAvailable() { return true }
         if await gemini.isAvailable()  { return true }
-        if await lmStudio.isAvailable() { return true }
+        if await local.isAvailable() { return true }
         return false
     }
 
@@ -101,13 +101,13 @@ final class LLMRouter {
     /// `LLMRouterChainTests` in JarvisMacTests.
     func selectChain() -> [LLMProvider] {
         switch mode {
-        case .auto:          return [xai, miniMax, gemini, lmStudio]
-        case .xaiFirst:      return [xai, miniMax, gemini, lmStudio]
+        case .auto:          return [xai, miniMax, gemini, local]
+        case .xaiFirst:      return [xai, miniMax, gemini, local]
         case .xaiOnly:       return [xai]
-        case .miniMaxFirst:  return [miniMax, xai, gemini, lmStudio]
-        case .geminiFirst:   return [gemini, xai, miniMax, lmStudio]
-        case .localFirst:    return [lmStudio, xai, miniMax, gemini]
-        case .localOnly:     return [lmStudio]
+        case .miniMaxFirst:  return [miniMax, xai, gemini, local]
+        case .geminiFirst:   return [gemini, xai, miniMax, local]
+        case .localFirst:    return [local, xai, miniMax, gemini]
+        case .localOnly:     return [local]
         case .miniMaxOnly:   return [miniMax]
         case .geminiOnly:    return [gemini]
         case .disabled:      return []

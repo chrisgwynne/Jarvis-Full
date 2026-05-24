@@ -3,7 +3,7 @@ import CoreGraphics
 import ImageIO
 
 /// Vision analyzer for **background watch** tasks — backed by `LLMRouter`
-/// (MiniMax or LM Studio, whichever is configured).
+/// (MiniMax, Gemini, or whichever provider is configured).
 ///
 /// ## Role in the vision architecture
 ///

@@ -41,7 +41,7 @@ struct SettingsView: View {
     @State private var miniMaxTestResult: String? = nil
     @State private var miniMaxTestIsError: Bool = false
     @State private var miniMaxCurlCopied: Bool = false
-    @State private var lmStudioTestResult: String? = nil
+    @State private var localLLMTestResult: String? = nil
     @State private var xaiKeyDraft: String = ""
     @State private var xaiTestResult: String? = nil
     @State private var xaiTestIsError: Bool = false
@@ -433,7 +433,7 @@ struct SettingsView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
-                Text("Auto tries xAI → MiniMax → Gemini → LM Studio, skipping unavailable providers. Local-only keeps everything offline.")
+                Text("Auto tries xAI → MiniMax → Gemini → llama.cpp, skipping unavailable providers. Local-only keeps everything offline.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -540,22 +540,29 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("LM Studio (local)") {
-                Toggle("Enabled", isOn: boolBinding(\.lmStudioEnabled))
-                TextField("Base URL", text: nonOptStringBinding(\.lmStudioBaseURL))
-                TextField("Model (must match the loaded model identifier)",
-                          text: nonOptStringBinding(\.lmStudioModel))
+            Section("Local LLM Provider (llama.cpp)") {
+                Toggle("Enabled", isOn: boolBinding(\.llamaCppEnabled))
+                TextField("Base URL  (e.g. http://localhost:8080/v1)",
+                          text: nonOptStringBinding(\.llamaCppBaseURL))
+                TextField("Model name (must match the loaded model identifier)",
+                          text: nonOptStringBinding(\.llamaCppModel))
                 HStack {
                     Button("Test connection") {
-                        lmStudioTestResult = nil; isTesting = true
-                        Task { lmStudioTestResult = await testLMStudio(); isTesting = false }
+                        localLLMTestResult = nil; isTesting = true
+                        Task { localLLMTestResult = await testLocalLLM(); isTesting = false }
                     }.disabled(isTesting)
-                    if let r = lmStudioTestResult {
+                    if let r = localLLMTestResult {
                         Text(r).foregroundStyle(r.hasPrefix("Connected") ? Color.green : Color.red)
                             .font(.caption)
                     }
                 }
-                Text("Start LM Studio, load your model, then enable the local server (port 1234 by default).")
+                LabeledContent("Expected endpoint") {
+                    Text(controller.prefs.current.llamaCppBaseURL
+                         .trimmingCharacters(in: .init(charactersIn: "/")) + "/chat/completions")
+                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Text("Start llama.cpp server (port 8080 by default): llama-server -m model.gguf --port 8080")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -1462,10 +1469,10 @@ curl \(url) \\
 """
     }
 
-    private func testLMStudio() async -> String {
-        guard controller.prefs.current.lmStudioEnabled else { return "Disabled in settings" }
-        let ok = await controller.llmRouter.lmStudio.isAvailable()
-        return ok ? "Connected ✓" : "Unavailable — is LM Studio running?"
+    private func testLocalLLM() async -> String {
+        guard controller.prefs.current.llamaCppEnabled else { return "Disabled in Settings" }
+        let ok = await controller.llmRouter.local.isAvailable()
+        return ok ? "Connected ✓" : "Unavailable — is llama.cpp running? (llama-server --port 8080)"
     }
 
     // MARK: - Binding helpers

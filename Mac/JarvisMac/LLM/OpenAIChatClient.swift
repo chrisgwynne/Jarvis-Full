@@ -27,7 +27,7 @@ private extension String {
 
 /// OpenAI-compatible Chat Completions client.
 ///
-/// Used by both `LMStudioProvider` (truly OpenAI-compatible) and
+/// Used by `LlamaCppProvider` (truly OpenAI-compatible) and
 /// `MiniMaxProvider` (close enough — the v2 chat-completion endpoint
 /// accepts the same `{model, messages, temperature}` body shape).
 /// Differences between MiniMax and OpenAI (auth header, optional
@@ -36,10 +36,10 @@ private extension String {
 struct OpenAIChatClient {
 
     /// Fully-qualified chat completions URL.
-    /// LM Studio default: http://localhost:1234/v1/chat/completions
-    /// MiniMax default:   https://api.minimaxi.io/v1/chat/completions
+    /// llama.cpp default: http://localhost:8080/v1/chat/completions
+    /// MiniMax default:   https://api.minimax.io/v1/chat/completions
     let endpoint: URL
-    /// "Bearer <token>" for MiniMax, can be empty for LM Studio.
+    /// "Bearer <token>" for MiniMax, can be nil for llama.cpp.
     let authorizationHeader: String?
     let model: String
 

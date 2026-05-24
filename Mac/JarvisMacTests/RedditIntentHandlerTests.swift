@@ -25,7 +25,7 @@ final class RedditIntentHandlerTests: XCTestCase {
                 enabled:     { false },
                 apiKey:      { nil }
             ),
-            lmStudio: LMStudioProvider(
+            local: LlamaCppProvider(
                 baseURL:   { "" },
                 modelName: { "" },
                 enabled:   { false }

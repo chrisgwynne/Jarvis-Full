@@ -12,7 +12,7 @@ final class LLMRouterChainTests: XCTestCase {
     func test_auto_chain_startsWithXAI() {
         let r = makeRouter(mode: .auto)
         let ids = r.selectChain().map(\.id)
-        XCTAssertEqual(ids, ["xai", "minimax", "gemini", "lm_studio"])
+        XCTAssertEqual(ids, ["xai", "minimax", "gemini", "llama_cpp"])
     }
 
     func test_xaiFirst_putsXAIFirst() {
@@ -37,7 +37,7 @@ final class LLMRouterChainTests: XCTestCase {
 
     func test_localFirst_putsLocalFirst() {
         let r = makeRouter(mode: .localFirst)
-        XCTAssertEqual(r.selectChain().first?.id, "lm_studio")
+        XCTAssertEqual(r.selectChain().first?.id, "llama_cpp")
     }
 
     func test_geminiOnly_yieldsOnlyGemini() {
@@ -50,9 +50,9 @@ final class LLMRouterChainTests: XCTestCase {
         XCTAssertEqual(r.selectChain().map(\.id), ["minimax"])
     }
 
-    func test_localOnly_yieldsOnlyLMStudio() {
+    func test_localOnly_yieldsOnlyLlamaCpp() {
         let r = makeRouter(mode: .localOnly)
-        XCTAssertEqual(r.selectChain().map(\.id), ["lm_studio"])
+        XCTAssertEqual(r.selectChain().map(\.id), ["llama_cpp"])
     }
 
     func test_disabled_yieldsEmptyChain() {
@@ -79,11 +79,11 @@ final class LLMRouterChainTests: XCTestCase {
             visionModel: { "gemini-1.5-flash" },
             enabled:     { false },
             apiKey:      { nil })
-        let lmStudio = LMStudioProvider(
-            baseURL:   { "http://localhost:1234/v1" },
+        let llamaCpp = LlamaCppProvider(
+            baseURL:   { "http://localhost:8080/v1" },
             modelName: { "local" },
             enabled:   { false })
-        let r = LLMRouter(xai: xai, miniMax: miniMax, gemini: gemini, lmStudio: lmStudio)
+        let r = LLMRouter(xai: xai, miniMax: miniMax, gemini: gemini, local: llamaCpp)
         r.mode = mode
         return r
     }

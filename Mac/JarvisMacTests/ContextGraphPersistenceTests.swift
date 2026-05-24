@@ -72,7 +72,7 @@ final class ContextGraphPersistenceTests: XCTestCase {
                                           enabled: { false }, apiKey: { nil }),
                 gemini:   GeminiProvider(baseURL: { "" }, modelName: { "" },
                                          visionModel: { "" }, enabled: { false }, apiKey: { nil }),
-                lmStudio: LMStudioProvider(baseURL: { "" }, modelName: { "" }, enabled: { false })
+                local: LlamaCppProvider(baseURL: { "" }, modelName: { "" }, enabled: { false })
             ),
             contextBuilder: PersonalityContextBuilder(store: PersonalityFileStore()),
             activeContext:  ActiveContextRegistry.shared,

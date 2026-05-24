@@ -97,14 +97,14 @@ enum LLMError: LocalizedError {
 // MARK: - Provider routing mode
 
 enum LLMProviderMode: String, Codable, CaseIterable, Identifiable {
-    case auto           // xAI → MiniMax → Gemini → LM Studio (only enabled providers)
-    case xaiFirst       // xAI → MiniMax → Gemini → LM Studio
+    case auto           // xAI → MiniMax → Gemini → llama.cpp (only enabled providers)
+    case xaiFirst       // xAI → MiniMax → Gemini → llama.cpp
     case xaiOnly
-    case miniMaxFirst   // MiniMax → xAI → Gemini → LM Studio
+    case miniMaxFirst   // MiniMax → xAI → Gemini → llama.cpp
     case localFirst
     case localOnly
     case miniMaxOnly
-    case geminiFirst    // Gemini → xAI → MiniMax → LM Studio
+    case geminiFirst    // Gemini → xAI → MiniMax → llama.cpp
     case geminiOnly
     case disabled
 

@@ -420,15 +420,15 @@ final class JarvisController {
             enabled:     { prefs.current.geminiEnabled },
             apiKey:      { Keychain.get(KeychainAccount.geminiAPIKey) }
         )
-        let lmStudioProv = LMStudioProvider(
-            baseURL:   { prefs.current.lmStudioBaseURL },
-            modelName: { prefs.current.lmStudioModel },
-            enabled:   { prefs.current.lmStudioEnabled }
+        let localProv = LlamaCppProvider(
+            baseURL:   { prefs.current.llamaCppBaseURL },
+            modelName: { prefs.current.llamaCppModel },
+            enabled:   { prefs.current.llamaCppEnabled }
         )
-        let localRouter = LLMRouter(xai:      xaiProv,
-                                    miniMax:  miniMaxProv,
-                                    gemini:   geminiProv,
-                                    lmStudio: lmStudioProv)
+        let localRouter = LLMRouter(xai:     xaiProv,
+                                    miniMax: miniMaxProv,
+                                    gemini:  geminiProv,
+                                    local:   localProv)
         self.llmRouter = localRouter
 
         // ── Vision pipeline: two separate paths for different use-cases ──────────
