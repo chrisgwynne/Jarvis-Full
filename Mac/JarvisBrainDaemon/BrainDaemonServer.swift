@@ -273,7 +273,7 @@ final class BrainDaemonServer {
                 send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
                 return
             }
-            let dict: [String: Any] = ["deviceToken": rawToken]
+            let dict: [String: Any] = ["sessionToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
         case ("POST", "/v1/windows/pair"):
@@ -287,7 +287,7 @@ final class BrainDaemonServer {
                 send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
                 return
             }
-            let dict: [String: Any] = ["deviceToken": rawToken]
+            let dict: [String: Any] = ["sessionToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
         case ("GET", "/v1/router/diagnostics"):
