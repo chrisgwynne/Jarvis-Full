@@ -208,6 +208,95 @@ object EnglishG2P {
         "name" to "n eɪ m", "names" to "n eɪ m z",
         "doctor" to "d ɒ k t ə", "mister" to "m ɪ s t ə",
         "miss" to "m ɪ s", "missus" to "m ɪ s ɪ z",
+
+        // ── Past tenses: -ed suffix (voiceless stop → /t/, voiced/nasal → /d/,
+        //   after t/d → /ɪ d/) ───────────────────────────────────────────────
+        "locked" to "l ɒ k t", "unlocked" to "ʌ n l ɒ k t",
+        "turned" to "t ɜː n d", "returned" to "ɹ ɪ t ɜː n d",
+        "called" to "k ɔː l d",
+        "closed" to "k l əʊ z d", "opened" to "əʊ p ə n d",
+        "started" to "s t ɑː t ɪ d", "stopped" to "s t ɒ p t",
+        "wanted" to "w ɒ n t ɪ d", "needed" to "n iː d ɪ d",
+        "played" to "p l eɪ d", "moved" to "m uː v d",
+        "used" to "j uː z d", "changed" to "tʃ eɪ n dʒ d",
+        "connected" to "k ə n ɛ k t ɪ d",
+
+        // ── Question / place words ─────────────────────────────────────────
+        "there" to "ð eə",
+
+        // ── BATH vowel split (British /ɑː/ not /æ/) ────────────────────────
+        "front" to "f ɹ ʌ n t",
+        "last" to "l ɑː s t", "past" to "p ɑː s t",
+        "fast" to "f ɑː s t",
+        "class" to "k l ɑː s", "glass" to "ɡ l ɑː s",
+        "path" to "p ɑː θ", "bath" to "b ɑː θ",
+        "staff" to "s t ɑː f", "half" to "h ɑː f",
+
+        // ── Rooms / locations ─────────────────────────────────────────────
+        "door" to "d ɔː", "floor" to "f l ɔː", "room" to "ɹ uː m",
+        "kitchen" to "k ɪ tʃ ɪ n", "bedroom" to "b ɛ d ɹ uː m",
+        "bathroom" to "b ɑː θ ɹ uː m", "garden" to "ɡ ɑː d ə n",
+        "window" to "w ɪ n d əʊ", "table" to "t eɪ b ə l",
+        "office" to "ɒ f ɪ s", "street" to "s t ɹ iː t",
+        "lounge" to "l aʊ n dʒ", "hallway" to "h ɔː l w eɪ",
+
+        // ── Common -er words (word-final /ə/) ─────────────────────────────
+        // These supplement the letter-rule fix and cover multi-syllable words
+        // where the stem itself needs special phonemes.
+        "under" to "ʌ n d ə",
+        "after" to "ɑː f t ə", "never" to "n ɛ v ə",
+        "ever" to "ɛ v ə", "other" to "ʌ ð ə",
+        "water" to "w ɔː t ə", "butter" to "b ʌ t ə",
+        "letter" to "l ɛ t ə", "better" to "b ɛ t ə",
+        "number" to "n ʌ m b ə", "power" to "p aʊ ə",
+        "hour" to "aʊ ə", "flower" to "f l aʊ ə",
+        "together" to "t ə ɡ ɛ ð ə", "whether" to "w ɛ ð ə",
+        "another" to "ə n ʌ ð ə", "either" to "aɪ ð ə",
+        "rather" to "ɹ ɑː ð ə", "further" to "f ɜː ð ə",
+        "quarter" to "k w ɔː t ə", "reminder" to "ɹ ɪ m aɪ n d ə",
+        "remember" to "ɹ ɪ m ɛ m b ə", "summer" to "s ʌ m ə",
+        "winter" to "w ɪ n t ə", "answer" to "ɑː n s ə",
+        "corner" to "k ɔː n ə", "center" to "s ɛ n t ə",
+        "timer" to "t aɪ m ə",
+
+        // ── Common adjectives / verbs ──────────────────────────────────────
+        "unavailable" to "ʌ n ə v eɪ l ə b l",
+        "available" to "ə v eɪ l ə b l",
+        "active" to "æ k t ɪ v",
+        "just" to "dʒ ʌ s t", "still" to "s t ɪ l",
+        "here" to "h ɪə", "hear" to "h ɪə",
+        "near" to "n ɪə", "clear" to "k l ɪə",
+        "real" to "ɹ ɪə l", "feel" to "f iː l",
+        "help" to "h ɛ l p", "try" to "t ɹ aɪ",
+        "read" to "ɹ iː d", "write" to "ɹ aɪ t",
+        "show" to "ʃ əʊ", "find" to "f aɪ n d",
+        "hold" to "h əʊ l d", "keep" to "k iː p",
+        "move" to "m uː v", "run" to "ɹ ʌ n",
+        "live" to "l ɪ v",
+        "set" to "s ɛ t", "put" to "p ʊ t",
+        "check" to "tʃ ɛ k", "update" to "ʌ p d eɪ t",
+        "connect" to "k ə n ɛ k t",
+        "ready" to "ɹ ɛ d i", "busy" to "b ɪ z i",
+        "next" to "n ɛ k s t", "back" to "b æ k",
+
+        // ── Smart home / Jarvis-specific ───────────────────────────────────
+        "thermostat" to "θ ɜː m ə s t æ t",
+        "temperature" to "t ɛ m p r ə tʃ ə",
+        "brightness" to "b ɹ aɪ t n ɪ s",
+        "alarm" to "ə l ɑː m",
+        "battery" to "b æ t r i",
+        "notification" to "n əʊ t ɪ f ɪ k eɪ ʃ ə n",
+        "calendar" to "k æ l ɪ n d ə",
+        "schedule" to "ʃ ɛ d j uː l",
+        "weather" to "w ɛ ð ə",
+        "forecast" to "f ɔː k ɑː s t",
+        "degree" to "d ɪ ɡ ɹ iː", "degrees" to "d ɪ ɡ ɹ iː z",
+        "percent" to "p ə s ɛ n t",
+        "minute" to "m ɪ n ɪ t", "minutes" to "m ɪ n ɪ t s",
+        "seconds" to "s ɛ k ə n d z",
+        "afternoon" to "ɑː f t ə n uː n",
+        "tonight" to "t ə n aɪ t",
+        "weekend" to "w iː k ɛ n d",
     )
 
     // ── Letter rules ────────────────────────────────────────────────────────
@@ -234,6 +323,15 @@ object EnglishG2P {
             }
             // 2-letter combos (digraphs)
             if (i + 2 <= n) {
+                // Word-final unstressed "-er" → /ə/ (not /ɜː/)
+                // This must come BEFORE the generic DIGRAPHS lookup so the
+                // schwa is emitted for words like "water", "over", "quarter".
+                if (i + 2 == n && word[i] == 'e' && word[i + 1] == 'r') {
+                    out.add("ə")
+                    i += 2
+                    continue
+                }
+
                 val di = word.substring(i, i + 2)
                 DIGRAPHS[di]?.let { ph ->
                     // Same split logic — "qu"→"k w" must become ["k","w"].

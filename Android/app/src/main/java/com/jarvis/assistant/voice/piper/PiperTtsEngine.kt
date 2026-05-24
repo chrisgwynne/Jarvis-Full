@@ -98,6 +98,22 @@ class PiperTtsEngine(
                     session.lastFailureReason.ifBlank { "inference_failed" }
                 )
 
+            // Debug WAV export (developer mode only — disabled by default).
+            if (PiperTtsDebugExporter.enabled && rawPcm != null) {
+                val snap = PiperTtsDebugExporter.DebugSnapshot(
+                    originalText   = text,
+                    normalizedText = text,
+                    phonemes       = emptyList(),
+                    phonemeIds     = parityTokens,
+                    noiseScale     = config.noiseScale,
+                    lengthScale    = config.lengthScale,
+                    noiseW         = config.noiseW,
+                    sampleRate     = config.sampleRate,
+                    rawPcm         = rawPcm,
+                )
+                PiperTtsDebugExporter.exportIfEnabled(snap)
+            }
+
             // MAC PARITY: Audio Conversion
             // 1. Peak Normalization: audio = audio / max(abs(audio))
             // 2. Clip to [-1.0, 1.0]

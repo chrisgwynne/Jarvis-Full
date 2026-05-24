@@ -23,6 +23,12 @@ class SherpaPiperPhonemizer(private val context: Context) : PiperPhonemizer {
 
     override val isAvailable: Boolean = true
 
+    /** Last normalized text fed to G2P — populated after each [textToPhonemeIds] call. */
+    @Volatile var lastNormalizedText: String = ""
+
+    /** Last per-sentence phoneme lists produced by G2P — populated after each call. */
+    @Volatile var lastPhonemes: List<List<String>> = emptyList()
+
     override fun textToPhonemeIds(
         text: String,
         config: PiperVoiceConfig,
@@ -36,11 +42,15 @@ class SherpaPiperPhonemizer(private val context: Context) : PiperPhonemizer {
         }
         if (normalized.isBlank()) return emptyList()
 
+        lastNormalizedText = normalized
+
         val sentencePhonemes: List<List<String>> = try {
             EnglishG2P.phonemize(normalized)
         } catch (e: Exception) {
             return emptyList()
         }
+
+        lastPhonemes = sentencePhonemes
         
         val totalPhonemes = sentencePhonemes.sumOf { it.size }
         if (totalPhonemes == 0) return emptyList()

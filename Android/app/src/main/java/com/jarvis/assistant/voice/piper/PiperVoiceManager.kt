@@ -42,6 +42,12 @@ class PiperVoiceManager(private val context: Context) {
     private val loader = PiperVoiceLoader(context)
     private val fallback = VoiceFallbackManager()
 
+    init {
+        // Configure debug exporter output directory (disabled by default).
+        val debugDir = java.io.File(context.getExternalFilesDir(null), "tts_debug")
+        PiperTtsDebugExporter.configure(debugDir)
+    }
+
     /** Mutex guarding voice load / switch / shutdown.  Speak is lock-free. */
     private val loadLock = Mutex()
 
