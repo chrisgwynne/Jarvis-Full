@@ -67,6 +67,12 @@ android {
     // best practice and reduces the pre-existing failure count.
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            // Force UTF-8 in the JVM that runs unit tests so that Kotlin's
+            // incremental compilation can handle Unicode characters in test
+            // names (e.g. em-dashes in backtick test names).
+            it.jvmArgs("-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US")
+        }
     }
 
 
