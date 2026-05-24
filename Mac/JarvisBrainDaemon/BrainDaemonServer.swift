@@ -14,6 +14,9 @@ final class BrainDaemonServer {
     private var isRunning = false
     private var tickerStopped = false
 
+    /// Tracks when the last ping was sent per client, for RTT measurement.
+    private var lastPingSentAt: [String: Date] = [:]
+
     let port: Int
 
     init() {
@@ -561,11 +564,14 @@ final class BrainDaemonServer {
             guard let self else { return }
             // Stop if the client has already been unregistered.
             guard DaemonMessageRouter.shared.isClientRegistered(clientId) else { return }
+            // Record when the ping was sent for RTT measurement
+            self.lastPingSentAt[clientId] = Date()
             // Send ping frame (opcode 0x09, no payload)
             let pingFrame = Data([0x89, 0x00])
             conn.send(content: pingFrame, completion: .contentProcessed { [weak self] error in
                 if let error {
                     self?.serverLog.error("Ping failed for \(clientId): \(error.localizedDescription)")
+                    self?.lastPingSentAt.removeValue(forKey: clientId)
                     self?.disconnectClient(clientId: clientId, platform: platform, conn: conn)
                     return
                 }
@@ -616,8 +622,13 @@ final class BrainDaemonServer {
                     conn.send(content: pongFrame, completion: .contentProcessed { _ in })
                     DaemonAuthStore.shared.recordSeen(deviceId: clientId)
 
-                case 0x0A:  // pong — update lastSeen, no-op otherwise
+                case 0x0A:  // pong — update lastSeen, record RTT
                     DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                    if let sentAt = self.lastPingSentAt.removeValue(forKey: clientId) {
+                        let rttMs = Date().timeIntervalSince(sentAt) * 1000.0
+                        DaemonDiagnostics.shared.websocketRttMs = rttMs
+                        self.serverLog.debug("WS ping RTT for \(clientId): \(rttMs, format: .fixed(precision: 1))ms")
+                    }
 
                 default:
                     self.serverLog.info("Unknown WS opcode \(opcode) from \(clientId)")

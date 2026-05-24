@@ -2,6 +2,7 @@ import Foundation
 
 /// One named stage in the assistant pipeline.
 enum LatencyStage: String, CaseIterable {
+    // Local Mac pipeline stages
     case wakeDetect       = "wake_detect"
     case sttStart         = "stt_start"
     case sttFirstPartial  = "stt_first_partial"
@@ -14,7 +15,24 @@ enum LatencyStage: String, CaseIterable {
     case ttsStart         = "tts_start"
     case ttsComplete      = "tts_complete"
     case bargeIn          = "barge_in"
+
+    // Cross-device pipeline stages
+    case transcriptSent       = "transcript_sent"       // Android sent transcript.final to daemon
+    case daemonReceived       = "daemon_received"        // daemon received transcript.final
+    case daemonRouted         = "daemon_routed"          // daemon delivered to Mac client
+    case replyGenerated       = "reply_generated"        // Mac generated reply
+    case replySentToDaemon    = "reply_sent_to_daemon"   // Mac sent reply to daemon
+    case daemonReplyRouted    = "daemon_reply_routed"    // daemon delivered reply to Android
+    case androidReplyReceived = "android_reply_received" // Android received reply from daemon
+    case daemonRtt            = "daemon_rtt"             // total daemon websocket round-trip
 }
+
+/// The set of cross-device stages, in pipeline order.
+private let crossDeviceStages: [LatencyStage] = [
+    .transcriptSent, .daemonReceived, .daemonRouted,
+    .replyGenerated, .replySentToDaemon, .daemonReplyRouted,
+    .androidReplyReceived, .daemonRtt,
+]
 
 /// Lightweight, thread-safe latency recorder. We capture sparse spans
 /// rather than full traces — each `mark(_:)` records the timestamp of a
@@ -78,6 +96,19 @@ final class LatencyTracker {
         lock.lock(); defer { lock.unlock() }
         var out: [String: Double] = [:]
         for stage in LatencyStage.allCases {
+            if let bucket = recent[stage], !bucket.isEmpty {
+                out[stage.rawValue] = bucket.reduce(0, +) / Double(bucket.count)
+            }
+        }
+        return out
+    }
+
+    /// Snapshot of cross-device stages only (transcriptSent … daemonRtt).
+    /// Returns averages for any stage that has recorded data.
+    func crossDeviceSnapshot() -> [String: Double] {
+        lock.lock(); defer { lock.unlock() }
+        var out: [String: Double] = [:]
+        for stage in crossDeviceStages {
             if let bucket = recent[stage], !bucket.isEmpty {
                 out[stage.rawValue] = bucket.reduce(0, +) / Double(bucket.count)
             }

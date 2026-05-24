@@ -125,7 +125,14 @@ final class DaemonMessageRouter {
 
             // Transcript from Android/Windows → route to Mac app
             case "transcript.final":
+                let receiveMs = Date().timeIntervalSince(envelope.timestamp) * 1000.0
+                let routeStart = Date()
                 self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+                let routeMs = Date().timeIntervalSince(routeStart) * 1000.0
+                DaemonDiagnostics.shared.recordDaemonRoute(
+                    receiveMs: max(0, receiveMs),
+                    routeMs: routeMs
+                )
 
             // transcript.partial: best-effort delivery to Mac, never queued
             case "transcript.partial":

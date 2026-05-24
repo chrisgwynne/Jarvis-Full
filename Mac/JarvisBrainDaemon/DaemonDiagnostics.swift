@@ -19,6 +19,16 @@ final class DaemonDiagnostics {
         set { connectedAndroidClients = newValue }  // legacy write: treat as android
     }
 
+    // Cross-device latency diagnostics
+    var avgTranscriptToDaemonMs: Double = 0    // Android STT → daemon receive
+    var avgDaemonRouteMs: Double = 0           // daemon route time
+    var avgReplyRouteMs: Double = 0            // daemon reply route time
+    var websocketRttMs: Double = 0             // latest measured WS RTT (from ping/pong)
+    var totalRoundtripMs: Double = 0           // latest full command roundtrip
+    var timeoutCount: Int = 0
+    var staleReplyCount: Int = 0
+    var supersededReplyCount: Int = 0
+
     // Routing diagnostics (Phase 3)
     var routedMessageCount: Int = 0
     var ignoredUnknownMessageCount: Int = 0
@@ -58,6 +68,13 @@ final class DaemonDiagnostics {
         lastMacAppMessageAt         = snap.lastMacAppMessageAt
     }
 
+    /// Update rolling averages for daemon routing timing.
+    /// Uses simple replacement (latest value) for now.
+    func recordDaemonRoute(receiveMs: Double, routeMs: Double) {
+        avgTranscriptToDaemonMs = receiveMs
+        avgDaemonRouteMs = routeMs
+    }
+
     func toJSON() -> String {
         let iso = ISO8601DateFormatter()
         var dict: [String: Any] = [
@@ -81,7 +98,16 @@ final class DaemonDiagnostics {
             "offlineQueueDepth": offlineQueueDepth,
             "offlineQueueDroppedCount": offlineQueueDroppedCount,
             "brainUnavailableCount": brainUnavailableCount,
-            "lastMessageType": lastMessageType
+            "lastMessageType": lastMessageType,
+            // Cross-device latency diagnostics
+            "avgTranscriptToDaemonMs": avgTranscriptToDaemonMs,
+            "avgDaemonRouteMs": avgDaemonRouteMs,
+            "avgReplyRouteMs": avgReplyRouteMs,
+            "websocketRttMs": websocketRttMs,
+            "totalRoundtripMs": totalRoundtripMs,
+            "timeoutCount": timeoutCount,
+            "staleReplyCount": staleReplyCount,
+            "supersededReplyCount": supersededReplyCount
         ]
         if let d = lastAndroidMessageAt { dict["lastAndroidMessageAt"] = iso.string(from: d) }
         if let d = lastWindowsMessageAt { dict["lastWindowsMessageAt"] = iso.string(from: d) }

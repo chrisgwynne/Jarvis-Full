@@ -54,6 +54,11 @@ object LatencyTracker {
     /** Phase 4 target — see Phase 4 in the original task spec. */
     const val TARGET_FIRST_TOKEN_MS = 400L
 
+    // Cross-device mark label constants
+    const val TRANSCRIPT_SENT_TO_DAEMON = "TRANSCRIPT_SENT_TO_DAEMON"
+    const val DAEMON_REPLY_RECEIVED     = "DAEMON_REPLY_RECEIVED"
+    const val TTS_START                 = "TTS_START"
+
     private val startMs    = AtomicLong(0L)
     private val previousMs = AtomicLong(0L)
 
@@ -78,6 +83,17 @@ object LatencyTracker {
                     "${TARGET_FIRST_TOKEN_MS}ms target",
             )
         }
+    }
+
+    /**
+     * Returns the total elapsed time in milliseconds from pipeline start to
+     * the most recent mark, or null if the pipeline has not been started.
+     * Useful as a cross-device round-trip summary.
+     */
+    fun crossDeviceSummaryMs(): Long? {
+        val start = startMs.get()
+        val last  = previousMs.get()
+        return if (start == 0L || last == 0L) null else last - start
     }
 
     fun reset() {

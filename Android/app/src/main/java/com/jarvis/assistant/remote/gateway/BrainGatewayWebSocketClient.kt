@@ -8,6 +8,7 @@ import com.jarvis.assistant.remote.macbridge.BridgeResult
 import com.jarvis.assistant.remote.macbridge.MacBridgeCapability
 import com.jarvis.assistant.remote.macbridge.MacBridgeCommandExecutor
 import com.jarvis.assistant.remote.macbridge.MacBridgeConfig
+import com.jarvis.assistant.util.LatencyTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -161,6 +162,10 @@ class BrainGatewayWebSocketClient(
         if (sent) {
             lastEventSentAtMs.set(System.currentTimeMillis())
             Log.i(TAG, "emitEvent('$command') sent")
+            // Mark latency for transcript frames sent to the daemon
+            if (command.contains("transcript", ignoreCase = true)) {
+                LatencyTracker.mark(LatencyTracker.TRANSCRIPT_SENT_TO_DAEMON)
+            }
         } else {
             Log.w(TAG, "emitEvent('$command') — send returned false")
         }
@@ -373,6 +378,7 @@ class BrainGatewayWebSocketClient(
 
             // Mac brain reply — full response, surface to Android TTS / UI.
             "reply.final", "chat.reply.final" -> {
+                LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
                 val replyText = json.optString("text").ifBlank { return }
                 Log.d(TAG, "reply.final: ${replyText.take(80)}")
                 onReplyFinal?.invoke(replyText)
@@ -380,12 +386,14 @@ class BrainGatewayWebSocketClient(
 
             // Streaming partial — surface to UI for typing indicator.
             "reply.partial", "chat.reply.partial" -> {
+                LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
                 val partial = json.optString("text").ifBlank { return }
                 onReplyPartial?.invoke(partial)
             }
 
             // Mac instructs Android to speak a specific text via Android TTS.
             "orchestrate.speak" -> {
+                LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
                 val speakText = json.optString("text").ifBlank { return }
                 Log.d(TAG, "orchestrate.speak: ${speakText.take(80)}")
                 onOrchestrateSpeak?.invoke(speakText)
@@ -544,7 +552,10 @@ class BrainGatewayWebSocketClient(
             put("deviceId",   deviceName())
             put("timestamp",  System.currentTimeMillis())
         }
-        sendFrame(frame)
+        val sent = sendFrame(frame)
+        if (sent) {
+            LatencyTracker.mark(LatencyTracker.TRANSCRIPT_SENT_TO_DAEMON)
+        }
         Log.d(TAG, "sendTranscript: ${text.take(80)}")
     }
 
