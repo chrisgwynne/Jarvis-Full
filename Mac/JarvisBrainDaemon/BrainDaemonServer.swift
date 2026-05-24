@@ -73,19 +73,58 @@ final class BrainDaemonServer {
     // MARK: - HTTP accumulation
 
     private func readHTTP(conn: NWConnection, buffer: Data) {
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] chunk, _, _, error in
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] chunk, _, _, error in
             guard let self, error == nil, let chunk, !chunk.isEmpty else {
                 conn.cancel()
                 return
             }
             let buf = buffer + chunk
-            if buf.range(of: Data("\r\n\r\n".utf8)) != nil {
-                self.processRequest(data: buf, conn: conn)
+            if let headerEnd = buf.range(of: Data("\r\n\r\n".utf8)) {
+                let headerData = buf[..<headerEnd.lowerBound]
+                guard let headerStr = String(data: headerData, encoding: .utf8) else {
+                    conn.cancel()
+                    return
+                }
+                // Parse Content-Length
+                var contentLength = 0
+                for line in headerStr.components(separatedBy: "\r\n") {
+                    if line.lowercased().hasPrefix("content-length:") {
+                        contentLength = Int(line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) ?? 0
+                    }
+                }
+                let bodyStart = headerEnd.upperBound
+                let bodyData = buf[bodyStart...]
+                if contentLength == 0 || bodyData.count >= contentLength {
+                    self.processRequest(data: buf, conn: conn)
+                } else {
+                    // Need more body — check against hard cap first
+                    let maxBody = 110 * 1024 * 1024  // 110 MB hard cap (max file 100 MB + overhead)
+                    if contentLength > maxBody {
+                        self.send(conn, statusCode: 413, body: self.errorJSON("File too large"))
+                        return
+                    }
+                    self.readHTTPBody(conn: conn, buffer: buf, totalNeeded: headerData.count + 4 + contentLength)
+                }
             } else if buf.count > 65_536 {
                 conn.cancel()
             } else {
                 self.readHTTP(conn: conn, buffer: buf)
             }
+        }
+    }
+
+    private func readHTTPBody(conn: NWConnection, buffer: Data, totalNeeded: Int) {
+        if buffer.count >= totalNeeded {
+            processRequest(data: Data(buffer.prefix(totalNeeded)), conn: conn)
+            return
+        }
+        let remaining = totalNeeded - buffer.count
+        conn.receive(minimumIncompleteLength: 1, maximumLength: min(remaining, 65_536)) { [weak self] chunk, _, _, error in
+            guard let self, error == nil, let chunk, !chunk.isEmpty else {
+                conn.cancel()
+                return
+            }
+            self.readHTTPBody(conn: conn, buffer: buffer + chunk, totalNeeded: totalNeeded)
         }
     }
 
@@ -346,6 +385,19 @@ final class BrainDaemonServer {
             let dict: [String: Any] = ["sessionToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
+        // ── File transfer endpoints ──────────────────────────────────────────
+        case ("POST", "/v1/files/upload"):
+            handleFileUpload(conn: conn, headers: headers, body: body)
+
+        case let ("GET", path) where path.hasPrefix("/v1/files/"):
+            let transferId = String(path.dropFirst("/v1/files/".count))
+            handleFileDownload(conn: conn, headers: headers, transferId: transferId)
+
+        case let ("DELETE", path) where path.hasPrefix("/v1/files/"):
+            let transferId = String(path.dropFirst("/v1/files/".count))
+            FileTransferStore.shared.delete(transferId: transferId)
+            send(conn, statusCode: 200, body: toJSON(["deleted": true]))
+
         case ("GET", "/v1/router/diagnostics"):
             let snap = DaemonMessageRouter.shared.snapshot()
             let iso = ISO8601DateFormatter()
@@ -551,11 +603,21 @@ final class BrainDaemonServer {
 
     /// Parses a raw client JSON frame, wraps it in a DaemonMessageEnvelope, and routes
     /// it via DaemonMessageRouter. Android and Windows send flat JSON (not envelopes).
+    /// Mac clients send full DaemonMessageEnvelope JSON — those are routed directly.
     private func wrapAndRoute(rawJSON: String, fromClientId: String, platform: String) {
         guard let data = rawJSON.data(using: .utf8),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
+
+        // If the frame is already a DaemonMessageEnvelope (Mac-sent), route directly.
+        if raw["sourceDeviceId"] != nil, raw["target"] != nil {
+            if let envelopeData = try? JSONSerialization.data(withJSONObject: raw) {
+                DaemonMessageRouter.shared.route(rawData: envelopeData, fromClientId: fromClientId)
+            }
+            return
+        }
+
         let type = raw["type"] as? String ?? "unknown"
         let deviceId = raw["deviceId"] as? String ?? fromClientId
         let correlationId = raw["messageId"] as? String ?? raw["routeId"] as? String
@@ -633,6 +695,148 @@ final class BrainDaemonServer {
         conn.send(content: Data(frame), completion: .contentProcessed { _ in })
     }
 
+    // MARK: - File transfer handlers
+
+    private func handleFileUpload(conn: NWConnection, headers: [String: String], body: Data) {
+        let contentType = headers["content-type"] ?? ""
+        guard contentType.contains("multipart/form-data") else {
+            send(conn, statusCode: 400, body: errorJSON("Expected multipart/form-data"))
+            return
+        }
+
+        // Extract boundary
+        guard let boundaryRange = contentType.range(of: "boundary="),
+              !boundaryRange.isEmpty else {
+            send(conn, statusCode: 400, body: errorJSON("Missing boundary in Content-Type"))
+            return
+        }
+        let boundary = String(contentType[boundaryRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+
+        // Parse multipart
+        guard let parsed = parseMultipart(body: body, boundary: boundary) else {
+            send(conn, statusCode: 400, body: errorJSON("Failed to parse multipart body"))
+            return
+        }
+
+        let targetPlatform = parsed.fields["targetPlatform"] ?? "mac"
+        let openOnMac = (parsed.fields["openOnMac"] ?? "false") == "true"
+        let suggestedAction = parsed.fields["suggestedAction"] ?? "save"
+        let userVisibleName = parsed.fields["userVisibleName"] ?? ""
+        let sourceDeviceId = headers["x-device-id"] ?? "unknown"
+
+        guard let (_, safeMeta) = FileTransferStore.shared.storeUpload(
+            filename: parsed.filename,
+            mimeType: parsed.mimeType,
+            data: parsed.fileData,
+            sourceDeviceId: sourceDeviceId,
+            targetPlatform: targetPlatform,
+            openOnMac: openOnMac,
+            suggestedAction: suggestedAction,
+            userVisibleName: userVisibleName
+        ) else {
+            send(conn, statusCode: 400, body: errorJSON("File rejected: too large, blocked extension, or disallowed type"))
+            return
+        }
+
+        // Emit file.transfer.created to Mac via router
+        let payloadDict: [String: JSONValue] = safeMeta.reduce(into: [:]) { dict, pair in
+            switch pair.value {
+            case let s as String: dict[pair.key] = .string(s)
+            case let i as Int: dict[pair.key] = .int(i)
+            case let b as Bool: dict[pair.key] = .bool(b)
+            default: break
+            }
+        }
+        let transferEnvelope = DaemonMessageEnvelope.make(
+            type: "file.transfer.created",
+            target: .macApp,
+            payload: .object(payloadDict),
+            sourcePlatform: "daemon"
+        )
+        _ = DaemonMessageRouter.shared.deliverToMac(transferEnvelope)
+
+        send(conn, statusCode: 200, body: toJSON(safeMeta))
+    }
+
+    private func handleFileDownload(conn: NWConnection, headers: [String: String], transferId: String) {
+        let platform = headers["x-platform"]?.lowercased() ?? ""
+        guard platform == "mac" || headers["x-device-id"] == "mac" else {
+            send(conn, statusCode: 403, body: errorJSON("File download only available to Mac clients"))
+            return
+        }
+
+        guard let (data, meta) = FileTransferStore.shared.retrieve(
+            transferId: transferId,
+            requestingPlatform: "mac"
+        ) else {
+            send(conn, statusCode: 404, body: errorJSON("Transfer not found or expired"))
+            return
+        }
+
+        let header = "HTTP/1.1 200 OK\r\nContent-Type: \(meta.mimeType)\r\nContent-Length: \(data.count)\r\nContent-Disposition: attachment; filename=\"\(meta.filename)\"\r\nX-Transfer-Id: \(meta.transferId)\r\nX-SHA256: \(meta.sha256)\r\nConnection: close\r\n\r\n"
+        var out = Data(header.utf8)
+        out.append(data)
+        conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
+    }
+
+    private struct MultipartParsed {
+        let filename: String
+        let mimeType: String
+        let fileData: Data
+        let fields: [String: String]
+    }
+
+    private func parseMultipart(body: Data, boundary: String) -> MultipartParsed? {
+        guard let bodyStr = String(data: body, encoding: .utf8) else { return nil }
+        let sep = "--\(boundary)"
+        let parts = bodyStr.components(separatedBy: sep).filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            $0.trimmingCharacters(in: .whitespacesAndNewlines) != "--"
+        }
+
+        var filename = "file"
+        var mimeType = "application/octet-stream"
+        var fileData: Data = Data()
+        var fields: [String: String] = [:]
+
+        for part in parts {
+            guard let headerEnd = part.range(of: "\r\n\r\n") else { continue }
+            let headerPart = String(part[..<headerEnd.lowerBound])
+            let bodyPart = String(part[headerEnd.upperBound...])
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\r\n--"))
+
+            if headerPart.contains("Content-Disposition: form-data") {
+                if headerPart.contains("filename=") {
+                    // File part
+                    if let fnRange = headerPart.range(of: "filename=\"") {
+                        let afterFn = String(headerPart[fnRange.upperBound...])
+                        if let endQ = afterFn.firstIndex(of: "\"") {
+                            filename = String(afterFn[..<endQ])
+                        }
+                    }
+                    // Find Content-Type in this part's headers
+                    for line in headerPart.components(separatedBy: "\r\n") {
+                        if line.lowercased().hasPrefix("content-type:") {
+                            mimeType = line.dropFirst("content-type:".count)
+                                .trimmingCharacters(in: .whitespaces)
+                        }
+                    }
+                    fileData = Data(bodyPart.utf8)
+                } else if let nameRange = headerPart.range(of: "name=\"") {
+                    // Field part
+                    let afterName = String(headerPart[nameRange.upperBound...])
+                    if let endQ = afterName.firstIndex(of: "\"") {
+                        let fieldName = String(afterName[..<endQ])
+                        fields[fieldName] = bodyPart
+                    }
+                }
+            }
+        }
+
+        guard !fileData.isEmpty else { return nil }
+        return MultipartParsed(filename: filename, mimeType: mimeType, fileData: fileData, fields: fields)
+    }
+
     // MARK: - Response helpers
 
     private func send(_ conn: NWConnection, statusCode: Int, body: Data) {
@@ -643,6 +847,7 @@ final class BrainDaemonServer {
         case 401: text = "Unauthorized"
         case 403: text = "Forbidden"
         case 404: text = "Not Found"
+        case 413: text = "Payload Too Large"
         case 500: text = "Internal Server Error"
         case 503: text = "Service Unavailable"
         default:  text = "Unknown"

@@ -449,11 +449,46 @@ class BrainGatewayWebSocketClient(
                 }
             }
 
+            // Remote action result from Mac — route to RemoteActionSender
+            "remote.action.result" -> {
+                val payload = json.optJSONObject("payload") ?: json
+                val requestId = payload.optString("requestId").ifBlank {
+                    json.optString("correlationId")
+                }
+                val success = payload.optBoolean("success", false)
+                val spokenSummary = payload.optString("spokenSummary", "Done.")
+                val errorCode = payload.optString("errorCode").ifBlank { null }
+                val errorMessage = payload.optString("errorMessage").ifBlank { null }
+                Log.d(TAG, "remote.action.result: success=$success summary=${spokenSummary.take(60)}")
+                if (requestId.isNotBlank()) {
+                    com.jarvis.assistant.remote.actions.RemoteActionSender.onResult(
+                        requestId,
+                        com.jarvis.assistant.remote.actions.RemoteActionResult(
+                            requestId = requestId,
+                            success = success,
+                            spokenSummary = spokenSummary,
+                            errorCode = errorCode,
+                            errorMessage = errorMessage
+                        )
+                    )
+                }
+                // Surface the spoken summary to JarvisRuntime for TTS
+                if (spokenSummary.isNotBlank()) {
+                    onReplyFinal?.invoke(spokenSummary)
+                }
+            }
+
             else -> Log.w(TAG, "Unsupported inbound frame type: '$frameType' — not handled")
         }
     }
 
     // ── Outbound transcript ───────────────────────────────────────────────────
+
+    /**
+     * Public wrapper for sendFrame — allows RemoteActionSender and other
+     * feature modules to send typed frames without exposing the private method.
+     */
+    fun sendTypedFrame(frame: JSONObject): Boolean = sendFrame(frame)
 
     /**
      * Sends a transcript.final frame to Mac for processing by the brain pipeline.

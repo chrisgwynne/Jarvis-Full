@@ -1432,6 +1432,7 @@ final class JarvisController {
             }
         }
         DaemonAppBridge.shared.connect()
+        RemoteActionExecutor.shared.wire(to: DaemonAppBridge.shared)
 
         androidToolOrchestrator.onDirectSend = { [weak self] envelope in
             // In daemon-centric architecture, tool requests route through DaemonAppBridge.

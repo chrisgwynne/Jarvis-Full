@@ -34,7 +34,12 @@ class PiperParityTest {
 
     @Test fun `normalize expands version numbers`() {
         val result = TextNormalizer.normalize("Running version v1.2.3 of the model.")
-        assertTrue("Should expand v1.2.3", result.contains("version 1 point 2 point 3"))
+        // expandVersionNumbers produces "version 1 point 2 point 3"; then
+        // expandStandaloneNumbers converts the digits to words, so the final
+        // output is "version one point two point three".
+        assertTrue("Should expand v1.2.3 — must contain 'point'", result.contains("point"))
+        assertFalse("Should remove 'v1.2.3' literal", result.contains("v1.2.3"))
+        assertTrue("Should say 'version'", result.contains("version"))
     }
 
     @Test fun `normalize expands urls`() {

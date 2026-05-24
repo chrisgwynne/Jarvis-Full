@@ -178,3 +178,73 @@ Expected: `{"status":"ok","daemon":true}`
 | Daemon unavailable | Mac | `[BrainGateway] JarvisBrainDaemon is not running` |
 | Auth file corrupt | Daemon | `DaemonAuthStore: corrupt JSON — backed up to .bak` |
 | Windows pair code | Daemon | request to `/v1/windows/pair/code` |
+| Remote action request | Daemon | `remote-action: request routed to Mac` |
+| Remote action result | Daemon | `remote-action: result routed to Android` |
+| Mac unavailable nack | Daemon | `remote-action: Mac unavailable` |
+| File upload | Daemon | `transfer: stored transferId=` |
+| File download | Daemon | `transfer: delivered transferId=` |
+
+---
+
+## Remote Actions QA
+
+### "Open Notes on the Mac"
+
+1. Ensure Android and Mac are both connected to daemon.
+2. Say "open notes on the mac" to Android Jarvis.
+3. Expected:
+   - Android sends `remote.action.request` with `action: "open_app"`, `appName: "Notes"`
+   - Daemon routes to Mac via `RemoteActionRouter`
+   - Mac opens Notes via `MacActionHandler.openApp`
+   - Mac sends `remote.action.result` with `success: true` and spoken summary
+   - Android TTS speaks "Opening Notes on the Mac." (from `onReplyFinal`)
+4. Daemon log: `remote-action: request routed to Mac` then `remote-action: result routed to Android`
+
+### "Create a note called Test on the Mac"
+
+1. Say "create a note called Test on the mac" to Android Jarvis.
+2. Expected:
+   - `remote.action.request` with `action: "create_note"`, `parameters.title: "Test"`
+   - Mac creates note via AppleScript in Notes app
+   - Android speaks "Creating a note called Test on the Mac."
+3. If automation permission not granted: Mac speaks "Notes is open. I couldn't create the note automatically."
+
+### "Show Mac camera"
+
+1. Say "show me the mac camera" to Android Jarvis.
+2. Expected:
+   - `remote.action.request` with `action: "show_camera"`
+   - Mac returns `success: false, errorCode: "unsupported_action"`
+   - Android speaks "That Mac action is not supported yet."
+
+### "Put this on the Mac" (share sheet)
+
+1. From any Android app (Photos, Chrome, Files), share a photo using the system share sheet.
+2. Select "Send to Mac" from the share sheet.
+3. Expected:
+   - `JarvisShareActivity` receives the file
+   - File POSTed to `/v1/files/upload` on daemon
+   - Daemon sends `file.transfer.created` WebSocket event to Mac
+   - Mac downloads file to `~/Downloads/Jarvis Transfers/`
+   - Mac opens file if `openOnMac: true`
+   - Mac shows notification: "File received from Android"
+
+### Mac unavailable — clean failure
+
+1. Stop JarvisMac (or disconnect from daemon).
+2. Say "open safari on the mac" to Android.
+3. Expected:
+   - Daemon detects no Mac client connected
+   - Returns `mac_client_unavailable` nack immediately
+   - Android TTS speaks "The Mac is not connected."
+   - No request left pending; no timeout wait
+
+### File transfer with Mac reconnect
+
+1. Upload a file from Android while Mac is disconnected.
+2. Reconnect Mac to daemon.
+3. Expected:
+   - `file.transfer.created` event is in offline queue (replay-safe type)
+   - Daemon drains queue to Mac on reconnect
+   - Mac downloads and saves file
+   - File arrives in `~/Downloads/Jarvis Transfers/`

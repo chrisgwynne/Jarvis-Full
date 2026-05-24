@@ -65,12 +65,16 @@ final class DaemonOfflineQueue {
         "command.result",       // legacy alias — kept for backward compat
         "error.report",
         "android.event",        // phone events (calls, SMS, battery) — informational
+        "remote.action.result", // Mac result that Android missed; safe to re-deliver on reconnect
+        "file.transfer.created", // file notification Mac missed while offline
     ]
 
     /// Types that are explicitly UNSAFE to replay and should NEVER be queued,
     /// even if the caller tries to enqueue them.  Listed for documentation clarity.
     static let replayUnsafeTypes: Set<String> = [
         "execution.request",    // would re-execute Android capability (destructive!)
+        "remote.action.request", // replaying could re-execute a Mac action (open app, create note) after user has moved on
+        "file.transfer.result", // stale ack
         "orchestrate.speak",
         "orchestrate.silent",
         "reply.final",

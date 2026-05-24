@@ -180,6 +180,97 @@ If Mac app is offline when transcript arrives:
 
 ---
 
+## Remote Actions (Android → Mac)
+
+Remote actions let Android trigger discrete Mac-side operations via the daemon.
+
+### remote.action.request (Android → daemon → Mac)
+```json
+{
+  "type": "remote.action.request",
+  "requestId": "<uuid>",
+  "routeId": "<uuid>",
+  "sourceDeviceId": "android",
+  "targetPlatform": "mac",
+  "action": "open_app",
+  "parameters": { "appName": "Notes" },
+  "userVisibleText": "Opening Notes on the Mac.",
+  "requiresConfirmation": false,
+  "timestamp": 1716000000000
+}
+```
+
+Supported actions: `open_app`, `create_note`, `show_camera`, `open_jarvis`.
+
+### remote.action.result (Mac → daemon → Android)
+```json
+{
+  "type": "remote.action.result",
+  "requestId": "<same uuid>",
+  "routeId": "<same uuid>",
+  "targetDeviceId": "android",
+  "success": true,
+  "spokenSummary": "Opening Notes on the Mac.",
+  "timestamp": "2026-05-24T12:00:00Z"
+}
+```
+
+On failure: `errorCode` and `errorMessage` are included. Error codes:
+- `mac_client_unavailable` — Mac not connected
+- `mac_action_timeout` — no response within 30s
+- `unsupported_action` — action not implemented
+- `unsupported_app` — app not found/installed
+- `needs_more_info` — action succeeded partially (e.g. Notes opened but note title needed)
+
+RemoteActionRouter (daemon) tracks pending requests with 30s timeout.
+If Mac is offline when a request arrives, the daemon immediately returns
+`mac_client_unavailable` to Android.
+
+---
+
+## File Transfer (Android → Mac)
+
+Files are transferred via HTTP multipart upload; the Mac app downloads via HTTP.
+The daemon acts as a temporary store (1-hour expiry, SHA-256 verified).
+
+### 1. Upload (Android → daemon HTTP)
+```
+POST /v1/files/upload
+Authorization: Bearer <token>
+Content-Type: multipart/form-data; boundary=JarvisFileBoundary
+X-Device-Id: android
+
+[multipart body with file part + metadata fields]
+Metadata fields: targetPlatform, openOnMac, suggestedAction, userVisibleName
+```
+Response: `{ "transferId": "...", "filename": "...", "sha256": "...", "expiresAt": "..." }`
+
+### 2. Daemon notifies Mac (daemon → Mac via WebSocket)
+`file.transfer.created` envelope sent automatically after upload.
+
+### 3. Mac downloads (Mac → daemon HTTP)
+```
+GET /v1/files/<transferId>
+Authorization: Bearer <token>
+X-Platform: mac
+```
+Response: binary file with `X-SHA256` header for verification.
+
+### 4. Mac deletes after pickup
+```
+DELETE /v1/files/<transferId>
+Authorization: Bearer <token>
+```
+
+Security:
+- Blocked extensions: `.app`, `.dmg`, `.exe`, `.sh`, `.command`, `.pkg`, etc.
+- Allowed MIME type prefixes: `image/`, `video/`, `audio/`, `text/`, `application/pdf`, etc.
+- Max file size: 100 MB (configurable via `JARVIS_MAX_FILE_MB` env var)
+- `localTempPath` is NEVER included in any HTTP response or log statement
+- Only Mac (`X-Platform: mac`) can download files
+
+---
+
 ## Auth file ownership
 
 | Process | File |

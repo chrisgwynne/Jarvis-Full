@@ -173,6 +173,30 @@ final class DaemonMessageRouter {
             case "diagnostics.request":
                 self.handleDiagnosticsRequest(envelope, fromClientId: fromClientId)
 
+            // Remote action: Android → Mac (request) and Mac → Android (result)
+            case "remote.action.request":
+                RemoteActionRouter.shared.routeRequest(envelope, fromClientId: fromClientId, router: self)
+                self.routedMessageCount += 1
+
+            case "remote.action.result":
+                RemoteActionRouter.shared.routeResult(envelope, router: self)
+                self.routedMessageCount += 1
+
+            // File transfer: Android uploads file; daemon notifies Mac
+            case "file.transfer.created":
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            // File transfer result: Mac acknowledges pickup → back to originating Android device
+            case "file.transfer.result":
+                let deviceId = envelope.payload.objectValue?["targetDeviceId"]?.stringValue
+                if let did = deviceId, let clientId = clientId(forDeviceId: did, platform: "android") {
+                    deliver(envelope, to: clientId)
+                    self.routedMessageCount += 1
+                } else if let clientId = clients.first(where: { $0.value.platform == "android" })?.key {
+                    deliver(envelope, to: clientId)
+                    self.routedMessageCount += 1
+                }
+
             // Unknown: increment counter, log, ignore
             default:
                 self.ignoredUnknownMessageCount += 1
@@ -328,6 +352,39 @@ final class DaemonMessageRouter {
             correlationId: env.correlationId
         )
         deliver(reply, to: fromClientId)
+    }
+
+    // MARK: - Public delivery helpers (used by RemoteActionRouter)
+
+    /// Delivers an envelope to the first connected Mac client.
+    /// Returns true if delivered, false if no Mac client is connected.
+    func deliverToMac(_ env: DaemonMessageEnvelope) -> Bool {
+        var delivered = false
+        queue.sync {
+            if let macId = macClientId() {
+                deliver(env, to: macId)
+                delivered = true
+            } else {
+                DaemonOfflineQueue.shared.enqueue(env, reason: "mac_offline_remote_action")
+            }
+        }
+        return delivered
+    }
+
+    /// Delivers an envelope to the Android client with matching deviceId.
+    /// Falls back to any connected Android client if deviceId doesn't match.
+    /// Returns true if delivered.
+    @discardableResult
+    func deliverToAndroid(_ env: DaemonMessageEnvelope, deviceId: String) -> Bool {
+        var delivered = false
+        queue.sync {
+            if let clientId = clientId(forDeviceId: deviceId, platform: "android")
+                ?? clients.first(where: { $0.value.platform == "android" })?.key {
+                deliver(env, to: clientId)
+                delivered = true
+            }
+        }
+        return delivered
     }
 
     // MARK: - Client lookups
