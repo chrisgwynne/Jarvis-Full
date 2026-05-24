@@ -269,26 +269,23 @@ class BrainGatewayWebSocketClient(
             .currentForegroundPackage
         val fgLabel = if (fgPkg != null) resolveAppLabel(fgPkg) else null
         val frame = JSONObject().apply {
-            put("type", "event")
-            put("command", "heartbeat")
-            put("payload", JSONObject().apply {
-                put("battery",    batteryLevel())
-                put("charging",   charging)
-                put("deviceName", deviceName())
-                if (fgPkg != null) put("foregroundApp", JSONObject().apply {
-                    put("package", fgPkg)
-                    if (fgLabel != null) put("label", fgLabel)
-                })
-                put("permissions", JSONObject().apply {
-                    put("notificationListener",
-                        com.jarvis.assistant.notifications.JarvisNotificationListener.isGranted(context))
-                    put("readContacts",
-                        context.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
-                            android.content.pm.PackageManager.PERMISSION_GRANTED)
-                    put("readPhoneState",
-                        context.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) ==
-                            android.content.pm.PackageManager.PERMISSION_GRANTED)
-                })
+            put("type", "heartbeat")
+            put("battery",    batteryLevel())
+            put("charging",   charging)
+            put("deviceName", deviceName())
+            if (fgPkg != null) put("foregroundApp", JSONObject().apply {
+                put("package", fgPkg)
+                if (fgLabel != null) put("label", fgLabel)
+            })
+            put("permissions", JSONObject().apply {
+                put("notificationListener",
+                    com.jarvis.assistant.notifications.JarvisNotificationListener.isGranted(context))
+                put("readContacts",
+                    context.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED)
+                put("readPhoneState",
+                    context.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED)
             })
         }
         sendFrame(frame)
@@ -296,11 +293,8 @@ class BrainGatewayWebSocketClient(
 
     private fun sendCapabilitiesReport() {
         val frame = JSONObject().apply {
-            put("type", "event")
-            put("command", "capabilities_report")
-            put("payload", JSONObject().apply {
-                put("capabilities", org.json.JSONArray(BrainGatewayPairingClient.DEFAULT_CAPABILITIES))
-            })
+            put("type", "capability.update")
+            put("capabilities", org.json.JSONArray(BrainGatewayPairingClient.DEFAULT_CAPABILITIES))
         }
         sendFrame(frame)
     }

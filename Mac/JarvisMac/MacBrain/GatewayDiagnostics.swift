@@ -62,7 +62,14 @@ final class GatewayDiagnostics {
     // MARK: - Computed
     var uptimeSeconds: Double { startedAt.map { Date().timeIntervalSince($0) } ?? 0 }
     var statusLine: String {
-        if isRunning { return "Running on :\(listeningPort) · \(connectedAndroidDevices) Android" }
+        if isRunning {
+            let winCount = DistributedBrainDiagnostics.shared.wsClientsConnected
+            let parts = [
+                "\(connectedAndroidDevices) Android",
+                winCount > 0 ? "\(winCount) Windows" : nil,
+            ].compactMap { $0 }
+            return "Running on :\(listeningPort) · " + parts.joined(separator: " · ")
+        }
         if let e = lastError { return "Error: \(e)" }
         return "Stopped"
     }

@@ -86,7 +86,7 @@ internal static class GatewayMessageTranslator
                 return new
                 {
                     deviceName   = frame.DeviceId ?? deviceId,
-                    appVersion   = "1.0.0",
+                    appVersion   = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0",
                     capabilities = WindowsCapabilities.Enabled
                 };
 

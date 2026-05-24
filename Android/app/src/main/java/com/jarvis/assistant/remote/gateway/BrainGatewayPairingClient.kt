@@ -105,7 +105,7 @@ class BrainGatewayPairingClient {
     ): String = JSONObject().apply {
         put("deviceId",     deviceId)
         put("deviceName",   deviceName)
-        put("pairingCode",  pairingCode)
+        put("code",         pairingCode)
         put("appVersion",   appVersion)
         put("platform",     "android")
         val caps = org.json.JSONArray()
