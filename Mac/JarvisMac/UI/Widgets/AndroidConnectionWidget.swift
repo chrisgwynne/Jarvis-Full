@@ -16,11 +16,6 @@ struct AndroidConnectionWidget: View {
                     Text(state.androidServerStatus.label)
                         .font(.subheadline)
                     Spacer()
-                    if state.androidAuthRequired {
-                        Label("Token", systemImage: "lock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
                 Text("ws://<your-mac-ip>:\(state.webSocketPort)")
                     .font(.caption.monospaced())

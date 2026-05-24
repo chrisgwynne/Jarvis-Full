@@ -239,7 +239,6 @@ public partial class App : System.Windows.Application
             openInspector: ShowInspector,
             ocrClipboardImage: () => _ = OcrClipboardImageAsync(),
             openAuditLog: ShowAuditLog,
-            copyBridgeToken: CopyBridgeToken,
             openGuidance: ShowGuidancePrompt,
             openChat: ShowChat,
             openLlmSettings: ShowLlmSettings,
@@ -424,18 +423,6 @@ public partial class App : System.Windows.Application
         _auditWindow = new AuditLogWindow(_services.GetRequiredService<IAuditLog>());
         _auditWindow.Closed += (_, _) => _auditWindow = null;
         _auditWindow.Show();
-    }
-
-    private void CopyBridgeToken()
-    {
-        if (_services is null) return;
-        var token = _services.GetRequiredService<BridgeTokenStore>().GetOrCreate();
-        try
-        {
-            System.Windows.Clipboard.SetText(token);
-            _services.GetRequiredService<IDiagnostics>().Record(DiagnosticLevel.Info, "browser", "bridge token copied to clipboard");
-        }
-        catch { /* ignored */ }
     }
 
     private void ShowInspector()

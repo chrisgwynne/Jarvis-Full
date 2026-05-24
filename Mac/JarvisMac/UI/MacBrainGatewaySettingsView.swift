@@ -3,6 +3,10 @@ import SwiftUI
 /// Settings view for the unified Mac Brain Gateway (port 8765).
 /// Replaces MacBrainSettingsView in Developer > Brain API sub-tab.
 /// Also surfaced in Integrations for Android pairing.
+///
+/// NOTE: The gateway master token (gatewayToken in Keychain) is kept for internal
+/// auth validation only. It is never shown, copied, or rotated from this UI.
+/// Windows pairs via 6-digit pairing code → device token (hidden). Android likewise.
 struct MacBrainGatewaySettingsView: View {
     let controller: JarvisController
 

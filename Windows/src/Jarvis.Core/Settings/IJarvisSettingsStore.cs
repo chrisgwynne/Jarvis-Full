@@ -20,9 +20,9 @@ public sealed record JarvisSettings
     public QuotaSettings Quota { get; init; } = new();
     public SidecarSettings Sidecar { get; init; } = new();
     public MouseChordSettings MouseChord { get; init; } = new();
-    /// <summary>Daemon gateway config (Phase 2). When <see cref="BrainGatewayConfig.BaseUrl"/>
-    /// is set the bridge uses gateway protocol (/v1/windows/ws); otherwise falls back to
-    /// the legacy <see cref="SidecarSettings.BridgeUrl"/>.</summary>
+    /// <summary>Daemon gateway config. Pairing-code flow stores the session token here.
+    /// When <see cref="BrainGatewayConfig.BaseUrl"/> is non-empty the bridge connects to
+    /// /v1/windows/ws; when empty the bridge stays Disabled.</summary>
     public BrainGatewayConfig Gateway { get; init; } = new();
 
     public static JarvisSettings Defaults => new();
@@ -57,7 +57,8 @@ public enum SpeakerAuthorityPreference
 
 /// <summary>
 /// Configuration for the Mac sidecar bridge. The Mac is the brain; Windows connects
-/// to <c>BridgeUrl</c> as a WebSocket client and authenticates with <c>BridgeToken</c>.
+/// via the pairing-code flow — users never enter or copy a bearer token.
+/// Connection is always gateway-protocol-only (BrainGatewayConfig.BaseUrl + SessionToken).
 /// </summary>
 public sealed record SidecarSettings
 {
@@ -65,13 +66,11 @@ public sealed record SidecarSettings
     /// runtime using its local LLM provider (P5.5+ behaviour).</summary>
     public bool Enabled { get; init; } = false;
 
-    /// <summary>WebSocket URL of the Mac brain. Default matches the Mac Brain API
-    /// server's <c>/v2/ws</c> endpoint on port 8765; change the host to your Mac's LAN IP
-    /// (System Settings → Network → Wi-Fi → Details → IP Address) once you've enabled
-    /// the brain server there.</summary>
-    public string BridgeUrl { get; init; } = "ws://127.0.0.1:8765/v2/ws";
+    // NOTE: BridgeUrl and BridgeToken (legacy bearer-token fields) have been removed.
+    // Connection is now exclusively through BrainGatewayConfig (pairing-code flow).
+    // Old JSON files that still contain these fields are silently ignored by the
+    // JSON deserializer (unknown properties are discarded).
 
-    public string? BridgeToken { get; init; }
     public bool AutoReconnect { get; init; } = true;
 
     public bool WakeWordEnabled { get; init; } = true;
@@ -238,17 +237,19 @@ public sealed record RedactionSettings
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 2 — Daemon Gateway Config
+// Daemon Gateway Config
 //
 // Windows connects to JarvisBrainDaemon via one place: BaseUrl (port 8765).
-// No separate WebSocket host, no separate port, no duplicate bearer token UI.
+// No bearer token UI — authentication is handled via the pairing-code flow.
 // The WebSocket URL is derived as {ws|wss}://{host}/v1/windows/ws.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Single source of truth for the Mac Brain Gateway connection. When
-/// <see cref="BaseUrl"/> is non-empty the bridge uses gateway protocol; otherwise
-/// it falls back to the legacy <see cref="SidecarSettings.BridgeUrl"/>.
+/// Single source of truth for the Mac Brain Gateway connection.
+/// When <see cref="BaseUrl"/> is non-empty and <see cref="SessionToken"/> is set
+/// (obtained via pairing-code exchange), the bridge connects to /v1/windows/ws.
+/// When BaseUrl is empty the bridge stays Disabled; when BaseUrl is set but no
+/// SessionToken the bridge transitions to PairingRequired.
 /// </summary>
 public sealed record BrainGatewayConfig
 {
@@ -272,11 +273,6 @@ public sealed record BrainGatewayConfig
 
     /// <summary>UTC timestamp of the most recent successful WebSocket connection.</summary>
     public DateTimeOffset? LastConnectedAt { get; init; }
-
-    // ── Diagnostics (migration) ───────────────────────────────────────────────
-    /// <summary>Set by migration when values were imported from old <see cref="SidecarSettings"/>.</summary>
-    public bool MigratedFromLegacy { get; init; }
-    public DateTimeOffset? MigrationCompletedAt { get; init; }
 
     // ── Derived helpers ────────────────────────────────────────────────────────
 
