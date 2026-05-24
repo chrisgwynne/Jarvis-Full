@@ -6,9 +6,6 @@ import SwiftUI
 struct MacBrainGatewaySettingsView: View {
     let controller: JarvisController
 
-    @State private var tokenRevealed = false
-    @State private var tokenCopied = false
-    @State private var tokenRegenConfirm = false
     @State private var pairingCountdown: Int = 0
     @State private var pairingTimer: Timer? = nil
     @State private var codeCopied = false
@@ -121,47 +118,6 @@ struct MacBrainGatewaySettingsView: View {
                     }
                 }
             } header: { Text("Network") }
-
-            // ── Authentication ────────────────────────────────────────────
-            Section {
-                LabeledContent("Gateway token") {
-                    HStack(spacing: 6) {
-                        if tokenRevealed {
-                            Text(authStore.gatewayToken ?? "—")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
-                        } else {
-                            Text(authStore.gatewayToken.map { _ in "••••••••••••••••" } ?? "Not configured")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(tokenRevealed ? "Hide" : "Reveal") { tokenRevealed.toggle() }
-                            .buttonStyle(.borderless).font(.caption)
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(authStore.gatewayToken ?? "", forType: .string)
-                            tokenCopied = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { tokenCopied = false }
-                        } label: {
-                            Image(systemName: tokenCopied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled((authStore.gatewayToken ?? "").isEmpty)
-                        Button("Rotate") { tokenRegenConfirm = true }
-                            .buttonStyle(.borderless).foregroundStyle(.orange).font(.caption)
-                    }
-                }
-                if authStore.gatewayToken == nil || authStore.gatewayToken!.isEmpty {
-                    Button("Generate gateway token") {
-                        authStore.regenerateGatewayToken()
-                    }
-                    .buttonStyle(.borderless).font(.caption)
-                }
-                Text("Single token authorizes Brain API, Android WebSocket, and Windows sidecar. Device-specific tokens are issued during pairing (below).")
-                    .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Authentication") }
 
             // ── Paired Devices ────────────────────────────────────────────
             Section {
@@ -352,17 +308,6 @@ struct MacBrainGatewaySettingsView: View {
         .onDisappear {
             pairingTimer?.invalidate()
             pairingTimer = nil
-        }
-        .confirmationDialog("Rotate gateway token?",
-                           isPresented: $tokenRegenConfirm,
-                           titleVisibility: .visible) {
-            Button("Rotate Token", role: .destructive) {
-                authStore.regenerateGatewayToken()
-                diag.tokenRotationCount += 1
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The old token stops working immediately. All clients (Android app, Windows sidecar) must be updated with the new token. Device tokens issued via pairing are not affected.")
         }
     }
 

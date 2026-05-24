@@ -44,9 +44,6 @@ public partial class SettingsWindow : Window
         GatewayBaseUrlBox.Text = s.Gateway.BaseUrl;
         RefreshPairingStatus(s.Gateway);
 
-        SidecarEnabledCheck.IsChecked = s.Sidecar.Enabled;
-        BridgeUrlBox.Text = s.Sidecar.BridgeUrl;
-        BridgeTokenBox.Password = s.Sidecar.BridgeToken ?? string.Empty;
         AutoReconnectCheck.IsChecked = s.Sidecar.AutoReconnect;
         OfflineDegradedCheck.IsChecked = s.Sidecar.OfflineDegradedModeEnabled;
         WakeWordEnabledCheck.IsChecked = s.Sidecar.WakeWordEnabled;
@@ -89,9 +86,6 @@ public partial class SettingsWindow : Window
             },
             Sidecar = s.Sidecar with
             {
-                Enabled = SidecarEnabledCheck.IsChecked == true,
-                BridgeUrl = string.IsNullOrWhiteSpace(BridgeUrlBox.Text) ? s.Sidecar.BridgeUrl : BridgeUrlBox.Text.Trim(),
-                BridgeToken = string.IsNullOrEmpty(BridgeTokenBox.Password) ? null : BridgeTokenBox.Password,
                 AutoReconnect = AutoReconnectCheck.IsChecked == true,
                 OfflineDegradedModeEnabled = OfflineDegradedCheck.IsChecked == true,
                 WakeWordEnabled = WakeWordEnabledCheck.IsChecked == true,
@@ -232,21 +226,15 @@ public partial class SettingsWindow : Window
         TestBridgeOutput.Text = "Probing…";
         try
         {
-            // Prefer gateway URL; fall back to legacy WS URL for the probe.
             var gatewayBase = GatewayBaseUrlBox.Text?.Trim() ?? string.Empty;
-            var token = _store.Current.Gateway.SessionToken ?? BridgeTokenBox.Password;
-            string probeUrl;
-            if (!string.IsNullOrWhiteSpace(gatewayBase))
+            var token = _store.Current.Gateway.SessionToken;
+            if (string.IsNullOrWhiteSpace(gatewayBase))
             {
-                // Probe wants a WS URL; derive it.
-                var derived = new BrainGatewayConfig { BaseUrl = gatewayBase }.DeriveWebSocketUrl();
-                probeUrl = derived ?? gatewayBase;
+                TestBridgeOutput.Text = "Enter the Mac Brain Gateway URL first.";
+                return;
             }
-            else
-            {
-                probeUrl = BridgeUrlBox.Text?.Trim() ?? string.Empty;
-                token    = BridgeTokenBox.Password;
-            }
+            var derived = new BrainGatewayConfig { BaseUrl = gatewayBase }.DeriveWebSocketUrl();
+            var probeUrl = derived ?? gatewayBase;
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var result = await BridgeConnectivityProbe.RunAsync(probeUrl, token, cts.Token).ConfigureAwait(true);
             TestBridgeOutput.Text = result.FormatText();

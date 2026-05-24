@@ -66,8 +66,7 @@ enum KeychainAccount {
     /// proactivity provider so the user can scope them differently —
     /// notifications-read for one, issues-write for the other.
     static let githubIssuesToken        = "github_issues_token"
-    /// Home Assistant WebSocket authentication token.  Displayed in Settings
-    /// as a QR code for the Android companion app.  Kept in Keychain to avoid
+    /// Home Assistant WebSocket authentication token.  Kept in Keychain to avoid
     /// landing in `preferences.json` or version-control diffs.
     static let webSocketAuthToken       = "websocket_auth_token"
     /// Bearer token for the Mac Brain HTTP server (GET /brain/health,

@@ -185,33 +185,3 @@ final class TailscaleService {
     }
 }
 
-// MARK: - QR Code generation (CoreImage)
-
-import AppKit
-import CoreImage
-
-extension TailscaleStatus {
-
-    /// Render a scannable QR code NSImage for the given payload string.
-    ///
-    /// CIQRCodeGenerator already outputs black modules on white background —
-    /// the standard scannable orientation. Do NOT invert.
-    static func qrImage(for string: String, scale: CGFloat = 10) -> NSImage? {
-        guard let data = string.data(using: .utf8),
-              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
-        filter.setValue(data, forKey: "inputMessage")
-        filter.setValue("Q", forKey: "inputCorrectionLevel")
-        guard let raw = filter.outputImage else { return nil }
-
-        // Scale up so every module is several pixels wide — essential for scanning.
-        // No interpolation: nearest-neighbour keeps edges perfectly sharp.
-        let scaled = raw.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-
-        // Render to CGImage (avoids NSCIImageRep colour-profile and lazy-render issues).
-        let ctx = CIContext(options: [.useSoftwareRenderer: false])
-        guard let cg = ctx.createCGImage(scaled, from: scaled.extent) else { return nil }
-
-        return NSImage(cgImage: cg, size: NSSize(width: scaled.extent.width,
-                                                  height: scaled.extent.height))
-    }
-}

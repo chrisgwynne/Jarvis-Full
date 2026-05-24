@@ -56,10 +56,7 @@ struct SettingsView: View {
     @State private var showingAddAlias = false
     @State private var newAliasFriendlyName = ""
     @State private var newAliasEntityID = ""
-    // Network / QR
-    @State private var showQR = false
     @State private var revealSecret = false
-    @State private var qrCopied = false
 
     // MARK: - Body
 
@@ -1002,12 +999,6 @@ struct SettingsView: View {
                             .buttonStyle(.borderless).font(.caption)
                     }
 
-                    Button { showQR.toggle() } label: {
-                        Label(showQR ? "Hide QR code" : "Show pairing QR code",
-                              systemImage: showQR ? "qrcode.viewfinder" : "qrcode")
-                    }
-                    if showQR { qrPairingContent }
-
                     LabeledContent("Android WebSocket URL") {
                         let port = controller.prefs.current.brainServerPort
                         let ip = controller.state.tailscaleIP ?? TailscaleService.findLocalIP() ?? "<your-ip>"
@@ -1379,79 +1370,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    // MARK: - QR / Network helpers
-
-    private func buildQRPayload() -> String {
-        let tsStatus = controller.tailscale.status
-        let host: String
-        if let ip = tsStatus.ip { host = ip }
-        else if let lan = TailscaleService.findLocalIP() { host = lan }
-        else { host = "not-connected" }
-
-        // Android connects to JarvisBrainDaemon at brainServerPort (8765)
-        // using the gateway token — NOT the legacy webSocketPort/webSocketAuthToken.
-        let port = controller.prefs.current.brainServerPort
-        let auth = GatewayAuthStore.shared.gatewayToken ?? ""
-
-        let dict: [String: Any] = ["host": host, "port": Int(port), "auth": auth]
-
-        if let data = try? JSONSerialization.data(withJSONObject: dict, options: .sortedKeys),
-           let s = String(data: data, encoding: .utf8) { return s }
-        return "{}"
-    }
-
-    @ViewBuilder
-    private var qrPairingContent: some View {
-        let payload = buildQRPayload()
-        let tsConnected = controller.state.tailscaleConnected
-        let gatewayConfigured = !(GatewayAuthStore.shared.gatewayToken ?? "").isEmpty
-        let hostLabel: String = {
-            if let ip = controller.tailscale.status.ip { return ip }
-            return TailscaleService.findLocalIP() ?? "unknown"
-        }()
-
-        if !gatewayConfigured {
-            Label("No gateway token — go to Connections tab and generate one first",
-                  systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .font(.caption)
-                .frame(maxWidth: .infinity, alignment: .center)
-        } else if let qrImage = TailscaleStatus.qrImage(for: payload, scale: 10) {
-            HStack {
-                Spacer()
-                Image(nsImage: qrImage)
-                    .interpolation(.none)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 200, height: 200)
-                Spacer()
-            }
-        }
-
-        HStack {
-            Image(systemName: tsConnected ? "checkmark.circle.fill" : "wifi")
-                .foregroundColor(tsConnected ? .green : .orange).font(.caption)
-            Text(tsConnected
-                 ? "Via Tailscale (\(hostLabel)) — works from anywhere"
-                 : "Via local Wi-Fi (\(hostLabel)) — same network only")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(payload, forType: .string)
-            qrCopied = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { qrCopied = false }
-        } label: {
-            Label(qrCopied ? "Copied!" : "Copy raw payload (for debugging)",
-                  systemImage: qrCopied ? "checkmark" : "doc.on.doc")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .buttonStyle(.borderless)
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     // MARK: - HA alias sheet
