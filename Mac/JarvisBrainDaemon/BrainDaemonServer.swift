@@ -510,6 +510,11 @@ final class BrainDaemonServer {
             if let d = snap.lastMacAppMessageAt  { dict["lastMacAppMessageAt"]  = iso.string(from: d) }
             send(conn, statusCode: 200, body: toJSON(dict))
 
+        case ("GET", "/v1/handoffs"):
+            let summaries = HandoffContextStore.shared.recentSummary()
+            let dict: [String: Any] = ["handoffs": summaries]
+            send(conn, statusCode: 200, body: toJSON(dict))
+
         default:
             send(conn, statusCode: 404, body: errorJSON("Endpoint not found: \(path)"))
         }

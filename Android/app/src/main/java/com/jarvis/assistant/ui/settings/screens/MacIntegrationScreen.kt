@@ -331,6 +331,45 @@ internal fun MacIntegrationScreen(
         }
         Spacer(Modifier.height(8.dp))
 
+        // ── 5b. Cross-device continuity ───────────────────────────────────────
+        var notifForwarding by remember { mutableStateOf(store.crossDeviceNotifForwarding) }
+        var watchdogEnabled  by remember { mutableStateOf(store.crossDeviceWatchdog) }
+        Spacer(Modifier.height(8.dp))
+        SettingsGroup(
+            title  = "Cross-device",
+            footer = "Controls how this phone coordinates with Mac Jarvis for handoff and continuity.",
+        ) {
+            SettingsToggleRow(
+                title           = "Forward notifications to Mac",
+                description     = "Send app notifications to Mac Jarvis for cross-device awareness",
+                checked         = notifForwarding,
+                onCheckedChange = { on ->
+                    notifForwarding = on
+                    store.crossDeviceNotifForwarding = on
+                },
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Comm watchdog alerts",
+                description     = "Alert when the Mac connection drops unexpectedly",
+                checked         = watchdogEnabled,
+                onCheckedChange = { on ->
+                    watchdogEnabled = on
+                    store.crossDeviceWatchdog = on
+                },
+            )
+            SettingsRowDivider()
+            SettingsValueRow(
+                title = "Daemon connection",
+                value = when (wsStatus) {
+                    GatewayWsStatus.Connected    -> "Connected"
+                    GatewayWsStatus.Reconnecting -> "Reconnecting…"
+                    GatewayWsStatus.Connecting   -> "Connecting…"
+                    else                         -> "Not connected"
+                },
+            )
+        }
+
         // ── 6. Camera & Remote View ───────────────────────────────────────────
         SettingsGroup(
             title  = "Camera & Remote View",

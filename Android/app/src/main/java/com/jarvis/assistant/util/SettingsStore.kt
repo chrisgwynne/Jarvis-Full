@@ -124,6 +124,10 @@ class SettingsStore(context: Context) {
         const val KEY_MAC_BRAIN_ALLOW_HA_REPORTING = "mac_brain_allow_ha_reporting"
         const val KEY_MAC_BRAIN_DEVICE_ID          = "mac_brain_device_id"
         // ── Mac Camera (HTTP camera stream viewer) ─────────────────────────────
+        // ── Cross-device continuity ──────────────────────────────────────────
+        const val KEY_CROSS_DEVICE_NOTIF_FORWARDING = "cross_device_notif_forwarding"
+        const val KEY_CROSS_DEVICE_WATCHDOG         = "cross_device_watchdog"
+
         const val KEY_MAC_CAMERA_ENABLED          = "mac_camera_enabled"
         const val KEY_MAC_CAMERA_USE_BRIDGE_CREDS = "mac_camera_use_bridge_creds"
         const val KEY_MAC_CAMERA_BASE_URL         = "mac_camera_base_url"
@@ -513,6 +517,18 @@ class SettingsStore(context: Context) {
         get() = prefs.getString(KEY_MAC_BRIDGE_ANDROID_ROLE,
             com.jarvis.assistant.remote.macbridge.AndroidRole.FULL_ASSISTANT.name) ?: ""
         set(v) = prefs.edit().putString(KEY_MAC_BRIDGE_ANDROID_ROLE, v).apply()
+
+    // ── Cross-device continuity ────────────────────────────────────────────────
+
+    /** Forward notifications to Mac Jarvis for cross-device awareness. Default true. */
+    var crossDeviceNotifForwarding: Boolean
+        get() = prefs.getBoolean(KEY_CROSS_DEVICE_NOTIF_FORWARDING, true)
+        set(v) = prefs.edit().putBoolean(KEY_CROSS_DEVICE_NOTIF_FORWARDING, v).apply()
+
+    /** Alert when the Mac connection drops unexpectedly. Default true. */
+    var crossDeviceWatchdog: Boolean
+        get() = prefs.getBoolean(KEY_CROSS_DEVICE_WATCHDOG, true)
+        set(v) = prefs.edit().putBoolean(KEY_CROSS_DEVICE_WATCHDOG, v).apply()
 
     // ── Mac Camera ─────────────────────────────────────────────────────────────
 

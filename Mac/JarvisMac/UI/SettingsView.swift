@@ -18,7 +18,7 @@ struct SettingsView: View {
 
     enum Tab: String, CaseIterable, Identifiable {
         case general, voice, conversation, models, connections,
-             integrations, gestures, newsFeeds, developer
+             integrations, gestures, newsFeeds, devices, developer
         var id: String { rawValue }
     }
 
@@ -89,6 +89,9 @@ struct SettingsView: View {
                 newsFeedsTab
                     .tabItem { Label("News & Feeds", systemImage: "newspaper") }
                     .tag(Tab.newsFeeds)
+                devicesTab
+                    .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
+                    .tag(Tab.devices)
                 developerTab
                     .tabItem { Label("Developer",    systemImage: "wrench.and.screwdriver") }
                     .tag(Tab.developer)
@@ -1125,7 +1128,38 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Tab 9: Developer
+    // MARK: - Tab 9: Devices
+
+    private var devicesTab: some View {
+        Form {
+            Section("Daemon") {
+                LabeledContent("Status") {
+                    Text(DaemonManager.shared.status == .running ? "Connected" : "Disconnected")
+                        .foregroundStyle(DaemonManager.shared.status == .running ? .green : .secondary)
+                }
+                LabeledContent("Port") { Text("8765") }
+            }
+            Section("Connected Devices") {
+                let deviceCount = DaemonManager.shared.connectedDevices
+                if deviceCount == 0 {
+                    Text("No devices connected").foregroundStyle(.secondary)
+                } else {
+                    Text("\(deviceCount) device(s) connected")
+                        .foregroundStyle(.secondary)
+                    Text("See Developer → Brain API for detailed device info.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Recent Handoffs") {
+                Text("Last 5 handoffs appear here when cross-device continuity is used.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Tab 10: Developer
 
     private var developerTab: some View {
         VStack(spacing: 0) {
@@ -1153,6 +1187,11 @@ struct SettingsView: View {
 
     private var devSubsystemsContent: some View {
         Form {
+            Section {
+                Text("Advanced settings — use with care.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section {
                 Toggle("Emergency Safe Mode", isOn: emergencySafeModeBinding)
                 if controller.prefs.current.emergencySafeMode {

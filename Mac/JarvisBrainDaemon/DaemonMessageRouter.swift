@@ -272,6 +272,11 @@ final class DaemonMessageRouter {
                                             sourceDeviceId: envelope.sourceDeviceId,
                                             ttlSeconds: 86400)
                 }
+                HandoffContextStore.shared.record(
+                    sourceDeviceId: envelope.sourceDeviceId,
+                    key: envelope.payload.objectValue?["key"]?.stringValue ?? "unknown",
+                    value: envelope.payload.objectValue?["value"]?.stringValue ?? ""
+                )
                 switch envelope.target {
                 case .macApp:
                     self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
