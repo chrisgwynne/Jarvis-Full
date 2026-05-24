@@ -12,6 +12,7 @@ final class BrainDaemonServer {
     private let networkQueue = DispatchQueue(label: "com.jarvis.brain.server", qos: .utility)
     private var listener: NWListener?
     private var isRunning = false
+    private var tickerStopped = false
 
     let port: Int
 
@@ -68,13 +69,14 @@ final class BrainDaemonServer {
     }
 
     func stop() {
+        tickerStopped = true
         listener?.cancel()
         listener = nil
     }
 
     private func startProactiveTicker() {
         networkQueue.asyncAfter(deadline: .now() + 60) { [weak self] in
-            guard let self else { return }
+            guard let self, !self.tickerStopped else { return }
             ProactiveCoordinator.shared.tick(router: DaemonMessageRouter.shared)
             self.startProactiveTicker()
         }
@@ -557,6 +559,8 @@ final class BrainDaemonServer {
         let pingInterval: TimeInterval = 30
         networkQueue.asyncAfter(deadline: .now() + pingInterval) { [weak self] in
             guard let self else { return }
+            // Stop if the client has already been unregistered.
+            guard DaemonMessageRouter.shared.isClientRegistered(clientId) else { return }
             // Send ping frame (opcode 0x09, no payload)
             let pingFrame = Data([0x89, 0x00])
             conn.send(content: pingFrame, completion: .contentProcessed { [weak self] error in
@@ -565,7 +569,8 @@ final class BrainDaemonServer {
                     self?.disconnectClient(clientId: clientId, platform: platform, conn: conn)
                     return
                 }
-                // Schedule next ping
+                // Schedule next ping only if client still registered.
+                guard DaemonMessageRouter.shared.isClientRegistered(clientId) else { return }
                 self?.startPingLoop(conn: conn, clientId: clientId, platform: platform)
             })
         }

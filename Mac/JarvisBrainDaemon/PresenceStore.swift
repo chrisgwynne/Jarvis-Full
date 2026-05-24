@@ -30,6 +30,11 @@ final class PresenceStore {
     private var store: [String: DevicePresence] = [:]
     private let lock = NSLock()
 
+    /// Entries for disconnected devices older than this are evicted.
+    private static let staleThresholdSeconds: TimeInterval = 300   // 5 min
+    /// Hard cap — never keep more than this many entries regardless of age.
+    private static let maxEntries = 50
+
     // MARK: - Update
 
     /// Applies a partial presence payload keyed by field name.
@@ -70,7 +75,34 @@ final class PresenceStore {
             p.updatedAt = Date()
             store[deviceId] = p
 
+            evictStaleEntries()
+
             presenceLogger.debug("presence: updated deviceId=\(deviceId) platform=\(platform) focusMode=\(p.focusMode)")
+        }
+    }
+
+    /// Removes disconnected-device entries that haven't been updated in >5 minutes,
+    /// and enforces the hard cap by dropping the oldest entries first.
+    /// Must be called inside `lock`.
+    private func evictStaleEntries() {
+        let cutoff = Date().addingTimeInterval(-Self.staleThresholdSeconds)
+        let connectedDevices = Set(DeviceRegistry.shared.connectedDevices.map { $0.deviceId })
+
+        // Remove stale entries for disconnected devices.
+        for (id, presence) in store
+            where !connectedDevices.contains(presence.deviceId) && presence.updatedAt < cutoff {
+            store.removeValue(forKey: id)
+            presenceLogger.info("presence: evicted stale entry deviceId=\(id)")
+        }
+
+        // Enforce max-entries cap: drop oldest first.
+        if store.count > Self.maxEntries {
+            let sorted = store.sorted { $0.value.updatedAt < $1.value.updatedAt }
+            let toRemove = sorted.prefix(store.count - Self.maxEntries)
+            for (id, _) in toRemove {
+                store.removeValue(forKey: id)
+                presenceLogger.warning("presence: evicted over-cap entry deviceId=\(id)")
+            }
         }
     }
 

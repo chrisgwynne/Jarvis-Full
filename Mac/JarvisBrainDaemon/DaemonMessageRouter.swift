@@ -78,6 +78,12 @@ final class DaemonMessageRouter {
         }
     }
 
+    /// Returns true synchronously if the given client ID is still registered.
+    /// Used by the ping loop to stop scheduling pings after disconnect.
+    func isClientRegistered(_ clientId: String) -> Bool {
+        queue.sync { clients[clientId] != nil }
+    }
+
     // MARK: - Route incoming message
 
     func route(rawData: Data, fromClientId: String) {

@@ -114,6 +114,7 @@ class BrainGatewayWebSocketClient(
     @Volatile private var ws: WebSocket? = null
     @Volatile private var serverInitiatedClose = false
     @Volatile private var scope: CoroutineScope = newScope()
+    @Volatile private var heartbeatJob: Job? = null
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -136,6 +137,8 @@ class BrainGatewayWebSocketClient(
 
     fun stop() {
         running.set(false)
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         ws?.close(1000, "Service stopping")
         ws = null
         serverInitiatedClose = false
@@ -231,7 +234,8 @@ class BrainGatewayWebSocketClient(
                     _sharedStatus.value = GatewayWsStatus.Connected
                     settingsRepo.recordConnected()
                     sendCapabilitiesReport()
-                    scope.launch { heartbeatLoop() }
+                    heartbeatJob?.cancel()
+                    heartbeatJob = scope.launch { heartbeatLoop() }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
