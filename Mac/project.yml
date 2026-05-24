@@ -92,3 +92,29 @@ targets:
     # #     branch: master
     # #   And add this entry under `dependencies:`:
     # - package: whisper
+
+  JarvisBrainDaemon:
+    type: tool
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: JarvisBrainDaemon
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.brain.daemon
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+    dependencies: []
+
+  JarvisBrainDaemonTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: JarvisBrainDaemonTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.brain.tests
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+    dependencies: []
