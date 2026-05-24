@@ -1431,6 +1431,18 @@ final class JarvisController {
                 self.androidToolOrchestrator.handleResult(data: data)
             }
         }
+        DaemonAppBridge.shared.onPresenceUpdate = { [weak self] _ in
+            CrossDeviceViewModel.shared.isDaemonConnected = true
+        }
+        DaemonAppBridge.shared.onCommPrompt = { payload in
+            CommWatchdogCoordinator.shared.handle(payload)
+        }
+        DaemonAppBridge.shared.onHandoffReceived = { key, value in
+            HandoffCoordinator.shared.receive(key: key, value: value)
+        }
+        DaemonAppBridge.shared.onClipboardUpdate = { text in
+            HandoffCoordinator.shared.receiveClipboard(text)
+        }
         DaemonAppBridge.shared.connect()
         RemoteActionExecutor.shared.wire(to: DaemonAppBridge.shared)
 

@@ -91,6 +91,14 @@ class BrainGatewayWebSocketClient(
     /** Proactive push: title + body from Mac. */
     var onProactiveNotify: ((String, String) -> Unit)? = null
 
+    var onProactiveCommPrompt: ((org.json.JSONObject) -> Unit)? = null
+    var onHandoffReceived: ((org.json.JSONObject) -> Unit)? = null
+    var onNotificationForward: ((org.json.JSONObject) -> Unit)? = null
+    var onClipboardUpdate: ((String) -> Unit)? = null
+    var commWatchdogManager: com.jarvis.assistant.comm.CommWatchdogManager? = null
+
+    var deviceId: String? = null
+
     // ── Diagnostics ───────────────────────────────────────────────────────────
     val reconnectCount: AtomicInteger = AtomicInteger(0)
     val lastEventSentAtMs: AtomicLong = AtomicLong(0L)
@@ -476,6 +484,32 @@ class BrainGatewayWebSocketClient(
                 if (spokenSummary.isNotBlank()) {
                     onReplyFinal?.invoke(spokenSummary)
                 }
+            }
+
+            "proactive.comm.prompt" -> {
+                val payload = json.optJSONObject("payload") ?: JSONObject()
+                onProactiveCommPrompt?.invoke(payload)
+                Log.d(TAG, "proactive.comm.prompt received for channel=${payload.optString("channel")}")
+            }
+            "comm.action.execute" -> {
+                val payload = json.optJSONObject("payload") ?: JSONObject()
+                commWatchdogManager?.handleActionExecute(payload)
+                Log.d(TAG, "comm.action.execute: action=${payload.optString("action")}")
+            }
+            "handoff.request" -> {
+                val payload = json.optJSONObject("payload") ?: JSONObject()
+                onHandoffReceived?.invoke(payload)
+                Log.d(TAG, "handoff.request: key=${payload.optString("key")}")
+            }
+            "notification.forward" -> {
+                val payload = json.optJSONObject("payload") ?: JSONObject()
+                onNotificationForward?.invoke(payload)
+                Log.d(TAG, "notification.forward: title=${payload.optString("title").take(40)}")
+            }
+            "clipboard.update" -> {
+                val payload = json.optJSONObject("payload") ?: JSONObject()
+                onClipboardUpdate?.invoke(payload.optString("text"))
+                Log.d(TAG, "clipboard.update received")
             }
 
             else -> Log.w(TAG, "Unsupported inbound frame type: '$frameType' — not handled")

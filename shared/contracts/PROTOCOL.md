@@ -311,3 +311,186 @@ When the daemon is unavailable, `AppState.daemonUnavailable = true` is surfaced 
 - `MacBridgeProtocolV2` — was the old in-app Windows WebSocket/SSE server. Marked `@available(*, deprecated)`. Inert.
 
 Both are replaced by JarvisBrainDaemon's `/v1/android/ws`, `/v1/windows/ws`, and `/v2/ws` endpoints.
+
+---
+
+## Phase 5–9 Frame Families
+
+The following frame types were added to support cross-device platform features.
+
+### presence.update
+Sent by any device to update its presence state in the daemon's `PresenceStore`.
+```json
+{
+  "type": "presence.update",
+  "target": {"type": "daemon"},
+  "payload": {
+    "isListening": false,
+    "isSpeaking": false,
+    "isScreenLocked": false,
+    "isAppForeground": true,
+    "hasHeadset": true,
+    "batteryPercent": 82,
+    "isCharging": false,
+    "activityState": "stationary",
+    "focusMode": "normal"
+  }
+}
+```
+
+### context.update
+Sent by any device to write a key/value pair into the daemon's `ContextStore` (24h TTL).
+```json
+{
+  "type": "context.update",
+  "target": {"type": "daemon"},
+  "payload": {"key": "last_transcript", "value": "turn off the kitchen lights"}
+}
+```
+
+### notification.forward
+Sent by Android to the daemon; daemon forwards to Mac.
+```json
+{
+  "type": "notification.forward",
+  "target": {"type": "macApp"},
+  "payload": {
+    "packageName": "com.slack.android",
+    "appName": "Slack",
+    "title": "Chris in #general",
+    "text": "Can you check the PR?",
+    "postedAt": "2026-05-24T10:00:00Z"
+  }
+}
+```
+
+### comm.event.received
+Sent by Android when a missed call, unread SMS, or WhatsApp message is detected.
+```json
+{
+  "type": "comm.event.received",
+  "target": {"type": "daemon"},
+  "payload": {
+    "eventId": "evt_abc123",
+    "channel": "phone",
+    "direction": "incoming",
+    "contactName": "Alice",
+    "contactHandle": "****1234",
+    "receivedAt": "2026-05-24T09:55:00Z",
+    "sourceApp": "com.android.dialer"
+  }
+}
+```
+`channel` is one of: `phone` | `sms` | `whatsapp` | `whatsapp_business`.
+Phone numbers are ALWAYS masked to `****last4` before transmission.
+
+### comm.event.resolved
+Sent by Android when a comm event is resolved (user replied/called back outside Jarvis).
+```json
+{
+  "type": "comm.event.resolved",
+  "target": {"type": "daemon"},
+  "payload": {"eventId": "evt_abc123", "state": "replied"}
+}
+```
+
+### proactive.comm.prompt
+Sent by daemon to Mac when a comm event is ready for proactive prompting.
+```json
+{
+  "type": "proactive.comm.prompt",
+  "target": {"type": "macApp"},
+  "payload": {
+    "eventId": "evt_abc123",
+    "channel": "phone",
+    "contactName": "Alice",
+    "contactHandle": "****1234",
+    "promptText": "Alice called while you were away.",
+    "promptCount": 1
+  }
+}
+```
+
+### comm.action.request
+Sent by Mac to daemon to request an action on a comm event.
+```json
+{
+  "type": "comm.action.request",
+  "target": {"type": "android", "deviceId": "pixel-7a"},
+  "payload": {
+    "requestId": "req_xyz",
+    "eventId": "evt_abc123",
+    "contactName": "Alice",
+    "channel": "phone",
+    "action": "callBack",
+    "requiresConfirmation": true
+  }
+}
+```
+`action` is one of: `callBack` | `reply` | `summarise` | `remindLater` | `dismiss`.
+
+### comm.action.execute
+Forwarded by daemon to Android. Android MUST show confirmation UI before executing.
+Same payload shape as `comm.action.request`.
+
+### comm.action.result
+Sent by Android to daemon after user confirms and action completes.
+```json
+{
+  "type": "comm.action.result",
+  "target": {"type": "macApp"},
+  "payload": {
+    "requestId": "req_xyz",
+    "eventId": "evt_abc123",
+    "action": "callBack",
+    "success": true,
+    "message": "Calling Alice..."
+  }
+}
+```
+
+### handoff.request
+Sent by any device to hand off text, URL, file, or conversation context to another device.
+```json
+{
+  "type": "handoff.request",
+  "target": {"type": "android"},
+  "payload": {
+    "key": "url",
+    "value": "https://example.com/article",
+    "sourceDevice": "mac"
+  }
+}
+```
+`key` is one of: `text` | `url` | `file` | `conversation`.
+
+### handoff.result
+Sent by the receiving device back to the sender.
+```json
+{
+  "type": "handoff.result",
+  "target": {"type": "macApp"},
+  "payload": {"key": "url", "success": true, "sourceDevice": "android"}
+}
+```
+
+### clipboard.update
+Sent by a device to explicitly push clipboard content to another device.
+Must be explicitly triggered by user — never sent silently.
+```json
+{
+  "type": "clipboard.update",
+  "target": {"type": "android"},
+  "payload": {"text": "Meeting notes for Thursday", "sourceDevice": "mac"}
+}
+```
+
+---
+
+## New daemon HTTP endpoints (Phase 5–9)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/devices/presence` | Returns array of per-device presence snapshots |
+| GET | `/v1/context` | Returns all active context store entries |
+| GET | `/v1/watchdog/status` | Returns all active (unresolved) comm events |

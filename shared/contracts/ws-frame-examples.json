@@ -48,7 +48,160 @@
       "payload": {}
     },
     "replay.begin": { "type": "replay.begin" },
-    "replay.end":   { "type": "replay.end" }
+    "replay.end":   { "type": "replay.end" },
+    "comm.event.received": {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "type": "comm.event.received",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "daemon"},
+      "timestamp": "2026-05-24T09:55:00Z",
+      "payload": {
+        "eventId": "evt_abc123",
+        "channel": "phone",
+        "direction": "incoming",
+        "contactName": "Alice",
+        "contactHandle": "****1234",
+        "receivedAt": "2026-05-24T09:55:00Z",
+        "sourceApp": "com.android.dialer"
+      }
+    },
+    "comm.event.resolved": {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "type": "comm.event.resolved",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "daemon"},
+      "timestamp": "2026-05-24T10:10:00Z",
+      "payload": {"eventId": "evt_abc123", "state": "replied"}
+    },
+    "comm.action.result": {
+      "id": "00000000-0000-0000-0000-000000000003",
+      "type": "comm.action.result",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "macApp"},
+      "timestamp": "2026-05-24T10:12:00Z",
+      "payload": {
+        "requestId": "req_xyz",
+        "eventId": "evt_abc123",
+        "action": "callBack",
+        "success": true,
+        "message": "Calling Alice..."
+      }
+    },
+    "handoff.request_android_to_mac": {
+      "id": "00000000-0000-0000-0000-000000000004",
+      "type": "handoff.request",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "macApp"},
+      "timestamp": "2026-05-24T10:00:00Z",
+      "payload": {"key": "url", "value": "https://example.com/article", "sourceDevice": "android"}
+    },
+    "clipboard.update_android_to_mac": {
+      "id": "00000000-0000-0000-0000-000000000005",
+      "type": "clipboard.update",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "macApp"},
+      "timestamp": "2026-05-24T10:01:00Z",
+      "payload": {"text": "Meeting notes for Thursday", "sourceDevice": "android"}
+    },
+    "notification.forward": {
+      "id": "00000000-0000-0000-0000-000000000006",
+      "type": "notification.forward",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "macApp"},
+      "timestamp": "2026-05-24T10:02:00Z",
+      "payload": {
+        "packageName": "com.slack.android",
+        "appName": "Slack",
+        "title": "Chris in #general",
+        "text": "Can you check the PR?",
+        "postedAt": "2026-05-24T10:02:00Z"
+      }
+    },
+    "context.update": {
+      "id": "00000000-0000-0000-0000-000000000007",
+      "type": "context.update",
+      "sourceDeviceId": "pixel-7a",
+      "sourcePlatform": "android",
+      "target": {"type": "daemon"},
+      "timestamp": "2026-05-24T10:03:00Z",
+      "payload": {"key": "last_transcript", "value": "turn off the kitchen lights"}
+    }
+  },
+  "daemon_to_mac": {
+    "proactive.comm.prompt": {
+      "id": "00000000-0000-0000-0000-000000000008",
+      "type": "proactive.comm.prompt",
+      "sourceDeviceId": "daemon",
+      "sourcePlatform": "daemon",
+      "target": {"type": "macApp"},
+      "timestamp": "2026-05-24T10:05:00Z",
+      "payload": {
+        "eventId": "evt_abc123",
+        "channel": "phone",
+        "contactName": "Alice",
+        "contactHandle": "****1234",
+        "promptText": "Alice called while you were away.",
+        "promptCount": 1
+      }
+    },
+    "comm.action.execute": {
+      "id": "00000000-0000-0000-0000-000000000009",
+      "type": "comm.action.execute",
+      "sourceDeviceId": "daemon",
+      "sourcePlatform": "daemon",
+      "target": {"type": "android", "deviceId": "pixel-7a"},
+      "timestamp": "2026-05-24T10:06:00Z",
+      "payload": {
+        "requestId": "req_xyz",
+        "eventId": "evt_abc123",
+        "contactName": "Alice",
+        "channel": "phone",
+        "action": "callBack",
+        "requiresConfirmation": true
+      }
+    }
+  },
+  "mac_to_daemon": {
+    "comm.action.request": {
+      "id": "00000000-0000-0000-0000-00000000000a",
+      "type": "comm.action.request",
+      "sourceDeviceId": "mac",
+      "sourcePlatform": "mac",
+      "target": {"type": "android", "deviceId": "pixel-7a"},
+      "timestamp": "2026-05-24T10:06:00Z",
+      "payload": {
+        "requestId": "req_xyz",
+        "eventId": "evt_abc123",
+        "contactName": "Alice",
+        "channel": "phone",
+        "action": "callBack",
+        "requiresConfirmation": true
+      }
+    },
+    "handoff.request_mac_to_android": {
+      "id": "00000000-0000-0000-0000-00000000000b",
+      "type": "handoff.request",
+      "sourceDeviceId": "mac",
+      "sourcePlatform": "mac",
+      "target": {"type": "android"},
+      "timestamp": "2026-05-24T10:07:00Z",
+      "payload": {"key": "text", "value": "Remember to update the README", "sourceDevice": "mac"}
+    },
+    "clipboard.update_mac_to_android": {
+      "id": "00000000-0000-0000-0000-00000000000c",
+      "type": "clipboard.update",
+      "sourceDeviceId": "mac",
+      "sourcePlatform": "mac",
+      "target": {"type": "android"},
+      "timestamp": "2026-05-24T10:08:00Z",
+      "payload": {"text": "Some copied text", "sourceDevice": "mac"}
+    }
   },
   "mac_to_client": {
     "session.start": {

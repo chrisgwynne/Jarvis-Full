@@ -36,6 +36,22 @@ final class DaemonAppBridge: ObservableObject {
     /// Parameters: (transferId, filename, mimeType, sizeBytes, openOnMac, suggestedAction, userVisibleName)
     var onFileTransferCreated: ((String, String, String, Int, Bool, String, String) -> Void)?
 
+    // MARK: - Cross-device callbacks
+
+    /// Called when a presence.update arrives from another device.
+    var onPresenceUpdate: (([String: Any]) -> Void)?
+    /// Called when a proactive.comm.prompt arrives (missed call / unread message nudge).
+    var onCommPrompt: (([String: Any]) -> Void)?
+    /// Called when a handoff.request arrives from another device.
+    /// Parameters: (key, serializedValue)
+    var onHandoffReceived: ((String, String) -> Void)?
+    /// Called when a clipboard.update arrives from another device.
+    var onClipboardUpdate: ((String) -> Void)?
+    /// Called when a notification.forward arrives from another device.
+    var onNotificationForward: (([String: Any]) -> Void)?
+    /// Called when a context.update arrives from another device.
+    var onContextUpdate: (([String: Any]) -> Void)?
+
     private var authToken: String? {
         Keychain.get(KeychainAccount.gatewayToken)
     }
@@ -297,6 +313,66 @@ final class DaemonAppBridge: ObservableObject {
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "correlationId": routeId,
             "payload": ["reason": reason, "source": "mac.brain"]
+        ]
+        send(envelope)
+    }
+
+    func sendCommActionRequest(
+        requestId: String,
+        eventId: String,
+        contactName: String,
+        channel: String,
+        action: String,
+        targetDeviceId: String
+    ) {
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "comm.action.request",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": ["type": "android", "deviceId": targetDeviceId],
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "correlationId": requestId,
+            "payload": [
+                "requestId": requestId,
+                "eventId": eventId,
+                "contactName": contactName,
+                "channel": channel,
+                "action": action,
+                "requiresConfirmation": true
+            ]
+        ]
+        send(envelope)
+    }
+
+    func sendHandoffRequest(key: String, value: String, targetDeviceId: String? = nil) {
+        let target: [String: Any] = targetDeviceId != nil
+            ? ["type": "android", "deviceId": targetDeviceId!]
+            : ["type": "broadcast"]
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "handoff.request",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": target,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "payload": ["key": key, "value": value, "sourceDevice": "mac"]
+        ]
+        send(envelope)
+    }
+
+    func sendClipboardUpdate(text: String, targetDeviceId: String? = nil) {
+        let target: [String: Any] = targetDeviceId != nil
+            ? ["type": "android", "deviceId": targetDeviceId!]
+            : ["type": "broadcast"]
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "clipboard.update",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": target,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "payload": ["text": text, "sourceDevice": "mac"]
         ]
         send(envelope)
     }

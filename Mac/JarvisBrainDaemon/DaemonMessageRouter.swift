@@ -52,6 +52,8 @@ final class DaemonMessageRouter {
                 conn: conn, capabilities: capabilities
             )
             routerLogger.info("router: client registered id=\(id) platform=\(platform) deviceId=\(deviceId)")
+            // Update DeviceRegistry
+            DeviceRegistry.shared.markConnected(deviceId)
             // Drain offline queue for Mac app
             if platform == "mac" {
                 let pending = DaemonOfflineQueue.shared.drain()
@@ -70,6 +72,8 @@ final class DaemonMessageRouter {
             guard let self else { return }
             if let c = self.clients.removeValue(forKey: id) {
                 routerLogger.info("router: client unregistered id=\(id) platform=\(c.platform)")
+                // Update DeviceRegistry
+                DeviceRegistry.shared.markDisconnected(c.deviceId, error: nil)
             }
         }
     }
@@ -103,8 +107,13 @@ final class DaemonMessageRouter {
             // Dispatch by type
             switch envelope.type {
 
-            // Presence updates: consume + broadcast to others
+            // Presence updates: store in PresenceStore then broadcast to others
             case "presence.update":
+                PresenceStore.shared.update(
+                    deviceId: envelope.sourceDeviceId,
+                    platform: envelope.sourcePlatform,
+                    fields: envelope.payload.objectValue ?? [:]
+                )
                 self.broadcastExcluding(envelope, excludingClientId: fromClientId)
                 self.routedMessageCount += 1
 
@@ -195,6 +204,93 @@ final class DaemonMessageRouter {
                 } else if let clientId = clients.first(where: { $0.value.platform == "android" })?.key {
                     deliver(envelope, to: clientId)
                     self.routedMessageCount += 1
+                }
+
+            // Context update — store in ContextStore, route to Mac
+            case "context.update":
+                if let key = envelope.payload.objectValue?["key"]?.stringValue,
+                   let value = envelope.payload.objectValue?["value"] {
+                    ContextStore.shared.set(key: key, value: value,
+                                            sourceDeviceId: envelope.sourceDeviceId)
+                }
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            // Communication events from Android watchdog
+            case "comm.event.received":
+                self.handleCommEventReceived(envelope)
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            case "comm.event.resolved":
+                if let eid = envelope.payload.objectValue?["eventId"]?.stringValue,
+                   let stateStr = envelope.payload.objectValue?["state"]?.stringValue,
+                   let state = CommEventState(rawValue: stateStr) {
+                    CommunicationWatchdogStore.shared.resolve(eventId: eid, state: state)
+                }
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            // Comm action: Mac → daemon → Android execution
+            case "comm.action.request":
+                self.routeCommAction(envelope, fromClientId: fromClientId)
+
+            case "comm.action.execute":
+                // Target Android device
+                let deviceId = envelope.payload.objectValue?["targetDeviceId"]?.stringValue
+                if let did = deviceId, let cid = clientId(forDeviceId: did, platform: "android") {
+                    deliver(envelope, to: cid)
+                    self.routedMessageCount += 1
+                } else if let cid = clients.first(where: { $0.value.platform == "android" })?.key {
+                    deliver(envelope, to: cid)
+                    self.routedMessageCount += 1
+                }
+
+            case "comm.action.result":
+                // Android result → Mac
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            // Notification forwarding
+            case "notification.forward":
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            // Handoff
+            case "handoff.request":
+                if let key = envelope.payload.objectValue?["key"]?.stringValue,
+                   let value = envelope.payload.objectValue?["value"] {
+                    ContextStore.shared.set(key: key, value: value,
+                                            sourceDeviceId: envelope.sourceDeviceId,
+                                            ttlSeconds: 86400)
+                }
+                switch envelope.target {
+                case .macApp:
+                    self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+                case .android(let did):
+                    if let cid = clientId(forDeviceId: did, platform: "android") {
+                        deliver(envelope, to: cid); self.routedMessageCount += 1
+                    }
+                case .windows(let did):
+                    if let cid = clientId(forDeviceId: did, platform: "windows") {
+                        deliver(envelope, to: cid); self.routedMessageCount += 1
+                    }
+                default:
+                    self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+                }
+
+            case "handoff.result":
+                self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+
+            // Clipboard
+            case "clipboard.update":
+                ContextStore.shared.set(key: ContextStore.lastClipboard,
+                                        value: envelope.payload,
+                                        sourceDeviceId: envelope.sourceDeviceId)
+                switch envelope.target {
+                case .macApp:
+                    self.routeToMacOrQueue(envelope, fromClientId: fromClientId)
+                case .android(let did):
+                    if let cid = clientId(forDeviceId: did, platform: "android") {
+                        deliver(envelope, to: cid); self.routedMessageCount += 1
+                    }
+                default:
+                    self.broadcastExcluding(envelope, excludingClientId: fromClientId)
                 }
 
             // Unknown: increment counter, log, ignore
@@ -303,6 +399,59 @@ final class DaemonMessageRouter {
         } else {
             routerLogger.warning("router: execution.request — no Android client connected, NACKing Mac (correlationId=\(env.correlationId ?? "?"))")
             sendNack(to: fromClientId, reason: "no_android_device", correlationId: env.correlationId)
+        }
+    }
+
+    // MARK: - Comm event helpers
+
+    private func handleCommEventReceived(_ env: DaemonMessageEnvelope) {
+        guard let obj = env.payload.objectValue else { return }
+        let eventId    = obj["eventId"]?.stringValue ?? UUID().uuidString
+        let channelStr = obj["channel"]?.stringValue ?? "phone"
+        guard let channel = CommChannel(rawValue: channelStr) else { return }
+        let state        = CommEventState(rawValue: obj["state"]?.stringValue ?? "missed") ?? .missed
+        let contactName  = obj["contactName"]?.stringValue ?? "Unknown"
+        let contactHandle = obj["contactHandle"]?.stringValue ?? ""
+        let sourceApp    = obj["sourceApp"]?.stringValue ?? ""
+        let snippet: String? = {
+            guard let s = obj["snippet"]?.stringValue,
+                  CommunicationWatchdogStore.shared.snippetRetentionSeconds > 0 else { return nil }
+            return s
+        }()
+        let event = CommEvent(
+            eventId:       eventId,
+            channel:       channel,
+            direction:     obj["direction"]?.stringValue ?? "incoming",
+            state:         state,
+            contactName:   contactName,
+            contactHandle: contactHandle,
+            receivedAt:    Date(),
+            snippet:       snippet,
+            sourceApp:     sourceApp,
+            lastPromptedAt: nil,
+            promptCount:   0,
+            expiresAt:     Date().addingTimeInterval(14400)  // 4 hours
+        )
+        CommunicationWatchdogStore.shared.ingest(event)
+    }
+
+    private func routeCommAction(_ env: DaemonMessageEnvelope, fromClientId: String) {
+        // Mac requests a comm action; daemon forwards to Android
+        let deviceId = env.payload.objectValue?["targetDeviceId"]?.stringValue
+        let execute = DaemonMessageEnvelope.make(
+            type: "comm.action.execute",
+            target: deviceId.map { .android(deviceId: $0) } ?? .android(deviceId: nil),
+            payload: env.payload,
+            correlationId: env.correlationId
+        )
+        if let did = deviceId, let cid = clientId(forDeviceId: did, platform: "android") {
+            deliver(execute, to: cid)
+            routedMessageCount += 1
+        } else if let cid = clients.first(where: { $0.value.platform == "android" })?.key {
+            deliver(execute, to: cid)
+            routedMessageCount += 1
+        } else {
+            sendNack(to: fromClientId, reason: "android_unavailable", correlationId: env.correlationId)
         }
     }
 

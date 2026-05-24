@@ -60,13 +60,19 @@ final class DaemonOfflineQueue {
     /// Everything NOT in this set is silently dropped when Mac is offline.
     private static let replaySafeTypes: Set<String> = [
         "transcript.final",
-        "execution.result",     // canonical canonical result type
+        "execution.result",     // canonical result type
         "tool.result",          // legacy alias — kept for backward compat
         "command.result",       // legacy alias — kept for backward compat
         "error.report",
         "android.event",        // phone events (calls, SMS, battery) — informational
         "remote.action.result", // Mac result that Android missed; safe to re-deliver on reconnect
         "file.transfer.created", // file notification Mac missed while offline
+        "comm.event.received",  // missed communication event — Mac may have been offline
+        "comm.action.result",   // Android comm action result — safe to surface to Mac on reconnect
+        "notification.forward", // notification from Android — Mac may have been offline
+        "handoff.request",      // cross-device handoff — context survives reconnect
+        "handoff.result",       // handoff acknowledgement
+        "context.update",       // cross-device context — 24h TTL, safe to replay
     ]
 
     /// Types that are explicitly UNSAFE to replay and should NEVER be queued,
@@ -83,6 +89,9 @@ final class DaemonOfflineQueue {
         "transcript.partial",
         "proactive.notify",
         "heartbeat", "heartbeat.android", "ping", "pong",
+        "clipboard.update",    // stale clipboard is confusing
+        "comm.action.execute", // would re-execute comms action
+        "comm.action.request", // stale request
     ]
 
     // MARK: - Enqueue

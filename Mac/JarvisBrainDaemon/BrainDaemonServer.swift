@@ -11,6 +11,7 @@ final class BrainDaemonServer {
     private let serverLog = Logger(subsystem: "com.jarvis.brain", category: "server")
     private let networkQueue = DispatchQueue(label: "com.jarvis.brain.server", qos: .utility)
     private var listener: NWListener?
+    private var isRunning = false
 
     let port: Int
 
@@ -63,11 +64,20 @@ final class BrainDaemonServer {
         }
 
         listener?.start(queue: networkQueue)
+        startProactiveTicker()
     }
 
     func stop() {
         listener?.cancel()
         listener = nil
+    }
+
+    private func startProactiveTicker() {
+        networkQueue.asyncAfter(deadline: .now() + 60) { [weak self] in
+            guard let self else { return }
+            ProactiveCoordinator.shared.tick(router: DaemonMessageRouter.shared)
+            self.startProactiveTicker()
+        }
     }
 
     // MARK: - HTTP accumulation
@@ -397,6 +407,70 @@ final class BrainDaemonServer {
             let transferId = String(path.dropFirst("/v1/files/".count))
             FileTransferStore.shared.delete(transferId: transferId)
             send(conn, statusCode: 200, body: toJSON(["deleted": true]))
+
+        case ("GET", "/v1/devices/presence"):
+            let presenceList = PresenceStore.shared.allPresence
+            let iso = ISO8601DateFormatter()
+            let presenceArray: [[String: Any]] = presenceList.map { p in
+                var dict: [String: Any] = [
+                    "deviceId": p.deviceId,
+                    "platform": p.platform,
+                    "isListening": p.isListening,
+                    "isSpeaking": p.isSpeaking,
+                    "isScreenLocked": p.isScreenLocked,
+                    "isAppForeground": p.isAppForeground,
+                    "hasHeadset": p.hasHeadset,
+                    "activityState": p.activityState,
+                    "focusMode": p.focusMode,
+                    "updatedAt": iso.string(from: p.updatedAt)
+                ]
+                if let bp = p.batteryPercent { dict["batteryPercent"] = bp }
+                if let ic = p.isCharging { dict["isCharging"] = ic }
+                return dict
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: presenceArray) {
+                send(conn, statusCode: 200, body: data)
+            } else {
+                send(conn, statusCode: 200, body: Data("[]".utf8))
+            }
+
+        case ("GET", "/v1/context"):
+            let contextMap = ContextStore.shared.getAll()
+            let iso2 = ISO8601DateFormatter()
+            let result2 = contextMap.values.map { entry -> [String: Any] in
+                [
+                    "key": entry.key,
+                    "sourceDeviceId": entry.sourceDeviceId,
+                    "createdAt": iso2.string(from: entry.createdAt),
+                    "expiresAt": iso2.string(from: entry.expiresAt)
+                ]
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: result2) {
+                send(conn, statusCode: 200, body: data)
+            } else {
+                send(conn, statusCode: 200, body: Data("[]".utf8))
+            }
+
+        case ("GET", "/v1/watchdog/status"):
+            let events = CommunicationWatchdogStore.shared.allActiveEvents()
+            let iso3 = ISO8601DateFormatter()
+            let result3 = events.map { ev -> [String: Any] in
+                var dict: [String: Any] = [
+                    "id": ev.id,
+                    "channel": ev.channel.rawValue,
+                    "contactHandle": ev.contactHandle,
+                    "state": ev.state.rawValue,
+                    "promptCount": ev.promptCount,
+                    "receivedAt": iso3.string(from: ev.receivedAt)
+                ]
+                if let s = ev.snippet { dict["snippet"] = s }
+                return dict
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: result3) {
+                send(conn, statusCode: 200, body: data)
+            } else {
+                send(conn, statusCode: 200, body: Data("[]".utf8))
+            }
 
         case ("GET", "/v1/router/diagnostics"):
             let snap = DaemonMessageRouter.shared.snapshot()
