@@ -1,120 +1,117 @@
 # Cross-Device QA Script
 
-Manual QA checklist for the Mac Brain ↔ Android/Windows sidecar path.
-Run against a real device before merging any cross-platform protocol change.
+Manual QA for the daemon-centric architecture.
+JarvisBrainDaemon must be running before any client can connect.
 
 ---
 
 ## Prerequisites
 
-| Item | Expected |
-|------|----------|
-| JarvisMac running on Mac | port 8765 listening |
-| Android device on same network/Tailscale | Jarvis app installed |
+| Item | Check |
+|------|-------|
+| JarvisBrainDaemon running on Mac | `curl http://localhost:8765/health` → `{"status":"ok"}` |
+| JarvisMac running | Connects to daemon at ws://127.0.0.1:8765/v1/mac/ws |
+| Android device on same network | Jarvis app installed |
 | Windows PC (optional) | Jarvis Windows app installed |
 
 ---
 
-## 1 — Pairing
+## 1 — Daemon health
 
-### 1a Android pairing
-
-1. Open Android → Settings → Mac Integration.
-2. Enter Mac's IP/hostname in the Gateway URL field (e.g. `http://192.168.1.5:8765`).
-3. On Mac: open Brain API settings → tap "Generate Pairing Code". Note the 6-digit code.
-4. Enter the 6-digit code in Android's Pairing Code field. Tap Pair.
-5. **Expected:** status changes to "Paired" within 3 seconds. No 400 error in logs.
-6. Confirm `gateway_paired_devices.json` on Mac contains the new device entry.
-
-### 1b Windows pairing
-
-1. Open Windows Jarvis Settings → Mac Integration.
-2. Enter Mac Gateway URL.
-3. Request pairing code on Mac, enter in Windows Settings.
-4. **Expected:** status shows "Connected" in the Windows tray.
+```
+curl http://localhost:8765/health
+```
+Expected: `{"status":"ok","daemon":true}`
 
 ---
 
-## 2 — Android STT → Mac Brain → Android TTS
+## 2 — Mac app connects to daemon
 
-1. Ensure Android is paired and status shows Connected.
-2. Say the wake word on Android.
-3. Ask: "What time is it?" (a simple factual query).
-4. **Expected:**
-   - Android shows "Listening" state.
-   - `[TRANSCRIPT_RAW]` logged in Android logcat.
-   - `sendTranscript` log appears: `"sendTranscript: what time is it"`.
-   - Mac logs `onTranscriptFinal` received, routes through brain pipeline.
-   - Mac sends `reply.final` frame back.
-   - Android `onReplyFinal` fires → `speakAndRecord` called.
-   - Android TTS speaks the reply.
-5. **Negative check:** if gateway is Disconnected, transcript is NOT sent — Android handles locally.
+1. Launch JarvisBrainDaemon (must be first).
+2. Launch JarvisMac.
+3. Check daemon diagnostics: `curl http://localhost:8765/v1/diagnostics`
+4. Expected: `connectedMacClients: 1` in router diagnostics.
 
 ---
 
-## 3 — Windows STT → Mac Brain → Windows TTS
+## 3 — Android pairing
 
-1. Ensure Windows is connected to Mac Gateway.
-2. Trigger a voice command on Windows ("What's on my calendar?").
-3. **Expected:**
-   - Windows sends `transcript.final` via `/v2/ws`.
-   - Mac's `MacBridgeProtocolV2.onInboundTranscript` fires.
-   - `handleRemoteTranscript` runs through Mac brain pipeline.
-   - `v2.pushReplyFinal(text:)` sends `reply.final` back.
-   - Windows TTS speaks the reply.
+1. Mac app: Settings → Mac Integration → "Generate Code".
+   Internally: `POST http://127.0.0.1:8765/v1/android/pair/code` → displays code.
+2. Android: Settings → Mac Integration → enter URL `http://[mac-ip]:8765` and 6-digit code.
+3. Android POSTs `http://[mac-ip]:8765/v1/android/pair`.
+4. Expected: Android status shows "Paired" within 3s.
+5. Verify: `curl -H "Authorization: Bearer <token>" http://localhost:8765/v1/devices` shows new device.
 
 ---
 
-## 4 — Mac proactive push → Android
+## 4 — Android STT → Mac brain → Android TTS
 
-1. On Mac, trigger a proactive event (e.g. a timer expiry or calendar alert).
-2. **Expected:** Android receives `proactive.notify` frame, `onProactiveNotify` fires, notification or TTS plays on Android.
-
----
-
-## 5 — Mac orchestrate.speak → Android
-
-1. On Mac, issue a voice command that results in an `orchestrate.speak` push.
-2. **Expected:** Android speaks the text via `speakAndRecord` (follows driving mode, barge-in, and conversation memory paths).
-
----
-
-## 6 — Disconnect / reconnect
-
-1. Kill network or move Android out of range.
-2. **Expected:** status transitions to Reconnecting, then back to Connected when network restores.
-3. Send a transcript while disconnected — verify it is handled locally (no crash, no silent drop).
+1. Android paired and connected (status = Connected).
+2. Trigger voice: "What time is it?"
+3. Log checks:
+   - Android: `[TRANSCRIPT_RAW]`
+   - Android: `sendTranscript:` log
+   - Android: machine transitions to Listening (local processing skipped)
+   - Daemon: `WS [android] type=transcript.final`
+   - Daemon router: `type=transcript.final → macApp`
+   - Mac: `DaemonAppBridge: received type=transcript.final`
+   - Mac: `handleRemoteTranscript` runs brain pipeline
+   - Mac: `DaemonAppBridge.sendReply()` sends `reply.final`
+   - Daemon: `type=reply.final → android`
+   - Android: `onReplyFinal` fires → `speakAndRecord()`
+4. Expected: Android TTS speaks the reply.
 
 ---
 
-## 7 — Re-pair flow
+## 5 — Windows STT → Mac brain → Windows TTS
 
-1. On Mac, revoke the Android device token.
-2. On Android, try to send a transcript.
-3. **Expected:** gateway receives 401 → status transitions to Unauthorized → Android surfaces re-pair prompt.
+1. Windows connected to daemon at `/v2/ws`.
+2. Trigger voice command.
+3. Expected: daemon routes transcript to Mac, Mac replies, Windows speaks.
 
 ---
 
-## 8 — Pairing code expiry
+## 6 — Mac app restart
 
-1. Generate a 6-digit pairing code on Mac.
-2. Wait 10 minutes without using it.
-3. Try to pair with the stale code.
-4. **Expected:** pairing returns error; new code required.
+1. Quit JarvisMac while Android is connected.
+2. Android sends a transcript.
+3. Daemon queues it (offline queue).
+4. Relaunch JarvisMac.
+5. Expected: Mac connects to daemon, offline queue drains, Mac processes queued transcript.
+
+---
+
+## 7 — Daemon restart
+
+1. Kill daemon while all clients connected.
+2. Android/Windows: status transitions to Reconnecting.
+3. Restart daemon.
+4. Clients reconnect automatically.
+5. Expected: after reconnect, full voice round-trip works again.
+
+---
+
+## 8 — Disconnect behavior
+
+1. Disconnect Android from network.
+2. Daemon: Android client removed on ping failure.
+3. Send transcript from Windows: routed to Mac, Mac replies, Windows speaks (no Android interference).
+4. Reconnect Android: Android reconnects and re-authenticates.
 
 ---
 
 ## Log grep targets
 
-| Event | Platform | Tag / message |
-|-------|----------|---------------|
-| STT complete | Android | `[TRANSCRIPT_RAW]` |
-| Transcript sent to Mac | Android | `sendTranscript:` |
-| Transcript received on Mac (Android) | Mac | `onTranscriptFinal` |
-| Transcript received on Mac (Windows) | Mac | `onInboundTranscript` |
-| Reply sent to Android | Mac | `reply.final` |
-| Reply received on Android | Android | `onReplyFinal` |
-| TTS started | Android | `[AUDIO_FOCUS_REQUEST]` |
-| Pairing success | Mac | `completePairing` |
-| Gateway connected | Android | `Connected to Mac Brain Gateway` |
-| Auth file collision check | Mac | verify only one process writes `gateway_paired_devices.json` |
+| Event | Platform | Tag / string |
+|-------|----------|--------------|
+| Daemon ready | Daemon | `JarvisBrainDaemon listening on port 8765` |
+| Mac connected | Mac | `DaemonAppBridge: connected to daemon` |
+| Transcript sent | Android | `sendTranscript:` |
+| Transcript received | Daemon | `WS [android] type=transcript.final` |
+| Routed to Mac | Daemon | `router: received type=transcript.final` |
+| Mac processes | Mac | `handleRemoteTranscript` |
+| Reply sent | Mac | `DaemonAppBridge send` |
+| Reply received | Android | `onReplyFinal` |
+| Android speaks | Android | `[AUDIO_FOCUS_REQUEST] speakAndRecord` |
+| Port conflict | Daemon | listen error on 8765 |

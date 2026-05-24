@@ -1,254 +1,189 @@
 # Cross-Device WebSocket Protocol
 
-Mac Brain (JarvisMac) owns port **8765** and exposes three WebSocket endpoints:
+## Architecture
 
-| Route | Client | Purpose |
-|-------|--------|---------|
-| `/v2/ws` | Windows | Full bidirectional bridge (MacBridgeProtocolV2) |
-| `/v1/windows/ws` | Windows | Compat alias → same MacBridgeProtocolV2 handler |
-| `/v1/android/ws` | Android | Android bidirectional bridge (GatewayAndroidConnector) |
+**JarvisBrainDaemon** is the permanent Jarvis runtime. It is the sole WebSocket authority.
+All client apps connect to the daemon. Apps are disposable frontends.
 
-JarvisBrainDaemon listens on port **8766** (internal IPC only; clients never connect here directly).
+```
+JarvisBrainDaemon (port 8765)
+├── Android (client)  → /v1/android/ws or /v2/ws
+├── Windows (client)  → /v2/ws
+├── Mac app (client)  → /v1/mac/ws
+```
+
+The daemon:
+- Owns port 8765
+- Owns pairing/auth
+- Owns device registry
+- Owns routing
+- Routes transcript.final → Mac app (brain intelligence)
+- Routes reply.final → originating device
+- Survives all app restarts
+
+The Mac app:
+- Connects to daemon at ws://127.0.0.1:8765/v1/mac/ws
+- Processes transcripts through the brain pipeline
+- Sends replies back through daemon
+- Is the intelligence engine, not the routing authority
 
 ---
 
-## Frame envelope
+## Pairing flow
 
-Every frame is a JSON text message (RFC 6455 opcode 0x01).
+### 1. Generate code (Mac app → daemon)
+```
+POST http://127.0.0.1:8765/v1/android/pair/code    (for Android)
+POST http://127.0.0.1:8765/v1/windows/pair/code   (for Windows)
+→ { "code": "482916", "expiresAt": "2026-05-24T12:05:00Z" }
+```
+Mac app displays the code. Code expires in 5 minutes.
 
-```json
-{
-  "type": "<frame-type>",
-  ...payload fields
-}
+### 2. Exchange code (client → daemon)
+```
+POST http://[daemon-host]:8765/v1/android/pair
+Body: { "code": "482916", "deviceId": "pixel-8-pro", "deviceName": "My Phone" }
+→ { "sessionToken": "<opaque>" }
+```
+
+### 3. Connect WebSocket
+```
+GET ws://[daemon-host]:8765/v2/ws
+Headers:
+  Authorization: Bearer <sessionToken>
+  Upgrade: websocket
+  X-Platform: android   (or windows)
 ```
 
 ---
 
-## Client → Mac frame types
+## WebSocket routes
 
-### `transcript.final`
-Client has a complete utterance for the Mac brain to process.
+| Route | Platform | Notes |
+|-------|----------|-------|
+| `/v2/ws` | All | Canonical unified route |
+| `/v1/android/ws` | Android | Platform alias |
+| `/v1/windows/ws` | Windows | Platform alias (compat) |
+| `/v1/mac/ws` | Mac app | Internal Mac connection |
 
+---
+
+## Frame types
+
+### Client → Daemon
+
+| Type | Description |
+|------|-------------|
+| `transcript.final` | Complete STT result for Mac brain processing |
+| `transcript.partial` | Streaming partial (best-effort, not queued) |
+| `device.hello` | First frame; identifies device/platform/version |
+| `heartbeat` | Keep-alive; daemon replies with `heartbeat.ack` |
+| `presence.update` | Device context (active app, window, etc.) |
+| `execution.result` | Result of a Mac-dispatched tool execution |
+| `capability.update` | Update device capability list |
+
+### Daemon → Client
+
+| Type | Description |
+|------|-------------|
+| `reply.final` | Complete brain reply targeting originating device |
+| `reply.partial` | Streaming token chunk |
+| `orchestrate.speak` | Request device to speak text via its TTS |
+| `orchestrate.silent` | Request device to suppress local TTS |
+| `proactive.notify` | Push notification from Mac brain |
+| `heartbeat.ack` | Response to heartbeat |
+| `hello.ack` | Acknowledges device.hello |
+| `nack` | Routing failure (brain unavailable, no target device) |
+| `error` | Protocol or processing error |
+
+---
+
+## Key frame schemas
+
+### transcript.final (client → daemon)
 ```json
 {
   "type": "transcript.final",
   "messageId": "<uuid>",
   "transcript": "turn on the kitchen lights",
-  "deviceId": "android-device-name",
+  "deviceId": "pixel-8-pro",
   "timestamp": 1716000000000
 }
 ```
 
-Fields:
-- `messageId` — caller-generated UUID; echoed back in `reply.final.routeId`
-- `transcript` — the spoken text, already STT-processed
-- `deviceId` — stable identifier for this device
-- `timestamp` — Unix epoch ms
-
-### `transcript.partial`
-Streaming partial transcript (informational; Mac records but does not process).
-
+### reply.final (daemon → client, via Mac)
 ```json
 {
-  "type": "transcript.partial",
-  "messageId": "<uuid>",
-  "transcript": "turn on the",
-  "deviceId": "android-device-name"
+  "type": "reply.final",
+  "routeId": "<same as messageId>",
+  "text": "Turning on the kitchen lights."
 }
 ```
 
-### `presence.update` (Windows)
-Windows presence snapshot pushed to Mac.
-
+### orchestrate.speak (daemon → client)
 ```json
 {
-  "type": "presence.update",
-  "deviceId": "windows-pc",
-  "activeApp": "cursor",
-  "windowTitle": "JarvisRuntime.kt — Jarvis-Full",
-  "activeCodingFile": "JarvisRuntime.kt",
-  "browserURL": "",
-  "foregroundApp": "cursor"
+  "type": "orchestrate.speak",
+  "text": "Your standup starts in five minutes."
 }
 ```
 
-### `lease.request` (Windows)
-Request TTS speaker lease from Mac.
-
+### proactive.notify (daemon → client)
 ```json
 {
-  "type": "lease.request",
-  "deviceId": "windows-pc",
-  "speechId": "<uuid>"
+  "type": "proactive.notify",
+  "title": "Standup soon",
+  "body": "Your 9am standup starts in five minutes.",
+  "urgency": "high"
 }
 ```
 
-### `device.hello`
-First frame after WebSocket upgrade; identifies device.
+### heartbeat (client → daemon)
+```json
+{
+  "type": "heartbeat",
+  "deviceId": "pixel-8-pro",
+  "timestamp": 1716000030000
+}
+```
 
+### device.hello (client → daemon)
 ```json
 {
   "type": "device.hello",
   "deviceId": "my-windows-pc",
   "deviceName": "Studio Laptop",
   "platform": "windows",
-  "appVersion": "2.3.1"
-}
-```
-
-### `replay.begin` / `replay.end` (Windows)
-Brackets a block of history replay frames. Mac ingests but does not produce live responses.
-
-```json
-{ "type": "replay.begin" }
-{ "type": "replay.end" }
-```
-
-### `execution.result` (Windows)
-Result of a remote execution request dispatched by Mac.
-
-```json
-{
-  "type": "execution.result",
-  "requestId": "<uuid>",
-  "ok": true,
-  "status": "done",
-  "message": "",
-  "payload": {}
-}
-```
-
-### `heartbeat`
-Keep-alive ping. Mac ignores but records the timestamp.
-
-```json
-{
-  "type": "heartbeat",
-  "deviceId": "android-device-name",
-  "timestamp": 1716000000000
+  "appVersion": "2.3.1",
+  "protocolVersion": "2"
 }
 ```
 
 ---
 
-## Mac → Client frame types
+## Routing model
 
-### `reply.final`
-Complete response to a `transcript.final` request.
-
-```json
-{
-  "type": "reply.final",
-  "routeId": "<same uuid as transcript.final messageId>",
-  "text": "Turning on the kitchen lights."
-}
+```
+Android          Daemon              Mac app
+   │                │                   │
+   │─ transcript.final ──────────────────►│
+   │                │                   │ (handleRemoteTranscript)
+   │                │                   │ (brain pipeline)
+   │◄─ reply.final ─────────────────────│
+   │  (speaks it)   │                   │
 ```
 
-### `reply.partial`
-Streaming token chunk (before `reply.final` arrives).
-
-```json
-{
-  "type": "reply.partial",
-  "routeId": "<uuid>",
-  "text": "Turning on"
-}
-```
-
-### `orchestrate.speak`
-Mac requests the client to speak this text using its local TTS.
-
-```json
-{
-  "type": "orchestrate.speak",
-  "text": "Good morning. Your 9am standup starts in five minutes."
-}
-```
-
-### `orchestrate.silent`
-Mac requests the client to suppress its local TTS for the current turn.
-
-```json
-{
-  "type": "orchestrate.silent",
-  "reason": "mac_speaking"
-}
-```
-
-### `proactive.notify`
-Mac pushes a proactive notification to the client.
-
-```json
-{
-  "type": "proactive.notify",
-  "title": "Standup in 5 minutes",
-  "body": "Your 9am standup starts in five minutes.",
-  "urgency": "high"
-}
-```
-
-### `session.start`
-Sent immediately after WebSocket upgrade to confirm connection.
-
-```json
-{
-  "type": "session.start",
-  "sessionId": "<uuid>",
-  "serverVersion": "mac-brain-1.0"
-}
-```
-
-### `lease.grant` / `lease.denied` (Windows)
-Response to a `lease.request`.
-
-```json
-{ "type": "lease.grant",  "speechId": "<uuid>" }
-{ "type": "lease.denied", "speechId": "<uuid>", "reason": "mac_owns_speaker" }
-```
-
-### `hello.ack` (Windows)
-Acknowledges a `device.hello`.
-
-```json
-{
-  "type": "hello.ack",
-  "deviceId": "my-windows-pc",
-  "sessionId": "<uuid>"
-}
-```
-
----
-
-## Pairing flow
-
-### Step 1 — Generate code (on Mac)
-```
-POST /v1/windows/pair/code   (or /v1/android/pair/code)
-→ { "code": "482916" }
-```
-
-### Step 2 — Exchange code (from client)
-```
-POST /v1/windows/pair        (or /v1/android/pair)
-Body: { "code": "482916", "deviceId": "...", "deviceName": "..." }
-→ { "sessionToken": "<opaque-token>" }
-```
-
-### Step 3 — Connect WebSocket
-```
-GET /v2/ws   (Windows)  or  GET /v1/android/ws  (Android)
-Headers: Authorization: Bearer <sessionToken>
-         Upgrade: websocket
-```
+If Mac app is offline when transcript arrives:
+- Daemon queues the frame (DaemonOfflineQueue, replay-safe types only)
+- Mac app receives the queue drain on reconnect
+- Daemon sends `nack { reason: "brain_unavailable" }` to originating device
 
 ---
 
 ## Auth file ownership
 
-| Process | Auth file |
-|---------|-----------|
-| `JarvisMac` (port 8765) | `~/Library/Application Support/JarvisMac/gateway_paired_devices.json` |
-| `JarvisBrainDaemon` (port 8766) | `~/Library/Application Support/JarvisMac/daemon_paired_devices.json` |
+| Process | File |
+|---------|------|
+| JarvisBrainDaemon (port 8765) | `~/Library/Application Support/JarvisMac/gateway_paired_devices.json` |
 
-Client-facing auth always goes through JarvisMac. The daemon file is for internal daemon-managed pairings only.
+The daemon is the sole auth authority. JarvisMac reads device state via daemon HTTP API.

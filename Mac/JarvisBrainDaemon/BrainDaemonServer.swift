@@ -19,7 +19,7 @@ final class BrainDaemonServer {
            let p = Int(envPort), p > 0, p < 65536 {
             port = p
         } else {
-            port = 8766   // JarvisMac owns 8765; daemon listens on 8766 for internal IPC
+            port = 8765
         }
         DaemonDiagnostics.shared.port = port
     }
@@ -132,6 +132,32 @@ final class BrainDaemonServer {
         if path == "/health" || path == "/brain/health" {
             let resp = makeHealthJSON()
             send(conn, statusCode: 200, body: resp)
+            return
+        }
+
+        // ── Unified /v2/ws route (canonical for all platforms) ──────────────
+        if path == "/v2/ws" && headers["upgrade"]?.lowercased() == "websocket" {
+            let bearer = extractBearer(headers)
+            if !DaemonAuthStore.shared.isAuthorized(bearer) {
+                DaemonDiagnostics.shared.unauthorizedAttempts += 1
+                send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
+                return
+            }
+            guard let clientKey = headers["sec-websocket-key"] else {
+                send(conn, statusCode: 400, body: errorJSON("Missing Sec-WebSocket-Key"))
+                return
+            }
+            let acceptKey = computeWSAcceptKey(clientKey)
+            let upgradeResp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
+            conn.send(content: Data(upgradeResp.utf8), completion: .contentProcessed { _ in })
+            let platform = (headers["x-platform"] ?? "").lowercased() == "windows" ? "windows" : "android"
+            if platform == "windows" {
+                DaemonDiagnostics.shared.connectedWindowsClients += 1
+                startWindowsWebSocketSession(conn: conn, platform: "windows", deviceId: extractDeviceId(headers) ?? UUID().uuidString)
+            } else {
+                DaemonDiagnostics.shared.connectedAndroidClients += 1
+                startAndroidWebSocketSession(conn: conn, platform: platform, deviceId: extractDeviceId(headers) ?? UUID().uuidString)
+            }
             return
         }
 
@@ -273,7 +299,7 @@ final class BrainDaemonServer {
                 send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
                 return
             }
-            let dict: [String: Any] = ["sessionToken": rawToken]
+            let dict: [String: Any] = ["deviceToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
         case ("POST", "/v1/windows/pair"):
@@ -284,6 +310,28 @@ final class BrainDaemonServer {
             }
             guard let rawToken = DaemonAuthStore.shared.completePairing(
                 code: req.code, deviceId: req.deviceId, deviceName: req.deviceName, platform: "windows") else {
+                send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
+                return
+            }
+            let dict: [String: Any] = ["deviceToken": rawToken]
+            send(conn, statusCode: 200, body: toJSON(dict))
+
+        case ("POST", "/v1/mac/pair/code"):
+            let code = DaemonAuthStore.shared.generatePairingCode()
+            let dict: [String: Any] = [
+                "code": code.code,
+                "expiresAt": ISO8601DateFormatter().string(from: code.expiresAt)
+            ]
+            send(conn, statusCode: 200, body: toJSON(dict))
+
+        case ("POST", "/v1/mac/pair"):
+            struct MacPairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
+            guard let req = try? JSONDecoder().decode(MacPairReq.self, from: body) else {
+                send(conn, statusCode: 400, body: errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
+                return
+            }
+            guard let rawToken = DaemonAuthStore.shared.completePairing(
+                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName, platform: "mac") else {
                 send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
                 return
             }
@@ -412,10 +460,8 @@ final class BrainDaemonServer {
                     // Task 4c: record lastSeen on any frame
                     DaemonAuthStore.shared.recordSeen(deviceId: clientId)
                     if let text = Self.parseWebSocketFrame(bytes) {
-                        // Also route through the message router for cross-device delivery
-                        if let rawData = text.data(using: .utf8) {
-                            DaemonMessageRouter.shared.route(rawData: rawData, fromClientId: clientId)
-                        }
+                        // Wrap raw client frame in DaemonMessageEnvelope and route to other clients.
+                        self.wrapAndRoute(rawJSON: text, fromClientId: clientId, platform: platform)
                         self.dispatchAndroidMessage(text: text, clientId: clientId, conn: conn, platform: platform)
                     }
 
@@ -491,6 +537,44 @@ final class BrainDaemonServer {
             DaemonDiagnostics.shared.connectedAndroidClients = max(0, DaemonDiagnostics.shared.connectedAndroidClients - 1)
         }
         serverLog.info("WS [\(platform)] \(clientId) disconnected")
+    }
+
+    // MARK: - Raw frame → envelope wrapper
+
+    /// Parses a raw client JSON frame, wraps it in a DaemonMessageEnvelope, and routes
+    /// it via DaemonMessageRouter. Android and Windows send flat JSON (not envelopes).
+    private func wrapAndRoute(rawJSON: String, fromClientId: String, platform: String) {
+        guard let data = rawJSON.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+        let type = raw["type"] as? String ?? "unknown"
+        let deviceId = raw["deviceId"] as? String ?? fromClientId
+        let correlationId = raw["messageId"] as? String ?? raw["routeId"] as? String
+
+        // Route everything device → Mac except replies/orchestration (Mac → device)
+        let targetType: String
+        switch type {
+        case "reply.final", "reply.partial", "orchestrate.speak", "orchestrate.silent", "proactive.notify":
+            targetType = platform
+        default:
+            targetType = "macApp"
+        }
+
+        var envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": type,
+            "sourceDeviceId": deviceId,
+            "sourcePlatform": platform,
+            "target": ["type": targetType],
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "payload": raw
+        ]
+        if let cid = correlationId { envelope["correlationId"] = cid }
+
+        if let envelopeData = try? JSONSerialization.data(withJSONObject: envelope) {
+            DaemonMessageRouter.shared.route(rawData: envelopeData, fromClientId: fromClientId)
+        }
     }
 
     // MARK: - WebSocket frame codec (RFC 6455)

@@ -133,7 +133,7 @@ struct Preferences: Codable, Equatable {
     // ── JarvisBrainDaemon ────────────────────────────────────────────────────
     /// When true, the app defers port 8765 to the background LaunchAgent daemon
     /// instead of hosting the server in-process.
-    var daemonEnabled: Bool = false
+    var daemonEnabled: Bool = true
     /// When daemonEnabled is true AND the daemon is not running, fall back to
     /// starting the in-app server instead of staying offline.
     var legacyBrainServerEnabled: Bool = false
@@ -654,7 +654,7 @@ struct Preferences: Codable, Equatable {
         legacyAndroidPortEnabled = try c.decodeIfPresent(Bool.self,   forKey: .legacyAndroidPortEnabled) ?? false
 
         // JarvisBrainDaemon
-        daemonEnabled                          = try c.decodeIfPresent(Bool.self, forKey: .daemonEnabled)                          ?? false
+        daemonEnabled                          = try c.decodeIfPresent(Bool.self, forKey: .daemonEnabled)                          ?? true
         legacyBrainServerEnabled               = try c.decodeIfPresent(Bool.self, forKey: .legacyBrainServerEnabled)               ?? false
         speakRemoteRepliesOnMac                = try c.decodeIfPresent(Bool.self, forKey: .speakRemoteRepliesOnMac)                ?? false
         showRemoteActivityInMacUI              = try c.decodeIfPresent(Bool.self, forKey: .showRemoteActivityInMacUI)              ?? true

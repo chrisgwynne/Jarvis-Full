@@ -2,20 +2,22 @@ import CryptoKit
 import Foundation
 import Network
 
-/// Unified Mac Brain Gateway — single TCP server on port 8765 (default).
+/// Mac Brain HTTP server — camera and brain-context HTTP routes only.
 ///
-/// Route table (highest priority first):
+/// In the daemon-centric architecture, JarvisBrainDaemon (port 8765) owns all
+/// external WebSocket connections (Android /v1/android/ws, Windows /v2/ws) and
+/// all device pairing. This server runs on port 8765 only when the daemon is
+/// not present (legacy / standalone mode). When the daemon is running, this
+/// server is not started.
+///
+/// Route table:
 ///
 ///   GET  /health          — liveness (no auth required)
 ///   GET  /brain/health    — alias for /health
 ///   GET  /v1/status       — gateway status (auth required)
-///   POST /v1/android/pair/code — generate pairing code (auth required)
-///   POST /v1/android/pair — complete pairing (auth required)
-///   GET  /v1/android/ws   — WebSocket upgrade → GatewayAndroidConnector
 ///   GET  /v1/devices      — paired device list (auth required)
 ///   POST /v1/auth/rotate  — rotate gateway token (auth required)
 ///   GET  /v1/diagnostics  — diagnostics JSON (auth required)
-///   GET|POST /v2/*        — Windows sidecar protocol (MacBridgeProtocolV2)
 ///   GET|POST /camera/*    — camera streaming (MacCameraHttpRoutes)
 ///   POST /brain/context   — Brain context assembly (auth required)
 ///   POST /brain/interactions — Brain learning events (auth required)
@@ -32,12 +34,6 @@ final class MacBrainServer {
     var cameraRoutes: MacCameraHttpRoutes?
     /// When true, camera routes use the same Bearer token as brain routes.
     var requireCameraToken = true
-
-    /// V2 distributed brain routes (Windows sidecar protocol).
-    var v2Routes: MacBridgeProtocolV2?
-
-    /// Android WebSocket connector for /v1/android/ws upgrades.
-    var androidConnector: GatewayAndroidConnector?
 
     init(handler: BrainHTTPHandler, diagnostics: GatewayDiagnostics) {
         self.handler = handler
@@ -104,7 +100,6 @@ final class MacBrainServer {
         listener = nil
         Task { @MainActor [weak self] in
             self?.cameraRoutes?.stopAll()
-            self?.v2Routes?.stopAll()
             self?.diagnostics.markStopped()
         }
     }
@@ -203,33 +198,6 @@ final class MacBrainServer {
             return
         }
 
-        // ── V2 distributed brain routes (/v2/*) ─────────────────────────
-        if path.hasPrefix("/v2/") {
-            let bearer = headers["authorization"]?
-                .replacingOccurrences(of: "Bearer ", with: "")
-                .trimmingCharacters(in: .whitespaces) ?? ""
-            if let token = diagnostics.authToken, !token.isEmpty {
-                if !GatewayAuthStore.shared.isAuthorized(bearer) {
-                    diagnostics.recordUnauthorized(isWebSocket: headers["upgrade"]?.lowercased() == "websocket")
-                    send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
-                    return
-                }
-            }
-            guard let routes = v2Routes else {
-                send(conn, statusCode: 503, body: errorJSON("Distributed brain not enabled"))
-                return
-            }
-            if path == "/v2/ws" && headers["upgrade"]?.lowercased() == "websocket" {
-                routes.handleWebSocketUpgrade(headers: headers, conn: conn)
-                diagnostics.recordRequest(path: path, statusCode: 101)
-                return
-            }
-            let (status, respBody, ct) = await routes.handle(method: method, path: path, headers: headers, body: body, conn: conn)
-            sendBinary(conn, statusCode: status, body: respBody, contentType: ct)
-            diagnostics.recordRequest(path: path, statusCode: status)
-            return
-        }
-
         // ── Camera routes (/camera/*) ────────────────────────────────────
         if path.hasPrefix("/camera/") {
             if requireCameraToken, let token = diagnostics.authToken, !token.isEmpty {
@@ -288,43 +256,8 @@ final class MacBrainServer {
                                 headers: [String: String], body: Data,
                                 conn: NWConnection) async -> (Int, Data) {
 
-        // ── WebSocket upgrade for Android ────────────────────────────────
-        if path == "/v1/android/ws" && headers["upgrade"]?.lowercased() == "websocket" {
-            guard let androidConn = androidConnector else {
-                return (503, errorJSON("Android connector not enabled"))
-            }
-            guard let clientKey = headers["sec-websocket-key"] else {
-                return (400, errorJSON("Missing Sec-WebSocket-Key"))
-            }
-            let acceptKey = Self.computeWSAcceptKey(clientKey)
-            let upgradeResp = "HTTP/1.1 101 Switching Protocols\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
-            conn.send(content: Data(upgradeResp.utf8), completion: .contentProcessed { _ in })
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .failed, .cancelled:
-                    Task { @MainActor in }  // connector handles cleanup in receiveLoop
-                default: break
-                }
-            }
-            androidConn.acceptConnection(conn, clientId: UUID().uuidString)
-            diagnostics.recordRequest(path: path, statusCode: 101)
-            return (0, Data())  // 0 = connection handed off, do not cancel
-        }
-
-        // ── WebSocket upgrade for Windows (/v1/windows/ws compatibility) ─
-        // Windows clients that have not yet updated to /v2/ws land here.
-        // Route them directly into MacBridgeProtocolV2 — identical handling.
-        if path == "/v1/windows/ws" && headers["upgrade"]?.lowercased() == "websocket" {
-            guard let routes = v2Routes else {
-                return (503, errorJSON("Distributed brain not enabled"))
-            }
-            routes.handleWebSocketUpgrade(headers: headers, conn: conn)
-            diagnostics.recordRequest(path: path, statusCode: 101)
-            return (0, Data())
-        }
+        // External device WebSocket connections (/v1/android/ws, /v1/windows/ws) are now
+        // handled exclusively by JarvisBrainDaemon on port 8765. This server is loopback-only.
 
         switch (method, path) {
 
@@ -344,49 +277,6 @@ final class MacBrainServer {
                 version: "2"
             )
             return (200, (try? JSONEncoder().encode(resp)) ?? Data())
-
-        // ── POST /v1/android/pair/code ───────────────────────────────────
-        case ("POST", "/v1/android/pair/code"):
-            let code = GatewayAuthStore.shared.generatePairingCode()
-            diagnostics.pairingCodeActive = true
-            struct CodeResp: Encodable { let code: String; let expiresAt: String }
-            let iso = ISO8601DateFormatter().string(from: code.expiresAt)
-            let resp = CodeResp(code: code.code, expiresAt: iso)
-            return (200, (try? JSONEncoder().encode(resp)) ?? Data())
-
-        // ── POST /v1/android/pair ────────────────────────────────────────
-        case ("POST", "/v1/android/pair"):
-            struct PairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
-            guard let req = try? JSONDecoder().decode(PairReq.self, from: body) else {
-                return (400, errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
-            }
-            guard let rawToken = GatewayAuthStore.shared.completePairing(
-                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName) else {
-                return (403, errorJSON("Invalid or expired pairing code"))
-            }
-            struct PairResp: Encodable { let sessionToken: String }
-            return (200, (try? JSONEncoder().encode(PairResp(sessionToken: rawToken))) ?? Data())
-
-        // ── POST /v1/windows/pair/code ───────────────────────────────────
-        case ("POST", "/v1/windows/pair/code"):
-            let code = GatewayAuthStore.shared.generatePairingCode()
-            diagnostics.pairingCodeActive = true
-            struct WinCodeResp: Encodable { let code: String; let expiresAt: String }
-            let iso = ISO8601DateFormatter().string(from: code.expiresAt)
-            return (200, (try? JSONEncoder().encode(WinCodeResp(code: code.code, expiresAt: iso))) ?? Data())
-
-        // ── POST /v1/windows/pair ────────────────────────────────────────
-        case ("POST", "/v1/windows/pair"):
-            struct WinPairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
-            guard let req = try? JSONDecoder().decode(WinPairReq.self, from: body) else {
-                return (400, errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
-            }
-            guard let rawToken = GatewayAuthStore.shared.completePairing(
-                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName) else {
-                return (403, errorJSON("Invalid or expired pairing code"))
-            }
-            struct WinPairResp: Encodable { let sessionToken: String }
-            return (200, (try? JSONEncoder().encode(WinPairResp(sessionToken: rawToken))) ?? Data())
 
         // ── GET /v1/devices ──────────────────────────────────────────────
         case ("GET", "/v1/devices"):

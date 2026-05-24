@@ -1399,50 +1399,56 @@ final class JarvisController {
         JarvisRuntimeCoordinator.shared.speakText          = { [weak self] text in self?.speak(text) }
         JarvisRuntimeCoordinator.shared.openOverlay        = { [weak self] kind in self?.openOverlay(kind) }
 
-        // Phase 4 — wire DaemonAppBridge → Mac brain runtime
-        if prefs.current.daemonEnabled {
-            DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform in
-                guard let self else { return }
-                let ctx = RemoteDeviceContext(
-                    deviceId: deviceId,
-                    platform: platform,
-                    deviceName: nil,
-                    capabilities: [],
-                    receivedAt: Date(),
-                    routeId: UUID().uuidString
-                )
-                Task { @MainActor in
-                    let response = await self.handleRemoteTranscript(transcript, context: ctx)
-                    await self.sendRemoteReply(response, to: ctx)
-                }
+        // Phase 4 — wire DaemonAppBridge → Mac brain runtime (daemon-centric architecture)
+        // DaemonAppBridge always connects to the daemon (JarvisBrainDaemon on port 8765).
+        // When the daemon is not running, DaemonAppBridge retries with exponential backoff.
+        DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform in
+            guard let self else { return }
+            let ctx = RemoteDeviceContext(
+                deviceId: deviceId,
+                platform: platform,
+                deviceName: nil,
+                capabilities: [],
+                receivedAt: Date(),
+                routeId: UUID().uuidString
+            )
+            Task { @MainActor in
+                let response = await self.handleRemoteTranscript(transcript, context: ctx)
+                await self.sendRemoteReply(response, to: ctx)
             }
-            DaemonAppBridge.shared.onAndroidEvent = { [weak self] command, data, deviceId in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.androidEventReceiver?.receiveRawData(command: command, data: data, deviceId: deviceId)
-                }
-            }
-            // Route execution.result frames to AndroidToolOrchestrator so pending
-            // submitTool() calls resolve with the Android execution outcome.
-            DaemonAppBridge.shared.onToolResult = { [weak self] data in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.androidToolOrchestrator.handleResult(data: data)
-                }
-            }
-            DaemonAppBridge.shared.connect()
         }
+        DaemonAppBridge.shared.onAndroidEvent = { [weak self] command, data, deviceId in
+            guard let self else { return }
+            Task { @MainActor in
+                self.androidEventReceiver?.receiveRawData(command: command, data: data, deviceId: deviceId)
+            }
+        }
+        // Route execution.result frames to AndroidToolOrchestrator so pending
+        // submitTool() calls resolve with the Android execution outcome.
+        DaemonAppBridge.shared.onToolResult = { [weak self] data in
+            guard let self else { return }
+            Task { @MainActor in
+                self.androidToolOrchestrator.handleResult(data: data)
+            }
+        }
+        DaemonAppBridge.shared.connect()
 
-        // Direct mode (no daemon): provide a send callback so AndroidToolOrchestrator
-        // can reach Android via GatewayAndroidConnector when the daemon is not in use.
-        // NOTE: GatewayAndroidConnector.onMessage is already wired elsewhere for inbound
-        // frames; this closure covers the outbound execution.request direction only.
-        // brainServer is set by startBrainServer() which runs during bootstrap; by the
-        // time submitTool() is ever called it will already be populated.
         androidToolOrchestrator.onDirectSend = { [weak self] envelope in
-            guard let self, !self.prefs.current.daemonEnabled else { return }
-            if let data = try? JSONSerialization.data(withJSONObject: envelope) {
-                self.brainServer?.androidConnector?.broadcast(data)
+            // In daemon-centric architecture, tool requests route through DaemonAppBridge.
+            // Direct broadcast via androidConnector is no longer supported.
+            guard let self else { return }
+            if let data = try? JSONSerialization.data(withJSONObject: envelope),
+               let text = String(data: data, encoding: .utf8) {
+                let envelope: [String: Any] = [
+                    "id": UUID().uuidString,
+                    "type": "execution.request",
+                    "sourceDeviceId": "mac",
+                    "sourcePlatform": "mac",
+                    "target": ["type": "android"],
+                    "timestamp": ISO8601DateFormatter().string(from: Date()),
+                    "payload": envelope
+                ]
+                DaemonAppBridge.shared.send(envelope)
             }
         }
 
@@ -5578,98 +5584,12 @@ final class JarvisController {
             cameraDiagnostics.log(.serverEnabled)
         }
 
-        // Wire Android WebSocket connector on /v1/android/ws.
-        let androidConnector = GatewayAndroidConnector()
-        androidConnector.diagnostics = gatewayDiagnostics
-        androidConnector.onMessage = { [weak self] data, respond in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                // Route execution.result frames to AndroidToolOrchestrator (direct mode).
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let msgType = json["type"] as? String,
-                   msgType == "execution.result" {
-                    self.androidToolOrchestrator.handleResult(data: data)
-                    return
-                }
-                // Forward everything else to AndroidBridgeManager via the existing WebSocketServer delegate.
-                self.wsServer.delegate?.server(self.wsServer, didReceive: data, respond: respond)
-            }
-        }
-        // Wire transcript.final → brain pipeline → reply.final back to Android.
-        androidConnector.onTranscriptFinal = { [weak self, weak server] clientId, routeId, text in
-            guard let self else { return }
-            let ctx = RemoteDeviceContext(
-                deviceId: clientId, platform: "android", deviceName: nil,
-                capabilities: [], receivedAt: Date(), routeId: routeId
-            )
-            Task { @MainActor [weak self, weak server] in
-                guard let self else { return }
-                let response = await self.handleRemoteTranscript(text, context: ctx)
-                if case .reply(let replyText, _, _) = response.outcome, !replyText.isEmpty {
-                    let frame: [String: Any] = [
-                        "type": "reply.final",
-                        "routeId": routeId,
-                        "text": replyText
-                    ]
-                    if let data = try? JSONSerialization.data(withJSONObject: frame),
-                       let json = String(data: data, encoding: .utf8) {
-                        server?.androidConnector?.sendText(json, to: clientId)
-                    }
-                }
-            }
-        }
-
-        server.androidConnector = androidConnector
         // Log deprecation notice if legacy port is still active.
         let legacyPortActive = prefs.current.legacyAndroidPortEnabled
         let gatewayPort = prefs.current.brainServerPort
         if legacyPortActive {
             gatewayDiagnostics.deprecatedAndroidPortEnabled = true
             Log.net.warning("Legacy Android port 17872 is active. Update Android app to use the new /v1/android/ws endpoint on port \(gatewayPort, privacy: .public)")
-        }
-
-        // Wire V2 distributed brain routes when enabled.
-        if prefs.current.distributedBrainEnabled {
-            let v2 = MacBridgeProtocolV2.shared
-            server.v2Routes = v2
-
-            // Wire transcript.final → brain pipeline → chat.reply.final back to Windows/all clients.
-            v2.onInboundTranscript = { [weak self, weak v2] deviceId, enrichedText in
-                guard let self else { return }
-                let ctx = RemoteDeviceContext(
-                    deviceId: deviceId, platform: "windows", deviceName: nil,
-                    capabilities: [], receivedAt: Date(), routeId: UUID().uuidString
-                )
-                Task { @MainActor [weak self, weak v2] in
-                    guard let self else { return }
-                    let response = await self.handleRemoteTranscript(enrichedText, context: ctx)
-                    if case .reply(let replyText, _, _) = response.outcome, !replyText.isEmpty {
-                        v2?.pushReplyFinal(text: replyText, intentLabel: nil)
-                    }
-                }
-            }
-
-            // Wire execution delivery back to RemoteExecutionCoordinator.
-            RemoteExecutionCoordinator.shared.onSendRequest = { [weak v2] req, deviceId in
-                v2?.pushEvent(type: .executionRequest, payload: [
-                    "requestId": req.id,
-                    "kind": req.kind.rawValue,
-                    "targetDevice": deviceId
-                ])
-            }
-            // Wire attention context provider.
-            AttentionContextProvider.shared = AttentionContextProvider()
-            AttentionContextProvider.shared?.isMacListening = state.isListening
-            // Wire attention coordinator refresh.
-            GlobalAttentionCoordinator.shared.isMacListeningProvider = { [weak self] in
-                self?.state.isListening ?? false
-            }
-            GlobalAttentionCoordinator.shared.isMacSpeakingProvider = { [weak self] in
-                self?.state.isSpeaking ?? false
-            }
-            // Wire reference resolver
-            DistributedReferenceResolver.shared.conversation = DistributedConversationCoordinator.shared
-            DistributedReferenceResolver.shared.presence = GlobalPresenceAggregator.shared
         }
 
         server.start(

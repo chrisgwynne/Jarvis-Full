@@ -1155,17 +1155,6 @@ class JarvisRuntime(
         if (macCfg.isConfigured && (macCfg.enabled || androidRole == com.jarvis.assistant.remote.macbridge.AndroidRole.AUTO)) macBridgeClient.start()
         // Brain Gateway — start if paired (isPaired checks baseUrl + sessionToken)
         if (JarvisApp.brainGatewaySettings.snapshot().isPaired) brainGatewayClient.start()
-        // Wire Mac Brain reply callbacks → Android TTS.
-        // reply.final / chat.reply.final: Mac has already decided the response text.
-        // orchestrate.speak: Mac explicitly requests Android to speak a given string.
-        // Both follow the same speakAndRecord path used by local responses so
-        // conversation memory, driving-mode truncation, and barge-in all apply.
-        brainGatewayClient.onReplyFinal = { text ->
-            if (text.isNotBlank()) scope.launch { speakAndRecord(text) }
-        }
-        brainGatewayClient.onOrchestrateSpeak = { text ->
-            if (text.isNotBlank()) scope.launch { speakAndRecord(text) }
-        }
         com.jarvis.assistant.remote.macbridge.AndroidEventBroadcaster.attach(
             client       = macBridgeClient,
             settingsRepo = macBridgeRepo,
@@ -2293,14 +2282,17 @@ class JarvisRuntime(
                     Log.d(TAG, "[TRANSCRIPT_NORMALIZED] \"$transcriptNormalisedLog\"")
 
                     // ── Brain Gateway relay ──────────────────────────────────
-                    // When paired and connected, forward every non-blank
-                    // transcript to the Mac brain so it can route, respond, and
-                    // push reply.final back via onReplyFinal above.
+                    // When connected to the Mac brain daemon, forward the transcript
+                    // there and skip local routing entirely. The Mac will reply via
+                    // reply.final → onReplyFinal → speakAndRecord().
                     if (brainGatewayClient.status.value ==
                             com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
                         && transcript.isNotBlank()
                     ) {
                         brainGatewayClient.sendTranscript(transcript)
+                        machine.transition(JarvisState.Listening)
+                        syncState(JarvisState.Listening)
+                        continue
                     }
 
                     // ── Confirmation-first intercept ─────────────────────────

@@ -62,6 +62,28 @@ final class DaemonClient {
         let isRevoked: Bool?
     }
 
+    // MARK: - Pairing (Mac app calls daemon to generate/consume pairing codes)
+
+    /// Ask daemon to generate a pairing code for the given platform ("android" | "windows" | "mac").
+    func generatePairingCode(platform: String) async -> (code: String, expiresAt: String)? {
+        let path = "/v1/\(platform)/pair/code"
+        guard let data = await rawPost(path, body: Data(), authenticated: true) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let code = json["code"], let exp = json["expiresAt"] else { return nil }
+        return (code, exp)
+    }
+
+    private func rawPost(_ path: String, body: Data, authenticated: Bool) async -> Data? {
+        guard let url = URL(string: base + path) else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        if authenticated, let token = authToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return try? await URLSession.shared.data(for: request).0
+    }
+
     // MARK: - Helpers
 
     private func get<T: Decodable>(_ path: String, authenticated: Bool, as type: T.Type) async -> T? {
