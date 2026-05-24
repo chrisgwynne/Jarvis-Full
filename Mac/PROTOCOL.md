@@ -1,3 +1,8 @@
+> This file mirrors the canonical docs at `../docs/ARCHITECTURE.md` and
+> `../shared/contracts/PROTOCOL.md`. See those files for the current specification.
+
+---
+
 # Jarvis Cross-Device Protocol
 
 ## Message Envelope Format

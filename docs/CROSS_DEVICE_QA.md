@@ -248,3 +248,36 @@ Expected: `{"status":"ok","daemon":true}`
    - Daemon drains queue to Mac on reconnect
    - Mac downloads and saves file
    - File arrives in `~/Downloads/Jarvis Transfers/`
+
+---
+
+## Soak / Stress Test Checklist
+
+### Daemon stability (run for 30 min continuous)
+- [ ] No memory growth in daemon process (check with `ps aux` before/after)
+- [ ] `DaemonTimeline` stays at ≤ 500 events
+- [ ] `PresenceStore` stays at ≤ 50 entries
+- [ ] `DaemonOfflineQueue` stays at ≤ 50 messages
+- [ ] Ping loop does not accumulate after rapid reconnects (check for `asyncAfter` orphans via log rate)
+- [ ] Proactive ticker fires ~once/minute (check `ProactiveCoordinator` log)
+
+### Android reconnect stress
+- [ ] Force-close and reopen Android Jarvis 10 times — only 1 heartbeat loop active after each reconnect
+- [ ] Toggle airplane mode 5 times while connected — NetworkChangeObserver triggers reconnect each time
+- [ ] Verify `sharedStatus` transitions: Disconnected → Connecting → Connected → Reconnecting → Connected
+
+### Cross-device latency targets
+- [ ] `daemon_rtt` < 50ms on LAN
+- [ ] `transcript_sent` → `android_reply_received` < 3000ms for LLM path
+- [ ] `transcript_sent` → `android_reply_received` < 500ms for fast-route path
+
+### Handoff
+- [ ] "Continue this on the Mac" → text appears in Mac overlay within 2s
+- [ ] "Open this on the Mac" with a URL → browser opens on Mac within 2s
+- [ ] Old handoffs (>24h) do not appear in `GET /v1/handoffs`
+- [ ] Handoff with >200 char text → stored summary truncated to 200 chars
+
+### Security invariants
+- [ ] Send a comm.event.received with raw phone number → verify daemon log shows ****last4 only
+- [ ] Attempt to handoff a .dmg URL → verify blocked
+- [ ] comm.action.execute frame — verify requiresConfirmation=true in all code paths

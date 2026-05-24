@@ -494,3 +494,18 @@ Must be explicitly triggered by user — never sent silently.
 | GET | `/v1/devices/presence` | Returns array of per-device presence snapshots |
 | GET | `/v1/context` | Returns all active context store entries |
 | GET | `/v1/watchdog/status` | Returns all active (unresolved) comm events |
+| GET | `/v1/diagnostics` | Aggregate latency + routing stats |
+| GET | `/v1/handoffs` | Recent handoff entries (HandoffContextStore) |
+
+---
+
+## Latency Trace
+
+No new wire frames are added for latency. Timing is recorded locally on each device
+and correlated by `correlationId` in `DaemonMessageEnvelope`. The daemon exposes
+aggregate diagnostics at `GET /v1/diagnostics`.
+
+Key `correlationId` usage:
+- Android sets `correlationId` on `transcript.final` frames
+- Mac echoes the same `correlationId` in its reply frames
+- Daemon uses this to correlate request/reply for roundtrip measurement

@@ -153,3 +153,242 @@ Mac app sends and receives DaemonMessageEnvelope-wrapped frames via DaemonAppBri
 | 8765 | JarvisBrainDaemon | Public WebSocket + HTTP API |
 | 8766 | JarvisBrainDaemon (alt) | Internal IPC (JARVIS_DAEMON_PORT override) |
 | loopback only | JarvisMac MacBrainServer | Camera stream + brain context HTTP |
+
+---
+
+## Devices and Roles
+
+| Device | Primary role |
+|--------|-------------|
+| Android | Voice capture, STT, wake word, tool execution, notifications bridge |
+| JarvisBrainDaemon | Routing, presence inference, handoff store, diagnostics, job scheduling |
+| Mac | LLM reasoning, TTS, overlay rendering, memory, proactivity |
+| Windows (sidecar) | Perception surface, browser/UI execution (Sprint P7+) |
+
+---
+
+## Latency Instrumentation
+
+Every voice command pipeline stage is timed from Android STT through daemon routing
+to Mac LLM completion and back. Key metrics:
+
+| Metric | Source | Description |
+|--------|--------|-------------|
+| transcript_sent | Android LatencyTracker | Android STT final → daemon send |
+| daemon_received | DaemonDiagnostics | Time daemon received transcript frame |
+| daemon_routed | DaemonDiagnostics | Daemon internal route duration |
+| reply_generated | Mac LatencyTracker | LLM start → complete |
+| daemon_rtt | DaemonDiagnostics | WebSocket ping/pong round-trip |
+| total_roundtrip | DaemonDiagnostics | Transcript sent → Android reply received |
+
+Diagnostics are exposed at `GET /v1/diagnostics` (daemon HTTP endpoint).
+No raw transcript text is ever logged — only durations and stage timestamps.
+
+---
+
+## Cross-Device Continuity (Handoff)
+
+Users can move context between devices with natural commands:
+- "Continue this on the Mac"
+- "Show this on Android"
+- "Send this to my Mac"
+
+Flow:
+1. Android recognises phrase via `FederationHandoffTool` regex patterns
+2. Android sends `handoff.request` frame to daemon with key + value
+3. Daemon routes to target device, stores in `HandoffContextStore` (20 entries, 24h TTL)
+4. Mac `HandoffCoordinator` receives it:
+   - URL key → opens in browser (NSWorkspace)
+   - text key → writes to clipboard + sets `pendingHandoffText` for overlay display
+   - conversation key → sets `pendingHandoffText` (conversation summary, not stored in clipboard)
+5. Mac shows `HandoffNoticeView` overlay if text content received
+6. `handoff.result` frame sent back to source device as confirmation
+
+Daemon exposes recent handoffs at `GET /v1/handoffs`.
+
+---
+
+## Presence Inference Engine
+
+`PresenceInferenceEngine` (daemon) computes confidence-scored user states from
+raw `PresenceStore` data without persisting them. States: probablyDriving,
+probablySleeping, probablyInMeeting, probablyAvailable, unknown.
+
+Consumers:
+- `ToolArbitrationService` — picks best device + output modality per tool
+- `DaemonJobScheduler` — suppresses jobs during sleep/driving/quiet hours
+- `DecisionEngine` (Mac app) — defers PASSIVE proactive suggestions
+
+---
+
+## Daemon Services
+
+| Service | File | Purpose |
+|---------|------|---------|
+| PresenceInferenceEngine | JarvisBrainDaemon | Confidence-scored user state inference |
+| DaemonJobScheduler | JarvisBrainDaemon | Recurring jobs with quiet hours + backoff |
+| ToolArbitrationService | JarvisBrainDaemon | Best device/modality per tool invocation |
+| DaemonTimeline | JarvisBrainDaemon | 500-event ring buffer of cross-device events |
+| HandoffContextStore | JarvisBrainDaemon | Recent handoffs, 20 entries, 24h TTL |
+| DaemonOfflineQueue | JarvisBrainDaemon | 50-message bounded queue with 120s TTL |
+| PresenceStore | JarvisBrainDaemon | Per-device presence, 50-entry cap, 5min stale eviction |
+
+---
+
+## Android Voice Pipeline
+
+```
+WakeWordDetector
+    │ onDetected
+    ▼
+JarvisStateMachine: WakeDetected → Listening
+    │ SpeechCapture.listen()
+    ▼
+JarvisStateMachine: Processing
+    │ FollowUpCoordinator → IntentClassifier → ToolRegistry
+    │   (or LlmRouter for free-form)
+    ▼
+TtsEngine.speak()  ── interruptible by BargeInDetector
+    │
+    ▼
+JarvisStateMachine: IdleWake → loop
+```
+
+`LatencyTracker` instruments every stage. `transcript.final` frames carry a
+`correlationId` that the Mac echoes in its reply for roundtrip measurement.
+
+---
+
+## Mac Voice Pipeline
+
+```
+WakeWordService (Sherpa ONNX or Apple)
+    │  wake event
+    ▼
+JarvisController.handleWakeEvent()
+    │  ExecutionTracer.begin()
+    ▼
+SpeechRecognizer (Whisper or Apple Speech)
+    │  transcript String
+    ▼
+ConversationRuntime.handleTranscript()
+    │  follow-up resolution, conversation state
+    ▼
+CommandPhraseMatcher  →  IntentMapping  →  Intent?   (Tier 1)
+    │
+IntentRouter.route(parsed:)                           (Tier 2)
+    │
+LLMIntentBridge → LLMRouter → MiniMax | llama.cpp   (Tier 3)
+    │
+JarvisController.execute()
+    ├──► TextToSpeechService.speak()
+    └──► OverlayManager.open(kind:)
+```
+
+---
+
+## Mac Subsystem Startup Order
+
+`RuntimeCoordinator.shared` starts subsystems in topological order, polls health
+every 30 seconds, and recovers failed subsystems independently (max 3 retries).
+
+| Order | Runtime | Depends on |
+|-------|---------|-----------|
+| 10 | SystemRuntime | — |
+| 20 | MemoryRuntime | system |
+| 25 | BrainRuntime | memory |
+| 30 | AudioRuntime | system |
+| 40 | ConversationRuntime | audio, system |
+| 50 | OverlayRuntime | system |
+| 60 | AmbientRuntime | system, overlay |
+| 70 | LLMRuntime | system, memory |
+| 80 | ProactivityRuntime | system, overlay, conversation |
+| 90 | AndroidRuntime | system |
+
+---
+
+## Android Reconnect and Status
+
+`sharedStatus` state machine:
+
+```
+Disconnected → Connecting → Connected → Reconnecting → Connected
+```
+
+- `NetworkChangeObserver` triggers reconnect on network transitions
+- Each reconnect starts exactly one heartbeat loop
+- `DaemonMessageRouter` logs "client registered" on each successful connect
+
+---
+
+## Memory Architecture
+
+### Mac
+| Component | Description |
+|-----------|-------------|
+| `MemoryStore` | CRUD SQLite via GRDB — facts, conversation summaries, preferences |
+| `BrainMemoryStore` | Authoritative long-term intelligence; importance × confidence scoring |
+| `SemanticMemoryIndex` | NLEmbedding cosine similarity, 500-entry cap, persisted JSON |
+| `EpisodeStore` | Time-bounded session grouping |
+| `HandoffContextStore` | Cross-device handoff entries (daemon-side) |
+
+### Android
+| Component | Description |
+|-----------|-------------|
+| Room DB (`jarvis.db`) | Memory, conversation turns, knowledge, telemetry |
+| EncryptedSharedPreferences | API keys, OAuth tokens, user settings |
+
+---
+
+## Security Invariants
+
+These invariants are enforced in code and must not be regressed:
+
+- `comm.action.execute` always has `requiresConfirmation: true` — Android never auto-executes
+- Phone numbers masked as `****last4` before any log or wire frame
+- No raw transcript bodies stored by default — only summaries (max 200 chars)
+- Dangerous file extensions blocked: app, dmg, exe, sh, command, pkg
+- No direct app-to-app sockets — all traffic through daemon on port 8765
+- No QR/token UI for pairing — pairing code flow only
+- Handoff text and conversation summaries capped at 200 chars
+- DaemonTimeline redacts 7+ consecutive digit runs (phone number patterns)
+
+---
+
+## Daemon HTTP Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /v1/diagnostics | Aggregate latency + routing stats |
+| GET | /v1/handoffs | Recent handoff entries (HandoffContextStore) |
+| GET | /v1/presence | Current per-device presence snapshot |
+| GET | /v1/health | Daemon liveness check |
+
+---
+
+## Troubleshooting
+
+### Duplicate clients registered
+Symptom: `DaemonMessageRouter` logs "client registered" twice for same device.
+Cause: rapid reconnect before disconnect cleanup completes.
+Fix: `unregisterClient` is idempotent. Check `DeviceRegistry.markDisconnected` is called.
+
+### Daemon disconnected / banner stuck
+Symptom: Mac shows "Daemon unavailable" banner even after daemon restarts.
+Cause: `DaemonSleepWakeObserver` reconnect delay (2s) not triggered.
+Fix: Check NSWorkspace wake notification reaches `DaemonAppBridge.connect()`.
+
+### Stale presence routes
+Symptom: `ToolArbitrationService` routes to a device that's offline.
+Cause: `PresenceStore` entry not evicted (device disconnected >5min ago).
+Fix: `evictStaleEntries()` runs on every `update()`. Verify `DeviceRegistry.connectedDevices` is current.
+
+### High latency
+Symptom: `daemon_rtt` > 200ms consistently.
+Cause: Mac and Android on different networks (not local).
+Fix: Ensure both devices are on the same LAN or Tailscale network.
+
+### Missing Android notifications
+Symptom: `comm.event.received` not arriving at daemon.
+Cause: `JarvisNotificationListener` not granted notification access.
+Fix: Settings → Notification Access → enable Jarvis.
