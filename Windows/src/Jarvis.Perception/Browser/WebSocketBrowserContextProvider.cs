@@ -12,22 +12,20 @@ using Microsoft.Extensions.Logging;
 namespace Jarvis.Perception.Browser;
 
 /// <summary>
-/// Loopback WebSocket server. Now authenticated: clients must include a shared token in
-/// the upgrade URL (<c>ws://127.0.0.1:PORT/?token=ABC</c>). Token lives in
-/// <see cref="BridgeTokenStore"/>; the user pastes it into the extension's options page.
+/// Loopback WebSocket server that accepts connections from the browser extension.
+/// Listens on 127.0.0.1 only — same-machine loopback is the security boundary.
 ///
-/// Direction is bidirectional in P3.5:
+/// Direction is bidirectional:
 ///   extension → host: hello, context, ping, ack
 ///   host → extension: command (navigate, click, …), each carrying a commandId
 ///
-/// One connection at a time. A new authenticated client supersedes the previous socket.
+/// One connection at a time. A new client supersedes the previous socket.
 /// </summary>
 public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly int _port;
-    private readonly BridgeTokenStore _tokens;
     private readonly IDiagnostics? _diagnostics;
     private readonly ILogger<WebSocketBrowserContextProvider>? _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -39,16 +37,13 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
     private WebSocket? _currentSocket;
     private BrowserContextSnapshot _current = BrowserContextSnapshot.Empty;
     private bool _connected;
-    private long _rejectedAuth;
-    private long _acceptedAuth;
+    private long _acceptedConnections;
 
     public WebSocketBrowserContextProvider(
-        BridgeTokenStore tokens,
         IDiagnostics? diagnostics = null,
         ILogger<WebSocketBrowserContextProvider>? logger = null,
         int port = 49321)
     {
-        _tokens = tokens;
         _diagnostics = diagnostics;
         _logger = logger;
         _port = port;
@@ -59,8 +54,7 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
     public event EventHandler<BrowserContextSnapshot>? Updated;
 
     public int Port => _port;
-    public long AuthAccepted => Interlocked.Read(ref _acceptedAuth);
-    public long AuthRejected => Interlocked.Read(ref _rejectedAuth);
+    public long TotalConnections => Interlocked.Read(ref _acceptedConnections);
 
     public async Task<bool> SendJsonAsync(string json, CancellationToken cancellationToken = default)
     {
@@ -113,14 +107,12 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
         if (_listener is not null) return;
         try
         {
-            // Pre-warm the token file so the user can copy it before the first connect.
-            _tokens.GetOrCreate();
             _listener = new HttpListener();
             _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
             _listener.Start();
             _acceptLoop = Task.Run(() => AcceptLoopAsync(_cts.Token));
             _diagnostics?.Record(DiagnosticLevel.Info, "browser", "bridge listening",
-                new Dictionary<string, object?> { ["port"] = _port, ["tokenFile"] = _tokens.FilePath });
+                new Dictionary<string, object?> { ["port"] = _port });
         }
         catch (Exception ex)
         {
@@ -152,20 +144,7 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
                 continue;
             }
 
-            // Auth: token must match the on-disk shared secret.
-            var presented = ctx.Request.QueryString["token"];
-            var expected = _tokens.GetOrCreate();
-            if (presented is null || !BridgeTokenStore.ConstantTimeEquals(presented, expected))
-            {
-                Interlocked.Increment(ref _rejectedAuth);
-                _diagnostics?.Record(DiagnosticLevel.Warn, "browser", "auth rejected",
-                    new Dictionary<string, object?> { ["remoteEndpoint"] = ctx.Request.RemoteEndPoint?.ToString() });
-                ctx.Response.StatusCode = 401;
-                ctx.Response.Close();
-                continue;
-            }
-
-            Interlocked.Increment(ref _acceptedAuth);
+            Interlocked.Increment(ref _acceptedConnections);
             _ = Task.Run(() => HandleSocketAsync(ctx, token));
         }
     }

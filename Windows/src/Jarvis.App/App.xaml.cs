@@ -814,9 +814,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IIdeContextProvider>(sp => new WindowTitleIdeContextProvider(
             () => sp.GetRequiredService<IDesktopAwarenessService>().Latest,
             sp.GetService<IDiagnostics>()));
-        services.AddSingleton<BridgeTokenStore>(_ => new BridgeTokenStore());
         services.AddSingleton<WebSocketBrowserContextProvider>(sp => new WebSocketBrowserContextProvider(
-            tokens: sp.GetRequiredService<BridgeTokenStore>(),
             diagnostics: sp.GetService<IDiagnostics>()));
         services.AddSingleton<IBrowserContext>(sp => sp.GetRequiredService<WebSocketBrowserContextProvider>());
         services.AddSingleton<IWorkflowCategorizer, WorkflowCategorizer>();

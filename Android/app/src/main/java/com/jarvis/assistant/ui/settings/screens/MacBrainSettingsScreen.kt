@@ -37,7 +37,6 @@ internal fun MacBrainSettingsScreen(
 ) {
     val enabled          by vm.macBrainEnabled.collectAsStateWithLifecycle()
     val baseUrl          by vm.macBrainBaseUrl.collectAsStateWithLifecycle()
-    val apiKey           by vm.macBrainApiKey.collectAsStateWithLifecycle()
     val wifiOnly         by vm.macBrainWifiOnly.collectAsStateWithLifecycle()
     val allowMemory      by vm.macBrainAllowMemory.collectAsStateWithLifecycle()
     val allowProject     by vm.macBrainAllowProject.collectAsStateWithLifecycle()
@@ -53,11 +52,11 @@ internal fun MacBrainSettingsScreen(
             !enabled ->
                 "Disabled" to "Mac Brain is off. Enable below to allow context enrichment."
             baseUrl.isBlank() ->
-                "Not configured" to "Set the server address to connect. Access key is optional for unsecured servers."
+                "Not configured" to "Set the server address to connect."
             diag.lastHealthOk == true ->
                 "Connected" to "Last health check passed at ${diag.lastHealthLatencyMs}ms."
             diag.lastHealthOk == false ->
-                "Unreachable" to "Last health check failed. Verify the URL and token."
+                "Unreachable" to "Last health check failed. Verify the server address."
             else ->
                 "Configured" to "Test the connection to verify reachability."
         }
@@ -107,14 +106,6 @@ internal fun MacBrainSettingsScreen(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
                     )
                 }
-                SettingsRowDivider()
-                SettingsTextFieldRow(
-                    title         = "Access key (optional)",
-                    value         = apiKey,
-                    onValueChange = vm::setMacBrainApiKey,
-                    placeholder   = "Leave blank for unsecured server",
-                    isSecret      = true,
-                )
             }
             Spacer(Modifier.height(4.dp))
 

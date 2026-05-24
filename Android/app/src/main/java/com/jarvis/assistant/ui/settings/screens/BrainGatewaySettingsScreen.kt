@@ -14,7 +14,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jarvis.assistant.JarvisApp
-import com.jarvis.assistant.remote.gateway.BrainGatewayQrScanScreen
 import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
 import com.jarvis.assistant.remote.gateway.GatewayWsStatus
 import com.jarvis.assistant.remote.gateway.TransportMode
@@ -45,20 +44,10 @@ internal fun BrainGatewaySettingsScreen(
     val testStatus  by vm.gatewayTestStatus.collectAsStateWithLifecycle()
     val pairStatus  by vm.gatewayPairStatus.collectAsStateWithLifecycle()
 
-    var showQr      by remember { mutableStateOf(false) }
-    var deviceName  by remember { mutableStateOf(cfg.deviceName) }
+    var deviceName     by remember { mutableStateOf(cfg.deviceName) }
+    var manualUrl      by remember { mutableStateOf("") }
+    var manualCode     by remember { mutableStateOf("") }
     val migratedFrom = remember { repo.migratedFrom }
-
-    if (showQr) {
-        BrainGatewayQrScanScreen(
-            onResult = { url, code ->
-                showQr = false
-                vm.completeGatewayPairing(url, code, deviceName)
-            },
-            onCancel = { showQr = false },
-        )
-        return
-    }
 
     SettingsScaffold(title = "Mac Brain Gateway", onBack = onBack, onClose = onClose) {
 
@@ -67,13 +56,13 @@ internal fun BrainGatewaySettingsScreen(
             !cfg.isPaired && wsStatus == GatewayWsStatus.NotPaired ->
                 StatusInfo(
                     "Not paired",
-                    "Scan the QR code from Mac Jarvis to pair",
+                    "Enter the Gateway URL and pairing code from Mac Jarvis to pair",
                     SettingsTheme.TextMuted, SettingsTheme.InfoBg,
                 )
             wsStatus == GatewayWsStatus.Unauthorized ->
                 StatusInfo(
                     "Token revoked",
-                    "The session token was rejected. Scan QR to re-pair.",
+                    "The session token was rejected. Enter a new pairing code to re-pair.",
                     SettingsTheme.Destructive, SettingsTheme.InfoBg,
                 )
             wsStatus == GatewayWsStatus.Connected ->
@@ -103,7 +92,7 @@ internal fun BrainGatewaySettingsScreen(
             else ->
                 StatusInfo(
                     "Not configured",
-                    "Scan the QR code from Mac Jarvis to pair",
+                    "Enter the Gateway URL and pairing code from Mac Jarvis to pair",
                     SettingsTheme.TextMuted, SettingsTheme.InfoBg,
                 )
         }
@@ -132,14 +121,14 @@ internal fun BrainGatewaySettingsScreen(
             if (migratedSource != null && cfg.baseUrl.isNotBlank()) {
                 SettingsInfoCard(
                     body = "URL pre-filled from your $migratedSource settings. " +
-                           "Scan the QR code to pair — the gateway port may differ (default 8765).",
+                           "Enter the pairing code to pair — the gateway port may differ (default 8765).",
                 )
                 Spacer(Modifier.height(8.dp))
             }
 
             SettingsGroup(
                 title  = "Pair with Mac Jarvis",
-                footer = "Open Mac Jarvis and navigate to Bridge → Show QR Code, then scan it here.",
+                footer = "On Mac: open Settings → Developer → Brain API → Generate Pairing Code. Enter the Gateway URL and the 6-digit code below.",
             ) {
                 SettingsTextFieldRow(
                     title         = "Device name",
@@ -148,11 +137,29 @@ internal fun BrainGatewaySettingsScreen(
                     placeholder   = android.os.Build.MODEL,
                 )
                 SettingsRowDivider()
+                SettingsTextFieldRow(
+                    title         = "Gateway URL",
+                    value         = manualUrl,
+                    onValueChange = { manualUrl = it },
+                    placeholder   = "http://100.x.x.x:8765",
+                )
+                SettingsRowDivider()
+                SettingsTextFieldRow(
+                    title         = "Pairing code",
+                    value         = manualCode,
+                    onValueChange = { manualCode = it.take(6) },
+                    placeholder   = "6-digit code from Mac",
+                )
+                SettingsRowDivider()
                 SettingsActionRow(
-                    title       = "Scan pairing QR",
-                    description = "Opens the camera to scan the QR code from Mac Jarvis",
-                    actionLabel = if (pairStatus == "Pairing…") "Pairing…" else "Scan",
-                    onAction    = { if (pairStatus != "Pairing…") showQr = true },
+                    title       = "Pair",
+                    description = "Enter the Gateway URL and 6-digit code above, then tap Pair.",
+                    actionLabel = if (pairStatus == "Pairing…") "Pairing…" else "Pair",
+                    onAction    = {
+                        if (pairStatus != "Pairing…" && manualUrl.isNotBlank() && manualCode.length == 6) {
+                            vm.completeGatewayPairing(manualUrl.trim(), manualCode.trim(), deviceName)
+                        }
+                    },
                 )
             }
         } else {
@@ -210,7 +217,7 @@ internal fun BrainGatewaySettingsScreen(
             SettingsGroup {
                 SettingsActionRow(
                     title       = "Unpair",
-                    description = "Removes the session token. Re-scan QR to re-pair.",
+                    description = "Removes the session token. Enter a new pairing code to re-pair.",
                     actionLabel = "Unpair",
                     destructive = true,
                     confirm     = true,

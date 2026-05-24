@@ -15,7 +15,6 @@ import com.jarvis.assistant.JarvisApp
 import com.jarvis.assistant.remote.macbridge.AndroidRole
 import com.jarvis.assistant.remote.macbridge.EffectiveRole
 import com.jarvis.assistant.remote.macbridge.MacBridgeClient
-import com.jarvis.assistant.remote.macbridge.MacBridgeQrScanScreen
 import com.jarvis.assistant.remote.macbridge.MacBridgeStatus
 import com.jarvis.assistant.ui.settings.SettingsGroup
 import com.jarvis.assistant.ui.settings.SettingsInfoCard
@@ -40,27 +39,11 @@ internal fun MacBridgeSettingsScreen(
     val status  by MacBridgeClient.sharedStatus.collectAsState()
 
     var cfg            by remember { mutableStateOf(repo.snapshot()) }
-    var showQr         by remember { mutableStateOf(false) }
     var cameraEnabled  by remember { mutableStateOf(store.macCameraEnabled) }
     var camUseBridge   by remember { mutableStateOf(store.macCameraUseBridgeCreds) }
     // Snapshot the role at composition time to detect mid-session changes.
     val macBridgeRoleAtStartup by remember { mutableStateOf(repo.snapshot().androidRole) }
     val arbitratorState by JarvisApp.roleArbitrator.state.collectAsState()
-
-    if (showQr) {
-        MacBridgeQrScanScreen(
-            onResult = { host, port, auth ->
-                val updated = cfg.copy(host = host, port = port, authToken = auth, enabled = true)
-                repo.save(updated)
-                cfg = updated
-                showQr = false
-                // Signal the runtime to (re)start the bridge
-                com.jarvis.assistant.service.JarvisService.toggleMacBridge(context, true)
-            },
-            onCancel = { showQr = false },
-        )
-        return
-    }
 
     SettingsScaffold(title = "Mac Bridge", onBack = onBack, onClose = onClose) {
 
@@ -158,10 +141,10 @@ internal fun MacBridgeSettingsScreen(
             status == MacBridgeStatus.RECONNECTING ->
                 "Connection lost — retrying with backoff"
             cfg.androidRole == AndroidRole.BRIDGE_ONLY && !cfg.isConfigured ->
-                "Configure host and auth token to enable Bridge mode"
+                "Use Mac Brain Gateway to pair — see Settings → Mac Brain Gateway"
             cfg.isConfigured ->
                 "Enable the toggle below to connect"
-            else -> "Scan the QR code from Mac Jarvis to pair"
+            else -> "Use Mac Brain Gateway to pair — see Settings → Mac Brain Gateway"
         }
         SettingsInfoCard(title = statusLabel, body = statusBody)
 
@@ -213,51 +196,38 @@ internal fun MacBridgeSettingsScreen(
         Spacer(Modifier.height(8.dp))
 
         // ── Connection details ───────────────────────────────────────────────
-        SettingsGroup {
-            SettingsValueRow(
-                title       = "Tailscale host",
-                value       = cfg.host.ifBlank { "Not set" },
-                description = "Mac's Tailscale IP (e.g. 100.91.42.7)",
-            )
-            SettingsRowDivider()
-            SettingsValueRow(
-                title       = "Port",
-                value       = cfg.port.toString(),
-                description = "Default 17872",
-            )
-            SettingsRowDivider()
-            SettingsValueRow(
-                title       = "Auth token",
-                value       = if (cfg.authToken.isBlank()) "Not set" else "••••••••",
-                description = "Shared secret from Mac Jarvis",
-            )
+        if (cfg.isConfigured) {
+            SettingsGroup {
+                SettingsValueRow(
+                    title       = "Tailscale host",
+                    value       = cfg.host.ifBlank { "Not set" },
+                    description = "Mac's Tailscale IP (e.g. 100.91.42.7)",
+                )
+                SettingsRowDivider()
+                SettingsValueRow(
+                    title       = "Port",
+                    value       = cfg.port.toString(),
+                    description = "Default 17872",
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            SettingsGroup {
+                com.jarvis.assistant.ui.settings.SettingsActionRow(
+                    title       = "Unpair",
+                    description = "Clears the host and session credentials.",
+                    actionLabel = "Unpair",
+                    destructive = true,
+                    confirm     = true,
+                    confirmCopy = "Yes, unpair",
+                    onAction    = {
+                        repo.clearPairing()
+                        cfg = repo.snapshot()
+                        com.jarvis.assistant.service.JarvisService.toggleMacBridge(context, false)
+                    },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(8.dp))
-
-        // ── QR pairing ───────────────────────────────────────────────────────
-        SettingsGroup {
-            com.jarvis.assistant.ui.settings.SettingsActionRow(
-                title       = "Scan pairing QR",
-                description = "Scan the QR code shown in Mac Jarvis to auto-configure",
-                actionLabel = "Scan",
-                onAction    = { showQr = true },
-            )
-            com.jarvis.assistant.ui.settings.SettingsRowDivider()
-            com.jarvis.assistant.ui.settings.SettingsActionRow(
-                title       = "Unpair",
-                description = "Clears the host and auth token. Re-scan the QR code to re-pair.",
-                actionLabel = "Unpair",
-                destructive = true,
-                confirm     = true,
-                confirmCopy = "Yes, unpair",
-                onAction    = {
-                    repo.clearPairing()
-                    cfg = repo.snapshot()
-                    com.jarvis.assistant.service.JarvisService.toggleMacBridge(context, false)
-                },
-            )
-        }
-        Spacer(Modifier.height(8.dp))
 
         // ── Event broadcasting ───────────────────────────────────────────────
         SettingsGroup(title = "Event broadcasting") {
