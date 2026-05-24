@@ -358,3 +358,261 @@ final class DaemonOfflineQueueTests: XCTestCase {
                        "Replay-safe types must all be queued — depth must equal 3")
     }
 }
+
+// MARK: - Phase 11 soak / stress tests
+
+/// Phase 11 soak tests for daemon core invariants.
+///
+/// All logic is replicated inline as minimal faithful copies because the daemon
+/// target is an executable and cannot be @testable imported.
+final class DaemonCoreTests: XCTestCase {
+
+    // MARK: - Inline helpers
+
+    /// Minimal replica of DaemonTimeline's ring-buffer logic.
+    private func makeTimeline(cap: Int = 500) -> (append: () -> Void, count: () -> Int) {
+        var buf: [Int] = []
+        return (
+            append: { buf.append(buf.count); if buf.count > cap { buf.removeFirst(buf.count - cap) } },
+            count: { buf.count }
+        )
+    }
+
+    /// Minimal replica of the presence-store eviction logic.
+    private func makePresenceStore(cap: Int = 50) -> (update: (String) -> Void, count: () -> Int) {
+        var store: [String: Date] = [:]
+        return (
+            update: { id in
+                store[id] = Date()
+                if store.count > cap {
+                    let sorted = store.sorted { $0.value < $1.value }
+                    for (k, _) in sorted.prefix(store.count - cap) { store.removeValue(forKey: k) }
+                }
+            },
+            count: { store.count }
+        )
+    }
+
+    /// Minimal ticker that reschedules itself until stopped.
+    private class MinimalTicker {
+        var stopped = false
+        var tickCount = 0
+        func scheduleNext(after: DispatchTimeInterval = .milliseconds(10)) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + after) { [weak self] in
+                guard let self, !self.stopped else { return }
+                self.tickCount += 1
+                self.scheduleNext(after: after)
+            }
+        }
+    }
+
+    /// Minimal thread-safe router.
+    private class MinimalRouter {
+        private var clients: [String: Bool] = [:]
+        private let lock = NSLock()
+        func register(_ id: String) { lock.withLock { clients[id] = true } }
+        func unregister(_ id: String) { lock.withLock { clients.removeValue(forKey: id) } }
+        func isRegistered(_ id: String) -> Bool { lock.withLock { clients[id] == true } }
+        var count: Int { lock.withLock { clients.count } }
+    }
+
+    /// Minimal bounded queue (drops oldest when full).
+    private func makeBoundedQueue(max: Int = 50) -> (enqueue: (String) -> Void, count: () -> Int) {
+        var q: [String] = []
+        return (
+            enqueue: { msg in q.append(msg); if q.count > max { q.removeFirst(q.count - max) } },
+            count: { q.count }
+        )
+    }
+
+    /// Quiet-hours check (default 22:00–07:00, wraps midnight).
+    private func isQuietHour(_ date: Date, start: Int = 22, end: Int = 7) -> Bool {
+        let h = Calendar.current.component(.hour, from: date)
+        if start < end { return h >= start && h < end }
+        return h >= start || h < end
+    }
+
+    /// Trivial arbitration function.
+    private func arbitrate(isDriving: Bool, isSleeping: Bool, hasHeadset: Bool) -> String {
+        if isDriving { return "voice_only" }
+        if isSleeping { return "silent" }
+        if hasHeadset { return "voice" }
+        return "voice_and_visual"
+    }
+
+    // MARK: - 1. Timeline ring buffer
+
+    func test_timeline_ringBuffer_staysAt500_afterOver600Appends() {
+        let tl = makeTimeline(cap: 500)
+        for _ in 0..<600 { tl.append() }
+        XCTAssertEqual(tl.count(), 500,
+            "Timeline ring buffer must cap at 500 entries even after 600 appends")
+    }
+
+    func test_timeline_ringBuffer_noOverEviction_after500Appends() {
+        let tl = makeTimeline(cap: 500)
+        for _ in 0..<500 { tl.append() }
+        XCTAssertEqual(tl.count(), 500,
+            "Timeline ring buffer must hold exactly 500 entries after exactly 500 appends")
+    }
+
+    // MARK: - 2. Presence store cap
+
+    func test_presenceStore_capAt50_after60Distinct() {
+        let ps = makePresenceStore(cap: 50)
+        for i in 0..<60 { ps.update("device-\(i)") }
+        XCTAssertEqual(ps.count(), 50,
+            "Presence store must evict oldest entries and never exceed 50 devices")
+    }
+
+    // MARK: - 3. Ticker stop prevents reschedule
+
+    func test_ticker_stop_preventsReschedule() {
+        let ticker = MinimalTicker()
+        ticker.scheduleNext(after: .milliseconds(10))
+
+        // Let it tick 2–3 times.
+        Thread.sleep(forTimeInterval: 0.050)
+        let countAtStop = ticker.tickCount
+        XCTAssertGreaterThanOrEqual(countAtStop, 1,
+            "Ticker should have fired at least once in 50 ms")
+
+        ticker.stopped = true
+        // Wait another interval to confirm no new ticks.
+        Thread.sleep(forTimeInterval: 0.050)
+
+        XCTAssertEqual(ticker.tickCount, countAtStop,
+            "After stopped=true, tickCount must not grow")
+    }
+
+    // MARK: - 4. Route lifecycle — 1,000 clients
+
+    func test_router_register1000_countEquals1000() {
+        let router = MinimalRouter()
+        for i in 0..<1_000 { router.register("client-\(i)") }
+        XCTAssertEqual(router.count, 1_000,
+            "Router must track all 1,000 registered clients")
+    }
+
+    func test_router_unregisterAll_countZero() {
+        let router = MinimalRouter()
+        for i in 0..<1_000 { router.register("client-\(i)") }
+        for i in 0..<1_000 { router.unregister("client-\(i)") }
+        XCTAssertEqual(router.count, 0,
+            "Router count must be 0 after unregistering all clients")
+    }
+
+    func test_router_concurrentRegisterUnregister_countIsConsistent() {
+        let router = MinimalRouter()
+        let group = DispatchGroup()
+        let q = DispatchQueue.global(qos: .userInteractive)
+
+        // Thread A: register 500 clients.
+        group.enter()
+        q.async {
+            for i in 0..<500 { router.register("a-\(i)") }
+            group.leave()
+        }
+
+        // Thread B: register another 500 clients (different IDs).
+        group.enter()
+        q.async {
+            for i in 0..<500 { router.register("b-\(i)") }
+            group.leave()
+        }
+
+        group.wait()
+
+        XCTAssertEqual(router.count, 1_000,
+            "Concurrent registrations from two threads must yield a consistent count of 1,000")
+
+        group.enter()
+        q.async {
+            for i in 0..<500 { router.unregister("a-\(i)") }
+            group.leave()
+        }
+        group.enter()
+        q.async {
+            for i in 0..<500 { router.unregister("b-\(i)") }
+            group.leave()
+        }
+        group.wait()
+
+        XCTAssertEqual(router.count, 0,
+            "Concurrent unregistrations from two threads must yield a final count of 0")
+    }
+
+    // MARK: - 5. Offline queue depth stays at 50 (inline test)
+
+    func test_boundedQueue_depthAt50_after100Enqueues() {
+        let q = makeBoundedQueue(max: 50)
+        for i in 0..<100 { q.enqueue("msg-\(i)") }
+        XCTAssertEqual(q.count(), 50,
+            "Bounded queue must discard oldest entries and stay at depth 50")
+    }
+
+    // MARK: - 6. Job scheduler quiet hours
+
+    func test_quietHours_23_isQuiet() {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = 23; comps.minute = 0; comps.second = 0
+        let date = Calendar.current.date(from: comps)!
+        XCTAssertTrue(isQuietHour(date), "23:00 should be in quiet hours (22–07)")
+    }
+
+    func test_quietHours_03_isQuiet() {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = 3; comps.minute = 0; comps.second = 0
+        let date = Calendar.current.date(from: comps)!
+        XCTAssertTrue(isQuietHour(date), "03:00 should be in quiet hours (22–07)")
+    }
+
+    func test_quietHours_08_isNotQuiet() {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = 8; comps.minute = 0; comps.second = 0
+        let date = Calendar.current.date(from: comps)!
+        XCTAssertFalse(isQuietHour(date), "08:00 should NOT be in quiet hours (22–07)")
+    }
+
+    func test_quietHours_2159_isNotQuiet() {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = 21; comps.minute = 59; comps.second = 0
+        let date = Calendar.current.date(from: comps)!
+        XCTAssertFalse(isQuietHour(date), "21:59 should NOT be in quiet hours (22–07)")
+    }
+
+    // MARK: - 7. Arbitration rule output determinism
+
+    func test_arbitration_sameInputs_alwaysSameOutput() {
+        let inputs: [(Bool, Bool, Bool)] = [
+            (true, false, false),   // driving
+            (false, true, false),   // sleeping
+            (false, false, true),   // headset
+            (false, false, false),  // default
+        ]
+        for (isDriving, isSleeping, hasHeadset) in inputs {
+            let expected = arbitrate(isDriving: isDriving, isSleeping: isSleeping, hasHeadset: hasHeadset)
+            for _ in 0..<100 {
+                let result = arbitrate(isDriving: isDriving, isSleeping: isSleeping, hasHeadset: hasHeadset)
+                XCTAssertEqual(result, expected,
+                    "arbitrate(\(isDriving),\(isSleeping),\(hasHeadset)) must always return '\(expected)'")
+            }
+        }
+    }
+
+    func test_arbitration_driving_returnsVoiceOnly() {
+        XCTAssertEqual(arbitrate(isDriving: true, isSleeping: false, hasHeadset: false), "voice_only")
+    }
+
+    func test_arbitration_sleeping_returnsSilent() {
+        XCTAssertEqual(arbitrate(isDriving: false, isSleeping: true, hasHeadset: false), "silent")
+    }
+
+    func test_arbitration_headset_returnsVoice() {
+        XCTAssertEqual(arbitrate(isDriving: false, isSleeping: false, hasHeadset: true), "voice")
+    }
+
+    func test_arbitration_default_returnsVoiceAndVisual() {
+        XCTAssertEqual(arbitrate(isDriving: false, isSleeping: false, hasHeadset: false), "voice_and_visual")
+    }
+}
