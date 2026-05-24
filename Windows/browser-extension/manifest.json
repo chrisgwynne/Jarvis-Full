@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Jarvis Context Bridge",
+  "version": "0.2.0",
+  "description": "Streams the active tab's context to the local Jarvis runtime over an authenticated loopback WebSocket; receives commands (navigate, click, dryRun, …) and acknowledges each one.",
+  "minimum_chrome_version": "108",
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "permissions": ["tabs", "activeTab", "scripting", "storage"],
+  "host_permissions": ["ws://127.0.0.1/*"],
+  "options_ui": { "page": "options.html", "open_in_tab": false },
+  "action": { "default_title": "Jarvis Context Bridge" }
+}

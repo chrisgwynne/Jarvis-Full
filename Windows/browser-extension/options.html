@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Jarvis Context Bridge — Options</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; padding: 18px; max-width: 460px;
+           background: #0f1117; color: #e6e8ee; }
+    label { display: block; font-size: 13px; color: #8aa6cc; margin-bottom: 6px; }
+    input { width: 100%; box-sizing: border-box; font: 13px ui-monospace, Consolas, monospace;
+            padding: 8px 10px; background: #151823; color: #e6e8ee; border: 1px solid #29314a; border-radius: 4px; }
+    button { margin-top: 14px; padding: 8px 16px; background: #2a5fb9; color: white;
+             border: 0; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    button:hover { background: #3a76d6; }
+    .status { margin-top: 14px; font-size: 12px; color: #8aa6cc; }
+    p { font-size: 12px; line-height: 1.4; color: #aab5c8; }
+    code { background: #151823; padding: 1px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h2 style="margin:0 0 16px;">Bridge token</h2>
+  <p>Paste the token from Jarvis here. The extension cannot connect without it. Get the
+  current token from Jarvis's tray menu → <em>Copy bridge token</em>, then paste below.</p>
+  <label for="token">Token</label>
+  <input id="token" type="text" placeholder="paste token" autocomplete="off"/>
+  <button id="save">Save and reconnect</button>
+  <p class="status" id="status">—</p>
+  <p>Token file on disk: <code>%APPDATA%\Jarvis\bridge-token.txt</code></p>
+  <script src="options.js"></script>
+</body>
+</html>

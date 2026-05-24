@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pebble</title>
+  <link rel="stylesheet" href="pebble.css" />
+</head>
+<body>
+  <div id="hud" hidden>
+    <div><span class="k">cpu</span><span id="hud-cpu">—</span></div>
+    <div><span class="k">mem</span><span id="hud-mem">—</span></div>
+    <div><span class="k">fps</span><span id="hud-fps">—</span></div>
+  </div>
+  <div id="pebble" class="state-idle" aria-hidden="true">
+    <svg class="ring" viewBox="0 0 100 100">
+      <defs>
+        <radialGradient id="core" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#cfe8ff" stop-opacity="0.95" />
+          <stop offset="55%" stop-color="#5fa8ff" stop-opacity="0.75" />
+          <stop offset="100%" stop-color="#1b3d7a" stop-opacity="0.0" />
+        </radialGradient>
+        <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+          <stop offset="60%" stop-color="rgba(120,180,255,0)" />
+          <stop offset="100%" stop-color="rgba(120,180,255,0.35)" />
+        </radialGradient>
+      </defs>
+      <circle class="halo" cx="50" cy="50" r="48" fill="url(#halo)" />
+      <circle class="ripple" cx="50" cy="50" r="22" fill="none" stroke="rgba(180,220,255,0.7)" stroke-width="1.2" />
+      <circle class="core" cx="50" cy="50" r="20" fill="url(#core)" />
+      <g class="orbits">
+        <circle class="orbit o1" cx="50" cy="22" r="1.6" fill="#cfe8ff" />
+        <circle class="orbit o2" cx="78" cy="50" r="1.6" fill="#cfe8ff" />
+        <circle class="orbit o3" cx="50" cy="78" r="1.6" fill="#cfe8ff" />
+      </g>
+    </svg>
+  </div>
+  <script src="pebble.js"></script>
+</body>
+</html>

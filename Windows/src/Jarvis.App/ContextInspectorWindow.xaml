@@ -1,0 +1,116 @@
+<Window x:Class="Jarvis.App.ContextInspectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Jarvis context"
+        Width="680" Height="720"
+        Background="#0F1117"
+        Foreground="#E6E8EE"
+        FontFamily="Segoe UI" FontSize="12"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#E6E8EE"/>
+        </Style>
+        <Style x:Key="K" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#8AA6CC"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="Margin" Value="0,8,0,2"/>
+        </Style>
+        <Style x:Key="V" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#E6E8EE"/>
+            <Setter Property="FontFamily" Value="ui-monospace, Consolas, monospace"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+    </Window.Resources>
+    <DockPanel Margin="14">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button x:Name="RefreshBtn" Content="Refresh" Padding="10,4" Click="OnRefresh"/>
+            <CheckBox x:Name="StreamMode" Content="Stream (event-driven)" IsChecked="True" Margin="12,6,0,0" Foreground="#E6E8EE"/>
+            <Button x:Name="CopyBtn" Content="Copy JSON" Margin="12,0,0,0" Padding="10,4" Click="OnCopy"/>
+            <TextBlock x:Name="UpdateCount" Margin="14,6,0,0" Foreground="#8AA6CC" Text="0 updates"/>
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Style="{StaticResource K}" Text="Workflow"/>
+                <TextBlock x:Name="WorkflowText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Foreground"/>
+                <TextBlock x:Name="ForegroundText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="IDE"/>
+                <TextBlock x:Name="IdeText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Selected text"/>
+                <TextBlock x:Name="SelectionText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Clipboard"/>
+                <TextBlock x:Name="ClipboardText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Browser"/>
+                <TextBlock x:Name="BrowserText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Recent OCR"/>
+                <TextBlock x:Name="OcrText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Metrics"/>
+                <TextBlock x:Name="MetricsText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Snapshot hash"/>
+                <TextBlock x:Name="HashText" Style="{StaticResource V}" Text="—"/>
+
+                <TextBlock Style="{StaticResource K}" Text="Last guidance query"/>
+                <TextBlock x:Name="GuidanceSummary" Style="{StaticResource V}" Text="—"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <TextBox x:Name="DiscoverQueryBox" Width="280" Padding="6,4"
+                             Background="#151823" Foreground="#E6E8EE" BorderBrush="#29314A"/>
+                    <Button Content="Discover targets" Margin="8,0,0,0" Padding="10,4" Click="OnDiscoverTargets"/>
+                </StackPanel>
+                <ItemsControl x:Name="TargetsList" Margin="0,8,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="50"/>
+                                    <ColumnDefinition Width="110"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Score, StringFormat=F2}" Style="{StaticResource V}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Target.Source}" Style="{StaticResource V}"/>
+                                <TextBlock Grid.Column="2" Text="{Binding Target.Role}" Style="{StaticResource V}"/>
+                                <TextBlock Grid.Column="3" Text="{Binding Target.Label}" Style="{StaticResource V}" TextTrimming="CharacterEllipsis"/>
+                                <Button Grid.Column="4" Content="Highlight" Padding="6,1" Margin="6,0,0,0"
+                                        Tag="{Binding Target}" Click="OnHighlightTarget"/>
+                                <Button Grid.Column="5" Content="Copy" Padding="6,1" Margin="6,0,0,0"
+                                        Tag="{Binding Target}" Click="OnCopyTarget"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Style="{StaticResource K}" Text="Recent automation"/>
+                <ItemsControl x:Name="RecentActionsList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="160"/>
+                                    <ColumnDefinition Width="100"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding At, StringFormat=HH:mm:ss}" Style="{StaticResource V}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding IntentKind}" Style="{StaticResource V}"/>
+                                <TextBlock Grid.Column="2" Text="{Binding Outcome}" Style="{StaticResource V}"/>
+                                <TextBlock Grid.Column="3" Text="{Binding IntentSummary}" Style="{StaticResource V}" TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

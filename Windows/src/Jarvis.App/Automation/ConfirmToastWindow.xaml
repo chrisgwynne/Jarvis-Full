@@ -1,0 +1,33 @@
+<Window x:Class="Jarvis.App.Automation.ConfirmToastWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        Focusable="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Title="Jarvis confirm">
+    <Border Background="#F00F1117" CornerRadius="8" Padding="14,12" Width="360"
+            BorderBrush="#446FA8FF" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="22" ShadowDepth="6" Color="Black" Opacity="0.45"/>
+        </Border.Effect>
+        <StackPanel>
+            <TextBlock x:Name="Headline" Foreground="#E6E8EE" FontFamily="Segoe UI" FontSize="13"
+                       TextWrapping="Wrap" FontWeight="SemiBold"/>
+            <TextBlock x:Name="TierText" Foreground="#8AA6CC" FontSize="10" Margin="0,4,0,0"/>
+            <ProgressBar x:Name="Countdown" Height="3" Margin="0,10,0,0"
+                         Minimum="0" Maximum="1" Value="1"
+                         Background="#22FFFFFF" Foreground="#FF6FA8FF" BorderThickness="0"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                <Button x:Name="CancelBtn" Content="Cancel" Padding="10,4" MinWidth="78"
+                        Click="OnCancel"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

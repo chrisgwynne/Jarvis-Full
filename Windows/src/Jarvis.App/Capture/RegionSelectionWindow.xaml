@@ -1,0 +1,27 @@
+<Window x:Class="Jarvis.App.Capture.RegionSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="#01000000"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        Cursor="Cross"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Title="Jarvis region capture">
+    <Canvas x:Name="Root" Background="#33000000">
+        <Rectangle x:Name="SelectionRect"
+                   Stroke="#FF6FA8FF" StrokeThickness="1.4"
+                   Fill="#1A6FA8FF"
+                   Visibility="Collapsed"/>
+        <TextBlock x:Name="HintText"
+                   Foreground="#E6E8EE" FontFamily="Segoe UI" FontSize="13"
+                   Canvas.Left="24" Canvas.Top="20"
+                   Text="Drag to capture · Esc to cancel"/>
+        <TextBlock x:Name="DimensionsText"
+                   Foreground="#E6E8EE" FontFamily="ui-monospace, Consolas" FontSize="11"
+                   Visibility="Collapsed"/>
+    </Canvas>
+</Window>

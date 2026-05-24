@@ -1,0 +1,17 @@
+// Optional module map for users who want to integrate sherpa-onnx via a
+// raw .a / .dylib rather than the prebuilt xcframework.
+//
+// The xcframework already ships its own modulemap (module name
+// `sherpa_onnx`). If you've dropped the xcframework at
+// `Vendor/sherpa-onnx.xcframework/` and added it to the JarvisMac target,
+// you can ignore this file.
+//
+// If you're linking the C library directly:
+//   1. Put `c-api.h` and the static lib alongside it.
+//   2. Uncomment the block below and set HEADER_SEARCH_PATHS in project.yml.
+//
+// module sherpa_onnx {
+//     header "c-api.h"
+//     link "sherpa-onnx-c-api"
+//     export *
+// }

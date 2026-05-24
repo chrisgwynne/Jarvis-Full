@@ -1,0 +1,47 @@
+## XcodeGen-generated project — regenerate with `xcodegen generate`
+*.xcodeproj/
+*.xcworkspace/
+
+## Xcode
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+!default.pbxuser
+!default.mode1v3
+!default.mode2v3
+!default.perspectivev3
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+
+## Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.pins
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+## Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+## Phase-2 large drop-ins — track empty dirs, ignore the heavy bits.
+Vendor/*
+!Vendor/.gitkeep
+Models/*
+!Models/.gitkeep
+.claude/

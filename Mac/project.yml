@@ -1,0 +1,94 @@
+name: JarvisMac
+options:
+  bundleIdPrefix: com.jarvis.mac
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEAD_CODE_STRIPPING: YES
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    ENABLE_HARDENED_RUNTIME: NO
+    # Phase-2: search path for the optional sherpa-onnx xcframework drop.
+    # Pointing Xcode at an empty Vendor/ is harmless until you install
+    # the framework.
+    FRAMEWORK_SEARCH_PATHS:
+      - $(inherited)
+      - $(SRCROOT)/Vendor
+
+# Phase-2 optional SwiftPM packages. Uncomment in Xcode (or here) once
+# you've decided which version to pin. The Swift code is gated by
+# `#if canImport(whisper)` / `#if canImport(sherpa_onnx)` so the project
+# still builds without them.
+# packages:
+#   whisper:
+#     url: https://github.com/ggerganov/whisper.cpp
+#     branch: master
+
+targets:
+  JarvisMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: JarvisMac
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/JarvisMac.entitlements"
+    resources:
+      - path: JarvisMac/Resources/Assets.xcassets
+    info:
+      path: JarvisMac/Resources/Info.plist
+      properties:
+        CFBundleName: Jarvis
+        CFBundleDisplayName: Jarvis
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSMicrophoneUsageDescription: "Jarvis listens for your voice commands."
+        NSCameraUsageDescription: "Jarvis uses the webcam for vision features."
+        NSSpeechRecognitionUsageDescription: "Jarvis transcribes your voice on-device."
+        NSAppleEventsUsageDescription: "Jarvis controls other apps when you ask it to."
+        NSLocalNetworkUsageDescription: "Jarvis pairs with your Android app over your local network."
+        LSApplicationCategoryType: public.app-category.utilities
+    entitlements:
+      path: JarvisMac/Resources/JarvisMac.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.mac.JarvisMac
+        PRODUCT_NAME: JarvisMac
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies: []
+    # Phase-2 optional drop-ins. Uncomment as you install them — the Swift
+    # code is gated by `#if canImport(...)` so the project builds without
+    # them.
+    #
+    # # Offline wake word (sherpa-onnx KWS):
+    # #   Drop sherpa-onnx.xcframework at Vendor/sherpa-onnx.xcframework
+    # #   then add this entry under `dependencies:`:
+    # - framework: Vendor/sherpa-onnx.xcframework
+    #   embed: true
+    #
+    # # Offline STT (whisper.cpp):
+    # #   In Xcode: File → Add Package Dependencies →
+    # #   https://github.com/ggerganov/whisper.cpp
+    # #   Then add to the `packages:` block at the top of this file:
+    # # packages:
+    # #   whisper:
+    # #     url: https://github.com/ggerganov/whisper.cpp
+    # #     branch: master
+    # #   And add this entry under `dependencies:`:
+    # - package: whisper

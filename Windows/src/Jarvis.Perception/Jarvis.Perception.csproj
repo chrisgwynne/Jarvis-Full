@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>Jarvis.Perception</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Required so the Windows SDK projections (Windows.Media.Ocr, Windows.Graphics.Imaging) are available. -->
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Jarvis.Core\Jarvis.Core.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jarvis.Perception.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- System.Windows.Automation namespace (AutomationElement, TextPattern, ...) ships in
+         UIAutomationClient.dll, which the WindowsDesktop framework reference includes when
+         <UseWPF> is true. No explicit <Reference> needed on .NET 8. -->
+  </ItemGroup>
+</Project>
