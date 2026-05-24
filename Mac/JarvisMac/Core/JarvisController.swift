@@ -5595,6 +5595,30 @@ final class JarvisController {
                 self.wsServer.delegate?.server(self.wsServer, didReceive: data, respond: respond)
             }
         }
+        // Wire transcript.final → brain pipeline → reply.final back to Android.
+        androidConnector.onTranscriptFinal = { [weak self, weak server] clientId, routeId, text in
+            guard let self else { return }
+            let ctx = RemoteDeviceContext(
+                deviceId: clientId, platform: "android", deviceName: nil,
+                capabilities: [], receivedAt: Date(), routeId: routeId
+            )
+            Task { @MainActor [weak self, weak server] in
+                guard let self else { return }
+                let response = await self.handleRemoteTranscript(text, context: ctx)
+                if case .reply(let replyText, _, _) = response.outcome, !replyText.isEmpty {
+                    let frame: [String: Any] = [
+                        "type": "reply.final",
+                        "routeId": routeId,
+                        "text": replyText
+                    ]
+                    if let data = try? JSONSerialization.data(withJSONObject: frame),
+                       let json = String(data: data, encoding: .utf8) {
+                        server?.androidConnector?.sendText(json, to: clientId)
+                    }
+                }
+            }
+        }
+
         server.androidConnector = androidConnector
         // Log deprecation notice if legacy port is still active.
         let legacyPortActive = prefs.current.legacyAndroidPortEnabled
@@ -5608,6 +5632,23 @@ final class JarvisController {
         if prefs.current.distributedBrainEnabled {
             let v2 = MacBridgeProtocolV2.shared
             server.v2Routes = v2
+
+            // Wire transcript.final → brain pipeline → chat.reply.final back to Windows/all clients.
+            v2.onInboundTranscript = { [weak self, weak v2] deviceId, enrichedText in
+                guard let self else { return }
+                let ctx = RemoteDeviceContext(
+                    deviceId: deviceId, platform: "windows", deviceName: nil,
+                    capabilities: [], receivedAt: Date(), routeId: UUID().uuidString
+                )
+                Task { @MainActor [weak self, weak v2] in
+                    guard let self else { return }
+                    let response = await self.handleRemoteTranscript(enrichedText, context: ctx)
+                    if case .reply(let replyText, _, _) = response.outcome, !replyText.isEmpty {
+                        v2?.pushReplyFinal(text: replyText, intentLabel: nil)
+                    }
+                }
+            }
+
             // Wire execution delivery back to RemoteExecutionCoordinator.
             RemoteExecutionCoordinator.shared.onSendRequest = { [weak v2] req, deviceId in
                 v2?.pushEvent(type: .executionRequest, payload: [

@@ -79,6 +79,18 @@ class BrainGatewayWebSocketClient(
 
     val status: StateFlow<GatewayWsStatus> get() = _sharedStatus
 
+    // ── Reply / orchestrate callbacks (set by JarvisRuntime) ─────────────────
+    /** Fired with the text of a reply.final or chat.reply.final from Mac brain. */
+    var onReplyFinal: ((String) -> Unit)? = null
+    /** Fired with partial streaming text (reply.partial / chat.reply.partial). */
+    var onReplyPartial: ((String) -> Unit)? = null
+    /** Mac requests Android to speak this text via Android TTS. */
+    var onOrchestrateSpeak: ((String) -> Unit)? = null
+    /** Mac requests Android to stay silent (suppress local TTS). */
+    var onOrchestrateSilent: ((String) -> Unit)? = null
+    /** Proactive push: title + body from Mac. */
+    var onProactiveNotify: ((String, String) -> Unit)? = null
+
     // ── Diagnostics ───────────────────────────────────────────────────────────
     val reconnectCount: AtomicInteger = AtomicInteger(0)
     val lastEventSentAtMs: AtomicLong = AtomicLong(0L)
@@ -321,7 +333,7 @@ class BrainGatewayWebSocketClient(
 
     private fun handleInbound(text: String) {
         val json = runCatching { JSONObject(text) }.getOrNull() ?: run {
-            Log.w(TAG, "Malformed JSON frame")
+            Log.w(TAG, "Malformed JSON frame — discarding")
             return
         }
 
@@ -329,53 +341,138 @@ class BrainGatewayWebSocketClient(
         sharedLastActivityAtMs.set(System.currentTimeMillis())
         settingsRepo.recordMacSeen()
 
-        if (frameType == "mac_status") {
-            val active = json.optBoolean("assistant_active", true)
-            macAssistantActive = active
-            sharedMacAssistantActive = active
-            Log.d(TAG, "mac_status: assistant_active=$active")
-            com.jarvis.assistant.JarvisApp.roleArbitrator.onMacStatusReceived(active)
-            return
-        }
+        when (frameType) {
 
-        if (frameType == "auth_revoked") {
-            Log.w(TAG, "Gateway sent auth_revoked — clearing pairing")
-            settingsRepo.clearPairing()
-            _sharedStatus.value = GatewayWsStatus.Unauthorized
-            running.set(false)
-            ws?.close(1000, "auth_revoked")
-            return
-        }
-
-        if (frameType != "request") return
-
-        val requestId = json.optString("id")
-        val command   = json.optString("command")
-        val payload   = json.optJSONObject("payload") ?: JSONObject()
-        if (requestId.isBlank() || command.isBlank()) return
-
-        lastInboundCommand = command
-        lastSharedInboundCommand = command
-        lastInboundAtMs.set(System.currentTimeMillis())
-
-        // Synthetic MacBridgeConfig for executor — all capabilities enabled.
-        val execCfg = MacBridgeConfig(enabledCapabilities = MacBridgeCapability.ALL)
-
-        scope.launch {
-            try {
-                val result = executor.execute(command, payload, execCfg)
-                val statusStr = if (result.ok) result.status ?: "ok" else "error: ${result.message}"
-                lastInboundStatus = statusStr
-                lastSharedInboundStatus = statusStr
-                sendResponse(requestId, result.ok, result.status, result.message, result.payload)
-            } catch (e: Exception) {
-                val statusStr = "error: ${e.message}"
-                lastInboundStatus = statusStr
-                lastSharedInboundStatus = statusStr
-                Log.w(TAG, "Command '$command' threw: ${e.message}")
-                sendResponse(requestId, false, "error", e.message ?: "Unexpected error")
+            "mac_status" -> {
+                val active = json.optBoolean("assistant_active", true)
+                macAssistantActive = active
+                sharedMacAssistantActive = active
+                Log.d(TAG, "mac_status: assistant_active=$active")
+                com.jarvis.assistant.JarvisApp.roleArbitrator.onMacStatusReceived(active)
             }
+
+            "auth_revoked" -> {
+                Log.w(TAG, "Gateway sent auth_revoked — clearing pairing")
+                settingsRepo.clearPairing()
+                _sharedStatus.value = GatewayWsStatus.Unauthorized
+                running.set(false)
+                ws?.close(1000, "auth_revoked")
+            }
+
+            // Mac brain reply — full response, surface to Android TTS / UI.
+            "reply.final", "chat.reply.final" -> {
+                val replyText = json.optString("text").ifBlank { return }
+                Log.d(TAG, "reply.final: ${replyText.take(80)}")
+                onReplyFinal?.invoke(replyText)
+            }
+
+            // Streaming partial — surface to UI for typing indicator.
+            "reply.partial", "chat.reply.partial" -> {
+                val partial = json.optString("text").ifBlank { return }
+                onReplyPartial?.invoke(partial)
+            }
+
+            // Mac instructs Android to speak a specific text via Android TTS.
+            "orchestrate.speak" -> {
+                val speakText = json.optString("text").ifBlank { return }
+                Log.d(TAG, "orchestrate.speak: ${speakText.take(80)}")
+                onOrchestrateSpeak?.invoke(speakText)
+            }
+
+            // Mac instructs Android to suppress its local TTS response.
+            "orchestrate.silent" -> {
+                val reason = json.optString("reason", "mac_responding")
+                Log.d(TAG, "orchestrate.silent: reason=$reason")
+                onOrchestrateSilent?.invoke(reason)
+            }
+
+            // Mac pushes a proactive notification to Android.
+            "proactive.notify" -> {
+                val title = json.optString("title", "Jarvis")
+                val body  = json.optString("body").ifBlank { return }
+                Log.d(TAG, "proactive.notify: $title — ${body.take(60)}")
+                onProactiveNotify?.invoke(title, body)
+            }
+
+            // TTS speaker lease — Android may start speaking.
+            "lease.grant" -> Log.d(TAG, "lease.grant received")
+
+            // TTS speaker lease denied — Mac is speaking.
+            "lease.deny", "lease.denied" -> Log.d(TAG, "lease.deny received")
+
+            // Server acknowledged our heartbeat.
+            "heartbeat.ack", "pong" -> Log.v(TAG, "heartbeat ack")
+
+            // Server is requesting our capability list — resend it.
+            "capability.request" -> {
+                Log.d(TAG, "capability.request — resending capabilities")
+                sendCapabilitiesReport()
+            }
+
+            // Session established / hello acknowledged.
+            "session.start", "hello.ack" -> {
+                Log.d(TAG, "Session established: type=$frameType")
+            }
+
+            // Server-side error frame.
+            "error" -> {
+                val msg = json.optString("message", "unknown error")
+                Log.w(TAG, "Gateway error frame: $msg")
+            }
+
+            // Mac requests Android to execute a command.
+            "request" -> {
+                val requestId = json.optString("id")
+                val command   = json.optString("command")
+                val payload   = json.optJSONObject("payload") ?: JSONObject()
+                if (requestId.isBlank() || command.isBlank()) return
+
+                lastInboundCommand = command
+                lastSharedInboundCommand = command
+                lastInboundAtMs.set(System.currentTimeMillis())
+
+                val execCfg = MacBridgeConfig(enabledCapabilities = MacBridgeCapability.ALL)
+                scope.launch {
+                    try {
+                        val result = executor.execute(command, payload, execCfg)
+                        val statusStr = if (result.ok) result.status ?: "ok" else "error: ${result.message}"
+                        lastInboundStatus = statusStr
+                        lastSharedInboundStatus = statusStr
+                        sendResponse(requestId, result.ok, result.status, result.message, result.payload)
+                    } catch (e: Exception) {
+                        val statusStr = "error: ${e.message}"
+                        lastInboundStatus = statusStr
+                        lastSharedInboundStatus = statusStr
+                        Log.w(TAG, "Command '$command' threw: ${e.message}")
+                        sendResponse(requestId, false, "error", e.message ?: "Unexpected error")
+                    }
+                }
+            }
+
+            else -> Log.w(TAG, "Unsupported inbound frame type: '$frameType' — not handled")
         }
+    }
+
+    // ── Outbound transcript ───────────────────────────────────────────────────
+
+    /**
+     * Sends a transcript.final frame to Mac for processing by the brain pipeline.
+     * Mac will respond with a reply.final frame which fires [onReplyFinal].
+     */
+    fun sendTranscript(text: String, routeId: String = java.util.UUID.randomUUID().toString()) {
+        if (_sharedStatus.value != GatewayWsStatus.Connected) {
+            Log.w(TAG, "sendTranscript skipped — not connected")
+            return
+        }
+        val frame = JSONObject().apply {
+            put("type",       "transcript.final")
+            put("messageId",  routeId)
+            put("transcript", text)
+            put("deviceId",   deviceName())
+            put("timestamp",  System.currentTimeMillis())
+        }
+        sendFrame(frame)
+        Log.d(TAG, "sendTranscript: ${text.take(80)}")
     }
 
     // ── Send ──────────────────────────────────────────────────────────────────

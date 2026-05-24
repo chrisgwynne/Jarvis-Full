@@ -19,7 +19,7 @@ final class BrainDaemonServer {
            let p = Int(envPort), p > 0, p < 65536 {
             port = p
         } else {
-            port = 8765
+            port = 8766   // JarvisMac owns 8765; daemon listens on 8766 for internal IPC
         }
         DaemonDiagnostics.shared.port = port
     }

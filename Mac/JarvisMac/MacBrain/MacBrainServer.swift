@@ -314,6 +314,18 @@ final class MacBrainServer {
             return (0, Data())  // 0 = connection handed off, do not cancel
         }
 
+        // ── WebSocket upgrade for Windows (/v1/windows/ws compatibility) ─
+        // Windows clients that have not yet updated to /v2/ws land here.
+        // Route them directly into MacBridgeProtocolV2 — identical handling.
+        if path == "/v1/windows/ws" && headers["upgrade"]?.lowercased() == "websocket" {
+            guard let routes = v2Routes else {
+                return (503, errorJSON("Distributed brain not enabled"))
+            }
+            routes.handleWebSocketUpgrade(headers: headers, conn: conn)
+            diagnostics.recordRequest(path: path, statusCode: 101)
+            return (0, Data())
+        }
+
         switch (method, path) {
 
         // ── GET /v1/status ───────────────────────────────────────────────
@@ -352,8 +364,29 @@ final class MacBrainServer {
                 code: req.code, deviceId: req.deviceId, deviceName: req.deviceName) else {
                 return (403, errorJSON("Invalid or expired pairing code"))
             }
-            struct PairResp: Encodable { let deviceToken: String }
-            return (200, (try? JSONEncoder().encode(PairResp(deviceToken: rawToken))) ?? Data())
+            struct PairResp: Encodable { let sessionToken: String }
+            return (200, (try? JSONEncoder().encode(PairResp(sessionToken: rawToken))) ?? Data())
+
+        // ── POST /v1/windows/pair/code ───────────────────────────────────
+        case ("POST", "/v1/windows/pair/code"):
+            let code = GatewayAuthStore.shared.generatePairingCode()
+            diagnostics.pairingCodeActive = true
+            struct WinCodeResp: Encodable { let code: String; let expiresAt: String }
+            let iso = ISO8601DateFormatter().string(from: code.expiresAt)
+            return (200, (try? JSONEncoder().encode(WinCodeResp(code: code.code, expiresAt: iso))) ?? Data())
+
+        // ── POST /v1/windows/pair ────────────────────────────────────────
+        case ("POST", "/v1/windows/pair"):
+            struct WinPairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
+            guard let req = try? JSONDecoder().decode(WinPairReq.self, from: body) else {
+                return (400, errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
+            }
+            guard let rawToken = GatewayAuthStore.shared.completePairing(
+                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName) else {
+                return (403, errorJSON("Invalid or expired pairing code"))
+            }
+            struct WinPairResp: Encodable { let sessionToken: String }
+            return (200, (try? JSONEncoder().encode(WinPairResp(sessionToken: rawToken))) ?? Data())
 
         // ── GET /v1/devices ──────────────────────────────────────────────
         case ("GET", "/v1/devices"):

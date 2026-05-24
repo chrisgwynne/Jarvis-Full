@@ -133,7 +133,7 @@ final class DaemonAuthStore {
 
     private var storeURL: URL {
         let sup = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return sup.appendingPathComponent("JarvisMac/gateway_paired_devices.json")
+        return sup.appendingPathComponent("JarvisMac/daemon_paired_devices.json")
     }
 
     private func save() {

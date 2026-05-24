@@ -284,7 +284,7 @@ public sealed record BrainGatewayConfig
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u)) return null;
         var wsScheme = u.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws";
         var port = u.IsDefaultPort ? string.Empty : $":{u.Port}";
-        return $"{wsScheme}://{u.Host}{port}/v1/windows/ws";
+        return $"{wsScheme}://{u.Host}{port}/v2/ws";
     }
 
     /// <summary>HTTP pairing URL: <see cref="BaseUrl"/> + /v1/windows/pair.</summary>

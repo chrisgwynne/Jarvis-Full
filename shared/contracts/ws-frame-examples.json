@@ -1,0 +1,98 @@
+{
+  "client_to_mac": {
+    "transcript.final": {
+      "type": "transcript.final",
+      "messageId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "transcript": "turn on the kitchen lights",
+      "deviceId": "pixel-8-pro",
+      "timestamp": 1716000000000
+    },
+    "transcript.partial": {
+      "type": "transcript.partial",
+      "messageId": "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
+      "transcript": "turn on the",
+      "deviceId": "pixel-8-pro"
+    },
+    "heartbeat": {
+      "type": "heartbeat",
+      "deviceId": "pixel-8-pro",
+      "timestamp": 1716000030000
+    },
+    "device.hello": {
+      "type": "device.hello",
+      "deviceId": "studio-laptop",
+      "deviceName": "Studio Laptop",
+      "platform": "windows",
+      "appVersion": "2.3.1"
+    },
+    "presence.update": {
+      "type": "presence.update",
+      "deviceId": "studio-laptop",
+      "activeApp": "cursor",
+      "windowTitle": "JarvisRuntime.kt — Jarvis-Full",
+      "activeCodingFile": "JarvisRuntime.kt",
+      "browserURL": "",
+      "foregroundApp": "cursor"
+    },
+    "lease.request": {
+      "type": "lease.request",
+      "deviceId": "studio-laptop",
+      "speechId": "f0e1d2c3-b4a5-6789-abcd-ef0123456789"
+    },
+    "execution.result": {
+      "type": "execution.result",
+      "requestId": "deadbeef-0000-1111-2222-333344445555",
+      "ok": true,
+      "status": "done",
+      "message": "",
+      "payload": {}
+    },
+    "replay.begin": { "type": "replay.begin" },
+    "replay.end":   { "type": "replay.end" }
+  },
+  "mac_to_client": {
+    "session.start": {
+      "type": "session.start",
+      "sessionId": "cafe0000-dead-beef-1234-567890abcdef",
+      "serverVersion": "mac-brain-1.0"
+    },
+    "reply.final": {
+      "type": "reply.final",
+      "routeId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "text": "Turning on the kitchen lights."
+    },
+    "reply.partial": {
+      "type": "reply.partial",
+      "routeId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "text": "Turning on the"
+    },
+    "orchestrate.speak": {
+      "type": "orchestrate.speak",
+      "text": "Good morning. Your 9am standup starts in five minutes."
+    },
+    "orchestrate.silent": {
+      "type": "orchestrate.silent",
+      "reason": "mac_speaking"
+    },
+    "proactive.notify": {
+      "type": "proactive.notify",
+      "title": "Standup in 5 minutes",
+      "body": "Your 9am standup starts in five minutes.",
+      "urgency": "high"
+    },
+    "hello.ack": {
+      "type": "hello.ack",
+      "deviceId": "studio-laptop",
+      "sessionId": "cafe0000-dead-beef-1234-567890abcdef"
+    },
+    "lease.grant": {
+      "type": "lease.grant",
+      "speechId": "f0e1d2c3-b4a5-6789-abcd-ef0123456789"
+    },
+    "lease.denied": {
+      "type": "lease.denied",
+      "speechId": "f0e1d2c3-b4a5-6789-abcd-ef0123456789",
+      "reason": "mac_owns_speaker"
+    }
+  }
+}
