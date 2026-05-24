@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ═══════════════════════════════════════════
+         PACKAGE VISIBILITY (Android 11+, API 30+)
+
+         Without this block getLaunchIntentForPackage(), queryIntentActivities(),
+         and Intent.setPackage() all return empty for packages outside this app's
+         visibility scope, which broke AppResolver (e.g. "open Spotify" failed
+         even though Spotify is installed) and blocked the WhatsApp intent.
+
+         - The <intent> query exposes every app with a LAUNCHER activity so the
+           AppResolver can list and fuzzy-match user-spoken app names.
+         - The explicit <package> entries cover apps addressed directly via
+           setPackage(...) for non-launcher intents (WhatsApp chat URI).
+    ═══════════════════════════════════════════ -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="whatsapp" />
+        </intent>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.spotify.music" />
+        <!-- Google Maps — needed so MapsIntentHandler can detect installation
+             and apply setPackage(..) to direct geo:/google.navigation: intents
+             specifically at Maps when present. -->
+        <package android:name="com.google.android.apps.maps" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="google.navigation" />
+        </intent>
+    </queries>
+
+    <!-- ═══════════════════════════════════════════
+         PERMISSIONS
+    ═══════════════════════════════════════════ -->
+
+    <!-- Microphone for wake word + speech recognition + ambient recording -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Camera for photo capture and visual analysis -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Write to gallery on Android 8/9 (API 26-28).
+         Not needed on Android 10+ — MediaStore inserts work without it. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- Required to start a foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Android 14: must declare the specific foreground service types in use -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Required for camera access from foreground service on Android 14+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Required for the Mac Bridge persistent WebSocket on Android 14+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Auto-start on boot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Prompt user to disable battery optimisation for this app -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Partial wake-lock — held only while the wake-word detector is
+         actively listening, so Doze maintenance windows and aggressive OEM
+         battery-savers (Samsung "Sleeping apps", Xiaomi MIUI, Huawei
+         "Protected apps", etc.) cannot pause the CPU mid-frame and stop
+         microphone capture.  Released when the user asks Jarvis to stop
+         listening, or when another app takes over audio focus.
+
+         NOT held for the service's entire lifetime — only when listening is
+         active.  See [com.jarvis.assistant.runtime.power.ListeningWakeLockGuard]. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- LLM API calls -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- ConnectivityManager.getActiveNetwork() / getNetworkCapabilities() -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Wi-Fi SSID inspection for NetworkEventAdapter (SSID is returned via
+         WifiManager.getConnectionInfo, which requires WIFI_STATE). SSID text
+         itself requires location permission which Jarvis already declares. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- UsageStatsManager for foreground-app tracking. App-op level; user
+         must grant via Settings → Apps → Special access → Usage access. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Audio ducking / routing -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- BT output (future TTS).  Legacy BLUETOOTH is a no-op on API 31+ (where
+         the runtime grant moved to BLUETOOTH_CONNECT); cap it at 30 so Play
+         Store and lint don't flag a permission with no effect on modern OS
+         versions. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- ── Meta Wearables (DAT SDK) ──────────────────────────────────────
+         Runtime-permission set the optional Meta Wearables module
+         needs to discover + pair with Meta AI glasses.  Master toggle
+         is OFF by default in Settings, so the user is never prompted
+         until they enable the feature.  See
+         com.jarvis.assistant.wearables.meta.* for the manager + state
+         machine + stub/mock providers. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <!-- Nearby Wi-Fi Devices replaces ACCESS_FINE_LOCATION as the
+         non-location-leaking gate for BLE scanning on API 33+. -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <!-- POST_NOTIFICATIONS required on Android 13+ to show the foreground notification -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Short haptic tick when the wake word is detected — auto-granted
+         (normal protection level) and silently a no-op on devices without
+         a vibrator (some tablets). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Floating overlay window (JarvisOverlayService).
+         Special-access permission — the user grants it via
+         Settings → Apps → Special access → Display over other apps.
+         JarvisOverlayService.startIfPermitted() checks the grant before
+         starting and OverlayPermission.openSettings() opens that page
+         when needed. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Phone & contacts tools -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- Voice-tool sprint additions: SMS reader, call log, system toggles.
+         WRITE_SETTINGS and ACCESS_NOTIFICATION_POLICY are special-access
+         permissions — the user grants them via a Settings panel rather
+         than a runtime prompt; the affected tools open that panel when
+         the grant is missing. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
+    <!-- Calendar reading and writing -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+
+    <!-- Driving mode — UiModeManager car mode -->
+    <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />
+
+    <!-- Call screening service binding -->
+    <uses-permission android:name="android.permission.BIND_CALL_SCREENING_SERVICE" />
+
+    <!-- Background location for geofence reminders (Android 10+) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Location — used to inject current city into the system prompt -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Incoming call detection (TelephonyCallback / PhoneStateListener) -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- Answer / decline incoming calls via TelecomManager -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+
+    <!-- Internal reminders & timers via AlarmManager.
+         SCHEDULE_EXACT_ALARM (API 31+): shown to the user in Settings; they
+         must grant it.  ReminderScheduler falls back to inexact alarms if it
+         isn't granted.
+
+         USE_EXACT_ALARM (API 33+) was removed: that permission is auto-granted
+         only for apps in the clock / calendar / alarm-clock category, and a
+         general-purpose assistant does not qualify.  Including it risked Play
+         Store rejection without delivering any benefit, since the Play
+         Console enforces category eligibility regardless of the manifest. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- ═══════════════════════════════════════════
+         APPLICATION
+    ═══════════════════════════════════════════ -->
+    <application
+        android:name=".JarvisApp"
+        android:allowBackup="true"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Jarvis"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <!-- ── Meta Wearables DAT — Application ID + Client Token ──
+             Both values are injected at build time from
+             local.properties (see app/build.gradle.kts).  Empty
+             placeholder = Developer Mode fallback (per Meta's docs:
+             "Do not set it if you are using Developer Mode to test
+             your integration").  Real values live in local.properties
+             which is gitignored — never paste secrets here. -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.APPLICATION_ID"
+            android:value="${metaWearablesApplicationId}" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+            android:value="${metaWearablesClientToken}" />
+
+        <!-- Main entry point -->
+        <!--
+             launchMode="singleTop" ensures that when the OAuth browser redirect
+             fires (com.jarvis.assistant://oauth/callback), Android delivers it to
+             the existing MainActivity via onNewIntent rather than creating a second
+             instance of the activity.
+        -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- OAuth redirect deep link -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="com.jarvis.assistant"
+                    android:host="oauth"
+                    android:path="/callback" />
+            </intent-filter>
+        </activity>
+
+        <!-- ─── Mac Camera viewer ─── -->
+        <activity
+            android:name=".ui.camera.MacCameraViewerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Jarvis"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- ─── Foreground service ─── -->
+        <!--
+             foregroundServiceType="microphone" is required on Android 14 when
+             the service accesses the microphone. Without it the OS kills the
+             service the moment it tries to open the audio record stream.
+        -->
+        <!--
+             foregroundServiceType="microphone|camera":
+             - microphone: wake word, STT, ambient recording
+             - camera: silent photo capture (user-requested only)
+             Both types must be declared here and as separate FOREGROUND_SERVICE_*
+             permission entries above (required on Android 14+).
+        -->
+        <service
+            android:name=".service.JarvisService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera|connectedDevice" />
+
+        <!-- ─── Boot receiver ─── -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Needed on some OEMs that send QUICKBOOT_POWERON instead -->
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ─── Reminder alarm receiver ─── -->
+        <!--
+             Receives AlarmManager broadcasts when a scheduled reminder or timer
+             is due.  ReminderScheduler builds the PendingIntent with an explicit
+             ComponentName, so the alarm is delivered *in-process* and no other
+             app can target this receiver — exported=false is correct and secure.
+        -->
+        <receiver
+            android:name=".reminders.ReminderAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- ─── Location reminder receiver ─── -->
+        <!--
+             Receives geofence transition PendingIntents from Google Play Services.
+             Must be exported=true so Play Services (an external process) can deliver.
+             NO intent-filter: LocationReminderManager registers an explicit PendingIntent
+             targeting this component directly — no implicit intent needed, and removing
+             the filter prevents other apps from spoofing geofence events.
+        -->
+        <receiver
+            android:name=".reminders.LocationReminderReceiver"
+            android:enabled="true"
+            android:exported="true" />
+
+        <!-- SavedPlaceGeofenceReceiver — records ENTER/EXIT transitions for
+             user-saved places (Home/Work/custom) so the proactive engine can
+             surface arrival/departure suggestions.  Not exported: only Play
+             Services should send these intents. -->
+        <receiver
+            android:name=".location.SavedPlaceGeofenceReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- ─── Issue reporter debug test trigger ─── -->
+        <!--
+             Owner/dev-only manual trigger for the auto-GitHub-issue pipeline.
+             Non-exported so only `adb shell am broadcast -n <explicit>` can
+             reach it; the receiver itself additionally rejects the intent at
+             runtime unless the APK is debuggable.  Release builds therefore
+             treat this as a permanent no-op even if the feature flag is on.
+        -->
+        <receiver
+            android:name=".reporting.github.IssueReporterDebugReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.jarvis.assistant.DEBUG_TEST_ISSUE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ─── Notification listener service ─── -->
+        <!-- User must grant access via Settings → Notification Access -->
+        <service
+            android:name=".notifications.JarvisNotificationListener"
+            android:exported="true"
+            android:label="Jarvis Notification Listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- ─── Call screening service (Android 10+) ─── -->
+        <!-- User must select Jarvis as the default screener in Phone app settings -->
+        <service
+            android:name=".calls.JarvisCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_CALL_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
+        <!-- ─── Overlay card service ─── -->
+        <!--
+             JarvisOverlayService draws the floating card layer using
+             TYPE_APPLICATION_OVERLAY. It is not a foreground service —
+             it runs in the background and attaches/detaches its
+             ComposeView to WindowManager as cards appear or clear.
+             SYSTEM_ALERT_WINDOW must be granted by the user first;
+             the service checks this before starting.
+        -->
+        <service
+            android:name=".overlay.JarvisOverlayService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- ─── Accessibility service (WhatsApp auto-send) ─── -->
+        <!--
+             The user must grant access once via Settings → Accessibility → Jarvis.
+             Scope is locked to WhatsApp events only (see xml/jarvis_accessibility_config.xml).
+             BIND_ACCESSIBILITY_SERVICE permission is held by the OS — exported=true is
+             required so the OS can bind to this service from outside the app process.
+        -->
+        <service
+            android:name=".accessibility.JarvisAccessibilityService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/jarvis_accessibility_config" />
+        </service>
+
+        <!-- FileProvider — exposes captured photos / recordings to other
+             apps via content:// URIs so ViewMediaTool / ShareMediaTool
+             can hand them to Gallery / Photos / Messages without the
+             receiving app crashing on file:// access (banned on API 24+).
+             Paths configured in @xml/jarvis_file_paths. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/jarvis_file_paths" />
+        </provider>
+
+    </application>
+
+</manifest>

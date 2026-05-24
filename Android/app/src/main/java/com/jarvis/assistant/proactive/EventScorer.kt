@@ -1,0 +1,230 @@
+package com.jarvis.assistant.proactive
+
+import android.util.Log
+
+/**
+ * EventScorer — converts raw [ProactiveEvent] candidates into [ScoredEvent]
+ * instances by applying the scoring formula and contextual penalties.
+ *
+ * ## Scoring formula
+ *
+ * 1. **Raw score** = `(urgency + relevance + confidence - annoyanceCost) / 3f`
+ *    Dividing by 3 normalises the theoretical maximum (3.0 when all positive
+ *    inputs = 1 and annoyanceCost = 0) to 1.0.
+ *
+ * 2. **Cooldown penalty** — applied when the event's dedupeKey was last
+ *    surfaced within its cooldown window:
+ *    `penalty = repetitionPenalty * (1 - msSinceLast / cooldownMs)`
+ *    The penalty is proportional to how recently the key was surfaced: it is
+ *    at its full weight right after surfacing and decreases linearly to zero
+ *    at the edge of the cooldown window.
+ *
+ * 3. **Speaking penalty** — applied when Jarvis is currently producing TTS
+ *    output.  Any interruption during active speech is jarring.
+ *
+ * 4. **Recent interaction penalty** — applied when the user interacted within
+ *    [ProactiveConfig.recentInteractionWindowMs].  The user just spoke; they
+ *    are already engaged and may not need a proactive nudge.
+ *
+ * 5. **Final score** = `clamp(rawScore - totalPenalty, 0f, 1f)`
+ *
+ * 6. The final score is mapped to an [InterruptLevel] using the thresholds in
+ *    [ProactiveConfig].
+ */
+class EventScorer(
+    private val config: ProactiveConfig,
+    private val cooldownStore: CooldownStore,
+    /**
+     * Optional per-action-class feedback source. When supplied, events in
+     * classes the user consistently ignores get an additional penalty so
+     * the system quietens itself instead of waiting for cooldown to stretch.
+     */
+    private val actionLedger: com.jarvis.assistant.core.decisions.ActionLedger? = null,
+) {
+
+    companion object {
+        private const val TAG = "EventScorer"
+        private const val LEARNED_MIN_SAMPLES = 4
+        private const val LEARNED_NEUTRAL_RATE = 0.5f
+        private const val LEARNED_PENALTY_WEIGHT = 0.4f
+
+        /**
+         * Maximum ignore count that contributes to cooldown escalation.  Past
+         * this point the cooldown stops growing — pattern-ignored suggestions
+         * are already effectively suppressed, and an ever-growing multiplier
+         * would make a one-off accepted suggestion (e.g. during travel)
+         * invisible for weeks.
+         */
+        private const val MAX_IGNORE_ESCALATION_STEPS = 5
+    }
+
+    // ── Public data class ─────────────────────────────────────────────────────
+
+    /**
+     * A [ProactiveEvent] decorated with scoring metadata produced by [score].
+     *
+     * @param event          The original event.
+     * @param rawScore       Normalised base score before penalties [0, 1].
+     * @param finalScore     Score after all penalties are applied; clamped to [0, 1].
+     * @param interruptLevel The [InterruptLevel] mapped from [finalScore].
+     * @param penalties      Named penalty contributions for debugging / logging.
+     */
+    data class ScoredEvent(
+        val event: ProactiveEvent,
+        val rawScore: Float,
+        val finalScore: Float,
+        val interruptLevel: InterruptLevel,
+        val penalties: Map<String, Float>
+    )
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * Score all [events] against the current [snapshot] and return a list of
+     * [ScoredEvent] instances, sorted descending by [ScoredEvent.finalScore].
+     */
+    fun scoreAll(
+        events: List<ProactiveEvent>,
+        snapshot: ContextSnapshot
+    ): List<ScoredEvent> = events
+        .map { score(it, snapshot) }
+        .sortedByDescending { it.finalScore }
+
+    /**
+     * Score a single [event] against [snapshot].
+     */
+    fun score(event: ProactiveEvent, snapshot: ContextSnapshot): ScoredEvent {
+        // Step 0 — honour explicit user-level suppression. When the user
+        // has muted an action class the final score is forced to zero so
+        // the event cannot cross either interrupt threshold regardless of
+        // how urgent the signal looks.
+        val actionClass = event.type.actionClassKey()
+        if (actionLedger?.isClassSuppressed(actionClass) == true) {
+            return ScoredEvent(
+                event = event,
+                rawScore = 0f,
+                finalScore = 0f,
+                interruptLevel = InterruptLevel.NONE,
+                penalties = mapOf("suppressed" to 1f),
+            )
+        }
+
+        // Step 1 — raw score
+        val raw = (event.urgency + event.relevance + event.confidence - event.annoyanceCost) / 3f
+
+        val penalties = mutableMapOf<String, Float>()
+
+        // Step 2 — cooldown / repetition penalty
+        // Cooldown stretches with each past ignore of this dedupeKey so that
+        // suggestions the user doesn't engage with back off over time.  The
+        // count is capped so the cooldown can't grow unbounded for keys the
+        // user permanently ignores (e.g. night-time charging prompts when
+        // the user is travelling for a week).
+        val baseCooldownMs = cooldownMsForType(event.type)
+        val ignoreCount    = cooldownStore.ignoreCount(event.dedupeKey)
+            .coerceAtMost(MAX_IGNORE_ESCALATION_STEPS)
+        val cooldownMs     = (baseCooldownMs *
+            (1f + ignoreCount * config.ignoreEscalationFactor)).toLong()
+        val msSinceLast = cooldownStore.msSinceSurfaced(event.dedupeKey)
+        val cooldownPenalty = if (msSinceLast < cooldownMs) {
+            val fraction = 1f - (msSinceLast.toFloat() / cooldownMs.toFloat())
+            config.repetitionPenalty * fraction.coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        if (cooldownPenalty > 0f) penalties["cooldown"] = cooldownPenalty
+
+        // Step 3 — speaking penalty
+        val speakingPenalty = if (snapshot.isJarvisSpeaking) config.speakingPenalty else 0f
+        if (speakingPenalty > 0f) penalties["speaking"] = speakingPenalty
+
+        // Step 4 — recent interaction penalty
+        val recentInteractionPenalty = run {
+            val lastMs = snapshot.lastUserInteractionTimeMillis ?: return@run 0f
+            val age = snapshot.currentTimeMillis - lastMs
+            if (age < config.recentInteractionWindowMs) config.recentInteractionPenalty else 0f
+        }
+        if (recentInteractionPenalty > 0f) penalties["recentInteraction"] = recentInteractionPenalty
+
+        // Step 4b — learned annoyance penalty from per-class accept rate.
+        // Classes the user has consistently dismissed get an added penalty
+        // on top of the linear cooldown escalation so sustained disinterest
+        // pulls the score below both thresholds rather than just slowing it.
+        val learnedPenalty = run {
+            val ledger = actionLedger ?: return@run 0f
+            val cls = event.type.actionClassKey()
+            val samples = ledger.verdictCount(cls)
+            if (samples < LEARNED_MIN_SAMPLES) return@run 0f
+            val rate = ledger.acceptRate(cls, minSamples = LEARNED_MIN_SAMPLES)
+            if (rate >= LEARNED_NEUTRAL_RATE) 0f
+            else (LEARNED_NEUTRAL_RATE - rate) * LEARNED_PENALTY_WEIGHT
+        }
+        if (learnedPenalty > 0f) penalties["learned"] = learnedPenalty
+
+        // Step 5 — apply total penalty
+        val totalPenalty = cooldownPenalty + speakingPenalty + recentInteractionPenalty + learnedPenalty
+        val finalScore   = (raw - totalPenalty).coerceIn(0f, 1f)
+
+        // Step 6 — map to interrupt level
+        val interruptLevel = when {
+            finalScore >= config.activeThreshold  -> InterruptLevel.ACTIVE
+            finalScore >= config.passiveThreshold -> InterruptLevel.PASSIVE
+            else                                  -> InterruptLevel.NONE
+        }
+
+        Log.v(
+            TAG,
+            "score(${event.type} / ${event.dedupeKey}): " +
+            "raw=${"%.3f".format(raw)} " +
+            "penalties=${penalties.entries.joinToString { "${it.key}=${"%.3f".format(it.value)}" }} " +
+            "final=${"%.3f".format(finalScore)} level=$interruptLevel"
+        )
+
+        return ScoredEvent(
+            event          = event,
+            rawScore       = raw.coerceIn(0f, 1f),
+            finalScore     = finalScore,
+            interruptLevel = interruptLevel,
+            penalties      = penalties
+        )
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Returns the cooldown window in milliseconds for a given [ProactiveEventType].
+     */
+    private fun cooldownMsForType(type: ProactiveEventType): Long = when (type) {
+        ProactiveEventType.LOW_BATTERY           -> config.cooldownLowBatteryMs
+        ProactiveEventType.UPCOMING_REMINDER     -> config.cooldownUpcomingReminderMs
+        ProactiveEventType.MISSED_CALL           -> config.cooldownMissedCallMs
+        ProactiveEventType.BEHAVIORAL_LEARNING   -> config.cooldownBehavioralLearningMs
+        ProactiveEventType.UNREAD_NOTIFICATION   -> config.cooldownUnreadNotificationMs
+        ProactiveEventType.UPCOMING_MEETING      -> config.cooldownUpcomingMeetingMs
+        ProactiveEventType.MEETING_STARTING_SOON -> config.cooldownMeetingStartingSoonMs
+        ProactiveEventType.DAILY_AGENDA          -> config.cooldownDailyAgendaMs
+        ProactiveEventType.ARRIVED_HOME          -> config.cooldownLocationTransitionMs
+        ProactiveEventType.LEFT_HOME             -> config.cooldownLocationTransitionMs
+        ProactiveEventType.ARRIVED_KNOWN_PLACE   -> config.cooldownLocationTransitionMs
+        // Scheduled-reminder lanes — the ScheduledReminderEngine owns
+        // its own dedupe so we don't need a per-type cooldown beyond
+        // the global one.  Reuse the existing upcoming-reminder window
+        // as a safe upper bound for any case where one of these events
+        // does land in this scorer path (e.g. a future direct inject).
+        ProactiveEventType.CALENDAR_EVENT_30M,
+        ProactiveEventType.CALENDAR_EVENT_10M,
+        ProactiveEventType.TODOIST_TASK_30M,
+        ProactiveEventType.TODOIST_TASK_10M,
+        ProactiveEventType.LOCAL_REMINDER_30M,
+        ProactiveEventType.LOCAL_REMINDER_10M    -> config.cooldownUpcomingReminderMs
+        // Ambient lanes — use a 15-minute cooldown per trigger to avoid
+        // repeating the same nudge in quick succession.
+        ProactiveEventType.AMBIENT_ROUTINE_SUGGESTION,
+        ProactiveEventType.AMBIENT_LOCATION_TODOIST_MATCH,
+        ProactiveEventType.AMBIENT_APP_CONTEXT_NUDGE,
+        ProactiveEventType.AMBIENT_HOME_ASSISTANT_ALERT,
+        ProactiveEventType.AMBIENT_TRAVEL_SUGGESTION,
+        ProactiveEventType.AMBIENT_MISSED_ROUTINE,
+        ProactiveEventType.AMBIENT_CUSTOMER_MESSAGE_NUDGE -> 15 * 60_000L
+    }
+}

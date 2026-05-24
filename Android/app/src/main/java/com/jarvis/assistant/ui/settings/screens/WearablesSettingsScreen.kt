@@ -1,0 +1,468 @@
+package com.jarvis.assistant.ui.settings.screens
+
+import android.widget.Toast
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import com.jarvis.assistant.JarvisApp
+import com.jarvis.assistant.wearables.meta.MetaWearablesState
+import com.jarvis.assistant.ui.settings.SettingsActionRow
+import com.jarvis.assistant.ui.settings.SettingsGroup
+import com.jarvis.assistant.ui.settings.SettingsInfoCard
+import com.jarvis.assistant.ui.settings.SettingsRowDivider
+import com.jarvis.assistant.ui.settings.SettingsScaffold
+import com.jarvis.assistant.ui.settings.SettingsToggleRow
+import com.jarvis.assistant.ui.settings.SettingsValueRow
+import kotlinx.coroutines.launch
+
+/**
+ * Wearables settings — Meta AI glasses module.
+ *
+ * Master switch is OFF by default.  When the user enables the module,
+ * the screen falls into one of:
+ *   - `SDK_UNAVAILABLE`  — DAT SDK not on classpath; suggest mock mode
+ *   - `DISCONNECTED`     — ready to connect
+ *   - `CONNECTING` / `CONNECTED` / `CAMERA_READY` / `STREAMING`
+ *   - `PERMISSION_MISSING` / `ERROR` — friendly recovery prompts
+ *
+ * Diagnostics buttons exercise the live manager so the user can
+ * verify the path end-to-end before relying on it for "look at this".
+ */
+@Composable
+internal fun WearablesSettingsScreen(
+    onBack: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    val repo    = JarvisApp.wearablesSettings
+    val mgr     = JarvisApp.metaWearables
+    val state   by repo.stateFlow.collectAsState()
+    val devState by mgr.stateFlow.collectAsState(initial = mgr.currentState)
+    val scope = rememberCoroutineScope()
+    var lastPhoto by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(state.enabled, state.useMockDevice) {
+        // Whenever the master toggle or mock-device flag flips, ask
+        // the manager to re-pick a backend.
+        mgr.refresh()
+    }
+
+    SettingsScaffold(title = "Wearables", onBack = onBack, onClose = onClose) {
+
+        SettingsInfoCard(
+            title = "Meta AI glasses",
+            body  = "Optional eyes-and-hands-free module powered by the " +
+                    "Meta Wearables DAT SDK.  When enabled, Jarvis can " +
+                    "capture from the glasses for \"look at this\", " +
+                    "\"take a glasses photo\", and \"read this\".  " +
+                    "OFF by default — privacy first.",
+        )
+
+        SettingsGroup(title = "Main control", description = "Master switch + mock") {
+            SettingsToggleRow(
+                title           = "Meta Wearables enabled",
+                description     = "Master switch.  OFF keeps the module dormant.",
+                checked         = state.enabled,
+                onCheckedChange = repo::setEnabled,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Use mock device",
+                description     = "Synthesise glasses connection + capture for testing " +
+                    "without hardware.  Useful when the DAT SDK isn't " +
+                    "installed yet.",
+                checked         = state.useMockDevice,
+                onCheckedChange = repo::setUseMockDevice,
+            )
+            SettingsRowDivider()
+            SettingsValueRow(
+                title       = "Connection state",
+                value       = devState.name,
+                description = "Live state from the wearables manager.",
+            )
+            SettingsRowDivider()
+            SettingsValueRow(
+                title       = "Registration status",
+                value       = mgr.registrationStatusLabel.ifBlank { "—" },
+                description = "Whether Jarvis is approved via the Meta AI " +
+                    "companion app to use the glasses.",
+            )
+            SettingsRowDivider()
+            SettingsValueRow(
+                title       = "Visible devices",
+                value       = mgr.visibleDeviceCount.toString(),
+                description = "Glasses paired in Meta AI that the SDK can see. " +
+                    "Zero means the glasses aren't paired or aren't on.",
+            )
+            // Device link state — critical when "couldn't connect" but
+            // the device count is > 0.  CONNECTED here means the BLE
+            // link is up and AutoDeviceSelector will accept it.
+            // DISCONNECTED here means the glasses are paired in Meta
+            // AI but not actively reachable right now — wake them up
+            // (open the case, wear them, open Meta AI).
+            mgr.firstDeviceLinkLabel.takeIf { it.isNotBlank() }?.let { link ->
+                SettingsRowDivider()
+                SettingsValueRow(
+                    title       = "Device link state",
+                    value       = link,
+                    description = "BLE link health for the first visible device. " +
+                        "CONNECTED = ready; DISCONNECTED = paired but offline " +
+                        "(wake the glasses).",
+                )
+            }
+            // Compatibility — when this is anything other than
+            // COMPATIBLE, session.start hangs at STARTING.  Most common
+            // cause of "stuck on CONNECTING".
+            mgr.compatibilityLabel.takeIf { it.isNotBlank() }?.let { compat ->
+                SettingsRowDivider()
+                SettingsValueRow(
+                    title       = "Device compatibility",
+                    value       = compat,
+                    description = "COMPATIBLE = ready. DEVICE_UPDATE_REQUIRED = " +
+                        "glasses firmware too old (use Check firmware update). " +
+                        "DAT_APP_UPDATE_REQUIRED = Meta AI's DAT app for this " +
+                        "App ID needs updating.",
+                )
+            }
+            mgr.lastError?.takeIf { it.isNotBlank() }?.let { err ->
+                SettingsRowDivider()
+                SettingsValueRow(
+                    title       = "Last error",
+                    value       = err.take(120),
+                    description = "Most recent failure from the SDK (logged " +
+                        "with [META_WEARABLES_ERROR] in logcat).",
+                )
+            }
+        }
+
+        SettingsGroup(
+            title = "App registration",
+            description = "Required before the SDK can find your glasses",
+        ) {
+            SettingsActionRow(
+                title       = "Register with Meta AI",
+                description = "Opens the Meta AI companion app so you can " +
+                    "approve Jarvis as a registered glasses app.  " +
+                    "Required once before the first connect.",
+                actionLabel = "Register",
+                onAction    = {
+                    val activity = (context as? android.app.Activity)
+                    if (activity == null) {
+                        Toast.makeText(context,
+                            "Open Settings from the main Jarvis screen so " +
+                                "we have an Activity to launch from.",
+                            Toast.LENGTH_LONG).show()
+                    } else if (!mgr.startRegistration(activity)) {
+                        Toast.makeText(context,
+                            "Registration unavailable — DAT SDK not active. " +
+                                "Check master toggle + mock toggle.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Unregister with Meta AI",
+                description = "Opens Meta AI to revoke this app's registration. " +
+                    "After completion you'll need to Register again before " +
+                    "connect will find a device.  Use when switching Meta " +
+                    "accounts or recovering from a stuck registration.",
+                actionLabel = "Unregister",
+                onAction    = {
+                    val activity = (context as? android.app.Activity)
+                    if (activity == null) {
+                        Toast.makeText(context,
+                            "Open Settings from the main Jarvis screen so " +
+                                "we have an Activity to launch from.",
+                            Toast.LENGTH_LONG).show()
+                    } else if (!mgr.startUnregistration(activity)) {
+                        Toast.makeText(context,
+                            "Unregistration unavailable — DAT SDK not active.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Reset SDK state (local)",
+                description = "Drop any active session and clear local SDK " +
+                    "caches without touching Meta-side registration.  Cheap " +
+                    "recovery for 'SDK is confused' — try this before " +
+                    "Unregister.",
+                actionLabel = "Reset",
+                onAction    = {
+                    scope.launch {
+                        mgr.resetSdkState()
+                        Toast.makeText(context,
+                            "SDK state reset. Registration kept; reconnect to retry.",
+                            Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
+        }
+
+        // Glasses-side permission status + grant buttons.  Distinct
+        // from Android's runtime CAMERA permission — the DAT SDK has
+        // its own permission surface granted via Meta AI.  Without
+        // CAMERA granted here, session.start can hang at STARTING
+        // indefinitely.
+        SettingsGroup(
+            title = "Glasses permissions",
+            description = "Must be granted via Meta AI before capture works",
+        ) {
+            SettingsValueRow(
+                title       = "Camera permission",
+                value       = mgr.cameraPermissionLabel,
+                description = "On-glasses CAMERA approval.  If this is " +
+                    "DENIED or UNKNOWN, photo capture won't work — tap " +
+                    "Grant camera below.",
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Grant camera permission",
+                description = "Opens Meta AI so you can approve glasses " +
+                    "camera access for Jarvis.",
+                actionLabel = "Grant",
+                onAction    = {
+                    val activity = (context as? android.app.Activity)
+                    if (activity == null || !mgr.requestCameraPermission(activity)) {
+                        Toast.makeText(context,
+                            "Permission request unavailable — DAT SDK not active.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            SettingsRowDivider()
+            SettingsValueRow(
+                title       = "Microphone permission",
+                value       = mgr.microphonePermissionLabel,
+                description = "On-glasses MICROPHONE approval (only needed " +
+                    "for audio capture; photos work without it).",
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Grant microphone permission",
+                description = "Opens Meta AI to approve glasses microphone access.",
+                actionLabel = "Grant",
+                onAction    = {
+                    val activity = (context as? android.app.Activity)
+                    if (activity == null || !mgr.requestMicrophonePermission(activity)) {
+                        Toast.makeText(context,
+                            "Permission request unavailable — DAT SDK not active.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+        }
+
+        SettingsGroup(
+            title = "Glasses updates",
+            description = "Open Meta AI's update screens if connect keeps stalling",
+        ) {
+            SettingsActionRow(
+                title       = "Check firmware update",
+                description = "Opens the firmware-update screen in Meta AI " +
+                    "for the linked glasses.  Try this if Connect hangs at " +
+                    "CONNECTING.",
+                actionLabel = "Open",
+                onAction    = {
+                    val activity = (context as? android.app.Activity)
+                    if (activity == null || !mgr.openFirmwareUpdate(activity)) {
+                        Toast.makeText(context,
+                            "Firmware update unavailable — DAT SDK not active.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Check DAT app update",
+                description = "Opens Meta AI's app-management screen for " +
+                    "the Jarvis registration.  Use if firmware looks fine " +
+                    "but Connect still hangs.",
+                actionLabel = "Open",
+                onAction    = {
+                    val activity = (context as? android.app.Activity)
+                    if (activity == null || !mgr.openDatAppUpdate(activity)) {
+                        Toast.makeText(context,
+                            "DAT app update unavailable — DAT SDK not active.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+        }
+
+        SettingsGroup(title = "Behaviour", description = "How Jarvis uses the glasses") {
+            SettingsToggleRow(
+                title           = "Auto-connect on Jarvis start",
+                description     = "Attempt a connection during runtime startup.",
+                checked         = state.autoConnectOnStart,
+                onCheckedChange = repo::setAutoConnectOnStart,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Use glasses for \"look at this\"",
+                description     = "Prefer the glasses camera for visual context requests.",
+                checked         = state.useForLookAtThis,
+                onCheckedChange = repo::setUseForLookAtThis,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Prefer glasses camera",
+                description     = "When both phone and glasses can capture, choose glasses.",
+                checked         = state.preferGlassesCamera,
+                onCheckedChange = repo::setPreferGlassesCamera,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Save captures to gallery",
+                description     = "Write glasses photos to the system gallery.",
+                checked         = state.saveCapturesToGallery,
+                onCheckedChange = repo::setSaveCapturesToGallery,
+            )
+        }
+
+        SettingsGroup(title = "Vision analysis", description = "OCR / object tags") {
+            SettingsToggleRow(
+                title           = "Vision analysis enabled",
+                description     = "Allow on-device + (optionally) cloud vision passes.",
+                checked         = state.visionAnalysisEnabled,
+                onCheckedChange = repo::setVisionAnalysisEnabled,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Prefer on-device vision",
+                description     = "Use Android ML Kit / Text Recognition over cloud.",
+                checked         = state.preferOnDeviceVision,
+                onCheckedChange = repo::setPreferOnDeviceVision,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Allow cloud vision",
+                description     = "Fall back to multimodal LLM when on-device can't.",
+                checked         = state.allowCloudVision,
+                onCheckedChange = repo::setAllowCloudVision,
+            )
+        }
+
+        SettingsGroup(title = "Privacy", description = "Local-first defaults") {
+            SettingsToggleRow(
+                title           = "Save visual history",
+                description     = "Keep a local store of what Jarvis has seen.",
+                checked         = state.saveVisualHistory,
+                onCheckedChange = repo::setSaveVisualHistory,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Confirm before sharing captures",
+                description     = "Ask before sending a captured photo to anyone.",
+                checked         = state.confirmBeforeSharing,
+                onCheckedChange = repo::setConfirmBeforeSharing,
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Confirm before saving memory",
+                description     = "Ask before creating a visual memory.",
+                checked         = state.confirmBeforeSavingMemory,
+                onCheckedChange = repo::setConfirmBeforeSavingMemory,
+            )
+        }
+
+        SettingsGroup(title = "Diagnostics", description = "Test the path end-to-end") {
+            SettingsActionRow(
+                title       = "Connect glasses",
+                description = "Attempt a connection now.",
+                actionLabel = "Connect",
+                onAction    = {
+                    scope.launch {
+                        val ok = mgr.connect(withCamera = true)
+                        val message = if (ok) {
+                            "Connected."
+                        } else {
+                            val err = mgr.lastError
+                            if (!err.isNullOrBlank())
+                                "Couldn't connect: $err"
+                            else
+                                "Couldn't connect (state=${mgr.currentState})."
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Force connect (ignore compatibility)",
+                description = "Skip the DEVICE_UPDATE_REQUIRED pre-check and let " +
+                    "the SDK attempt session.start anyway.  Use this when Meta AI " +
+                    "says firmware is current but the SDK still reports the device " +
+                    "as incompatible.  Will hang at CONNECTING and time out if the " +
+                    "firmware genuinely isn't on the DAT track.",
+                actionLabel = "Force",
+                onAction    = {
+                    scope.launch {
+                        val ok = mgr.connect(withCamera = true, force = true)
+                        val message = if (ok) {
+                            "Connected (force)."
+                        } else {
+                            val err = mgr.lastError
+                            if (!err.isNullOrBlank())
+                                "Force connect failed: $err"
+                            else
+                                "Force connect failed (state=${mgr.currentState})."
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Disconnect",
+                description = "Drop the active session.",
+                actionLabel = "Disconnect",
+                onAction    = {
+                    scope.launch { mgr.disconnect(); }
+                },
+            )
+            SettingsRowDivider()
+            SettingsActionRow(
+                title       = "Capture test photo",
+                description = "Capture one frame from the active backend.",
+                actionLabel = "Capture",
+                onAction    = {
+                    scope.launch {
+                        val uri = mgr.capturePhoto()
+                        lastPhoto = uri
+                        Toast.makeText(context,
+                            if (uri != null) "Photo captured." else "Capture failed (state=${mgr.currentState}).",
+                            Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
+            if (lastPhoto != null) {
+                SettingsRowDivider()
+                SettingsValueRow(
+                    title       = "Last photo",
+                    value       = lastPhoto!!.takeLast(48),
+                    description = "URI returned by the last capture.",
+                )
+            }
+        }
+
+        SettingsGroup(title = "Reset", description = "Restore defaults") {
+            SettingsActionRow(
+                title       = "Reset wearables settings",
+                description = "Restores the defaults from this screen.",
+                actionLabel = "Reset",
+                destructive = true,
+                confirm     = true,
+                onAction    = repo::resetToDefaults,
+            )
+        }
+    }
+}
