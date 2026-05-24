@@ -101,6 +101,66 @@ Expected: `{"status":"ok","daemon":true}`
 
 ---
 
+## 9 — Daemon unavailable: Mac shows diagnostic, not public port
+
+**Scenario**: daemon is enabled in prefs but not running.
+
+1. Ensure JarvisBrainDaemon is NOT running.
+2. Launch JarvisMac.
+3. Expected:
+   - Mac logs: `[BrainGateway] JarvisBrainDaemon is not running. Cross-device features unavailable.`
+   - `AppState.daemonUnavailable == true` (visible in Debug HUD if implemented)
+   - MacBrainServer starts on loopback only (camera + brain-context HTTP)
+   - Port 8765 is NOT bound by JarvisMac
+4. Verify: `curl http://localhost:8765/health` returns connection refused (no daemon, no Mac server on 8765)
+5. Start JarvisBrainDaemon.
+6. Expected: Mac reconnects, `AppState.daemonUnavailable` clears to false.
+
+---
+
+## 10 — Windows pair flow using /v1/windows/pair/code + /v1/windows/pair
+
+1. Mac app generates pairing code:
+   ```
+   POST http://127.0.0.1:8765/v1/windows/pair/code
+   Authorization: Bearer <gateway-token>
+   ```
+   Expected: `{ "code": "NNNNNN", "expiresAt": "…" }` within 200ms.
+2. Windows client uses code:
+   ```
+   POST http://[mac-ip]:8765/v1/windows/pair
+   Body: { "code": "NNNNNN", "deviceId": "win-pc", "deviceName": "Studio" }
+   ```
+   Expected: `{ "deviceToken": "<opaque>" }`, HTTP 200.
+3. Windows connects:
+   ```
+   GET ws://[mac-ip]:8765/v2/ws
+   Authorization: Bearer <deviceToken>
+   X-Platform: windows
+   ```
+   Expected: 101 Switching Protocols, daemon logs `Windows WS connected`.
+4. Verify: `curl http://localhost:8765/v1/devices` shows new device with `platform: "windows"`.
+5. Test voice round-trip from Windows: trigger STT → Mac replies → Windows TTS.
+
+---
+
+## 11 — Corrupt auth file: backup created, empty registry, log message
+
+1. Stop JarvisBrainDaemon.
+2. Write invalid JSON to `~/Library/Application Support/JarvisMac/gateway_paired_devices.json`:
+   ```
+   echo "CORRUPT DATA" > ~/Library/Application\ Support/JarvisMac/gateway_paired_devices.json
+   ```
+3. Start JarvisBrainDaemon.
+4. Expected:
+   - Log contains: `DaemonAuthStore: corrupt JSON — backed up to .bak, starting with empty registry`
+   - A `.bak` file is created alongside the JSON file
+   - Daemon starts successfully with no paired devices
+   - All existing pairings are lost (expected — corrupt file is unrecoverable)
+5. Pair a new device to verify the empty registry works correctly.
+
+---
+
 ## Log grep targets
 
 | Event | Platform | Tag / string |
@@ -115,3 +175,6 @@ Expected: `{"status":"ok","daemon":true}`
 | Reply received | Android | `onReplyFinal` |
 | Android speaks | Android | `[AUDIO_FOCUS_REQUEST] speakAndRecord` |
 | Port conflict | Daemon | listen error on 8765 |
+| Daemon unavailable | Mac | `[BrainGateway] JarvisBrainDaemon is not running` |
+| Auth file corrupt | Daemon | `DaemonAuthStore: corrupt JSON — backed up to .bak` |
+| Windows pair code | Daemon | request to `/v1/windows/pair/code` |

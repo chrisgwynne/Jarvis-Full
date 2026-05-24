@@ -50,6 +50,7 @@ final class DaemonOfflineQueue {
     // MARK: - Diagnostics
 
     private(set) var droppedCount: Int = 0
+    private(set) var drainedCount: Int = 0
     private(set) var replayUnsafeDroppedCount: Int = 0
     private(set) var expiredEvictedCount: Int = 0
 
@@ -117,7 +118,8 @@ final class DaemonOfflineQueue {
             evictExpired()
             let result = queue.map { $0.envelope }
             queue = []
-            queueLogger.info("offline queue drained \(result.count) messages")
+            drainedCount += result.count
+            queueLogger.info("offline queue drained \(result.count) messages (total drained=\(self.drainedCount))")
             return result
         }
     }
@@ -134,7 +136,7 @@ final class DaemonOfflineQueue {
     /// Returns a human-readable snapshot for the diagnostics inspector.
     var diagnosticsSummary: String {
         lock.withLock {
-            "depth=\(queue.count) dropped=\(droppedCount) replayUnsafeDropped=\(replayUnsafeDroppedCount) expiredEvicted=\(expiredEvictedCount)"
+            "depth=\(queue.count) dropped=\(droppedCount) drained=\(drainedCount) replayUnsafeDropped=\(replayUnsafeDroppedCount) expiredEvicted=\(expiredEvictedCount)"
         }
     }
 

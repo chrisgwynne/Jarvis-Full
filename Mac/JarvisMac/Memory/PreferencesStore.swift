@@ -134,8 +134,8 @@ struct Preferences: Codable, Equatable {
     /// When true, the app defers port 8765 to the background LaunchAgent daemon
     /// instead of hosting the server in-process.
     var daemonEnabled: Bool = true
-    /// When daemonEnabled is true AND the daemon is not running, fall back to
-    /// starting the in-app server instead of staying offline.
+    /// Kept for JSON backward compatibility. Always false — the Mac app no longer
+    /// falls back to hosting an external WebSocket server when the daemon is absent.
     var legacyBrainServerEnabled: Bool = false
     /// When true, Mac TTS speaks the reply generated for a remote device locally.
     /// Default off — remote device handles its own TTS.
@@ -158,6 +158,8 @@ struct Preferences: Codable, Equatable {
     var brainServerBindLocalOnly: Bool = false
 
     // ── Distributed Brain / Windows Sidecar ─────────────────────────────────
+    /// Kept for JSON backward compatibility. Never used to activate bridging —
+    /// JarvisBrainDaemon owns all cross-device WebSocket hosting.
     var distributedBrainEnabled: Bool = false
 
     // ── Mac Brain Gateway (unified port 8765) ────────────────────────────────

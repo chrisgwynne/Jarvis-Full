@@ -75,14 +75,9 @@ final class GlobalProactivityCoordinator {
             ProactivityOrchestrator.shared.publish(event)
         }
 
-        if decision.deliverOnWindows {
-            MacBridgeProtocolV2.shared.pushEvent(type: .proactiveEvent, payload: [
-                "title": event.title,
-                "body": event.body,
-                "urgency": event.urgency.rawValue,
-                "source": event.source.rawValue
-            ])
-        }
+        // Daemon routing handles proactive delivery to Windows — MacBridgeProtocolV2 is deprecated.
+        // JarvisBrainDaemon routes proactive.notify messages via its own WebSocket sessions.
+        _ = decision.deliverOnWindows
     }
 }
 

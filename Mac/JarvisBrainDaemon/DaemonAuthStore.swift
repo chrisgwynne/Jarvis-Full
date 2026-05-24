@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 import Security
 
 /// A device that completed the pairing handshake.
@@ -50,6 +51,9 @@ struct ActivePairingCode {
 /// Does NOT import the main app target.
 final class DaemonAuthStore {
     static let shared = DaemonAuthStore()
+
+    private let storeLock = NSLock()
+    private let serverLog = Logger(subsystem: "com.jarvis.daemon", category: "auth")
 
     private(set) var pairedDevices: [PairedDevice] = []
     private(set) var activePairingCode: ActivePairingCode? = nil
@@ -137,17 +141,28 @@ final class DaemonAuthStore {
     }
 
     private func save() {
-        guard let d = try? JSONEncoder().encode(pairedDevices) else { return }
-        try? FileManager.default.createDirectory(
-            at: storeURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
-        try? d.write(to: storeURL, options: .atomic)
+        storeLock.withLock {
+            guard let d = try? JSONEncoder().encode(pairedDevices) else { return }
+            try? FileManager.default.createDirectory(
+                at: storeURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try? d.write(to: storeURL, options: .atomic)
+        }
     }
 
     private func load() {
-        guard let d = try? Data(contentsOf: storeURL),
-              let decoded = try? JSONDecoder().decode([PairedDevice].self, from: d) else { return }
-        pairedDevices = decoded
+        storeLock.withLock {
+            guard let data = try? Data(contentsOf: storeURL) else { return }
+            if let decoded = try? JSONDecoder().decode([PairedDevice].self, from: data) {
+                pairedDevices = decoded
+            } else {
+                // Corrupt JSON — backup and start fresh
+                let backupURL = storeURL.deletingPathExtension().appendingPathExtension("json.bak")
+                try? data.write(to: backupURL, options: .atomic)
+                serverLog.error("DaemonAuthStore: corrupt JSON — backed up to .bak, starting with empty registry")
+                pairedDevices = []
+            }
+        }
     }
 
     // MARK: - Crypto

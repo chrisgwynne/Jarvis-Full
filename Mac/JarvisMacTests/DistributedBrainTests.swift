@@ -204,13 +204,7 @@ final class DistributedBrainTests: XCTestCase {
         XCTAssertEqual(coord.pendingCount, 0)
     }
 
-    // MARK: - MacBridgeProtocolV2 routes
-
-    func testMacBridgeProtocolV2Shared() {
-        // Smoke test: shared instance exists and responds
-        let bridge = MacBridgeProtocolV2.shared
-        XCTAssertNotNil(bridge)
-    }
+    // MARK: - (deleted) MacBridgeProtocolV2 is deprecated — external WS hosting moved to JarvisBrainDaemon
 
     // MARK: - pbxproj UUID regression
 

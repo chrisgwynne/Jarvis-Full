@@ -5524,27 +5524,28 @@ final class JarvisController {
     // MARK: - Mac Brain HTTP server
 
     func startBrainServer() {
-        // If the daemon is running and owns port 8765, skip starting the in-app server
-        // to avoid a port conflict. The daemon persists across app restarts.
-        if prefs.current.daemonEnabled {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let daemonAlive = await DaemonManager.shared.checkDaemonHealth()
-                if daemonAlive {
-                    Log.net.info("[BrainGateway] Daemon owns port 8765 — skipping in-app server")
-                    return
-                }
-                // Daemon enabled but not running — fall through to legacy server if opted in
-                if self.prefs.current.legacyBrainServerEnabled {
-                    self._startBrainServerLegacy()
-                }
-            }
+        guard prefs.current.daemonEnabled else {
+            // Daemon disabled at prefs level — start local brain-context + camera HTTP only
+            // (loopback only, brain-context routes, NO external WebSocket hosting)
+            _startLocalBrainContextServer()
             return
         }
-        _startBrainServerLegacy()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let daemonAlive = await DaemonManager.shared.checkDaemonHealth()
+            if daemonAlive {
+                Log.net.info("[BrainGateway] Daemon owns port 8765 — skipping in-app server")
+                self.state.daemonUnavailable = false
+                return
+            }
+            // Daemon not running — surface diagnostic, do NOT bind port 8765
+            Log.net.error("[BrainGateway] JarvisBrainDaemon is not running. Cross-device features unavailable.")
+            self.state.daemonUnavailable = true
+            self._startLocalBrainContextServer()
+        }
     }
 
-    private func _startBrainServerLegacy() {
+    private func _startLocalBrainContextServer() {
         let engine = BrainContextEngine()
         engine.memoryProvider     = MemoryContextProvider()
         engine.projectProvider    = ProjectContextProvider()
@@ -5584,14 +5585,7 @@ final class JarvisController {
             cameraDiagnostics.log(.serverEnabled)
         }
 
-        // Log deprecation notice if legacy port is still active.
-        let legacyPortActive = prefs.current.legacyAndroidPortEnabled
-        let gatewayPort = prefs.current.brainServerPort
-        if legacyPortActive {
-            gatewayDiagnostics.deprecatedAndroidPortEnabled = true
-            Log.net.warning("Legacy Android port 17872 is active. Update Android app to use the new /v1/android/ws endpoint on port \(gatewayPort, privacy: .public)")
-        }
-
+        // Local brain-context + camera HTTP only — loopback-only, no external WebSocket hosting.
         server.start(
             port: prefs.current.brainServerPort,
             bindLocalOnly: prefs.current.brainServerBindLocalOnly

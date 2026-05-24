@@ -10,6 +10,7 @@ import Network
 // AndroidBridgeManager calls `gatewayAndroidConnector.broadcast(_:)` to push to
 // Android, and wires `onMessage` to receive inbound Android frames.
 
+@available(*, deprecated, message: "External WebSocket hosting is now owned by JarvisBrainDaemon. This class is inert.")
 @MainActor
 final class GatewayAndroidConnector {
 

@@ -291,22 +291,7 @@ struct MacBrainGatewaySettingsView: View {
                 }
             } header: { Text("Remote Requests") }
 
-            // ── Legacy Port ───────────────────────────────────────────────
-            Section {
-                Toggle("Keep legacy Android port 17872 active",
-                       isOn: Binding(
-                           get: { controller.prefs.current.legacyAndroidPortEnabled },
-                           set: { v in
-                               controller.prefs.update { $0.legacyAndroidPortEnabled = v }
-                               if controller.prefs.current.brainServerEnabled {
-                                   controller.restartBrainServer()
-                               }
-                           }
-                       ))
-                Label("Deprecated. Android WebSocket has moved to wss://…:\(controller.prefs.current.brainServerPort)/v1/android/ws. Only enable this for old Android installs that haven't updated yet.",
-                      systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            } header: { Text("Legacy Port (Deprecated)") }
+            // Legacy port toggle removed — external WebSocket hosting is owned by JarvisBrainDaemon.
         }
         .formStyle(.grouped)
         .onDisappear {

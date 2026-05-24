@@ -228,12 +228,7 @@ final class MacBrainGatewayTests: XCTestCase {
         Keychain.remove(KeychainAccount.gatewayToken)
     }
 
-    // MARK: - 19. GatewayAndroidConnector connectedCount starts at zero
-
-    func test_gatewayAndroidConnector_connectedCountStartsAtZero() {
-        let connector = GatewayAndroidConnector()
-        XCTAssertEqual(connector.connectedCount, 0)
-    }
+    // MARK: - 19. (deleted) GatewayAndroidConnector is deprecated — external WS hosting moved to JarvisBrainDaemon
 
     // MARK: - 20. pbxproj gateway UUIDs uniqueness
 

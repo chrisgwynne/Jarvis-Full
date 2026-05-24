@@ -302,6 +302,14 @@ final class BrainDaemonServer {
             let dict: [String: Any] = ["deviceToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
+        case ("POST", "/v1/windows/pair/code"):
+            let code = DaemonAuthStore.shared.generatePairingCode()
+            let dict: [String: Any] = [
+                "code": code.code,
+                "expiresAt": ISO8601DateFormatter().string(from: code.expiresAt)
+            ]
+            send(conn, statusCode: 200, body: toJSON(dict))
+
         case ("POST", "/v1/windows/pair"):
             struct WinPairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
             guard let req = try? JSONDecoder().decode(WinPairReq.self, from: body) else {
