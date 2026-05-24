@@ -21,7 +21,7 @@ struct MacBrainGatewaySettingsView: View {
     var body: some View {
         Form {
             // ── Brain Daemon (LaunchAgent) ────────────────────────────────
-            DaemonControlView(manager: DaemonManager.shared)
+            DaemonControlView(manager: DaemonManager.shared, appState: controller.state)
 
             // ── Mac Brain Gateway Enable ───────────────────────────────────
             Section {

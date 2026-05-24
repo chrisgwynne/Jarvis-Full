@@ -2,11 +2,8 @@ import XCTest
 @testable import JarvisMac
 
 /// Contract tests that prove the cross-device architecture invariants.
-/// All tests run purely against JarvisMac types — DaemonAuthStore and
-/// DaemonOfflineQueue live in the JarvisBrainDaemon executable target and
-/// cannot be tested here without a separate target setup.
-/// Those daemon types are covered by comments that document what the separate
-/// daemon contract tests would verify.
+/// These tests validate source-level contracts: deprecated classes are not instantiated,
+/// internal types hold correct defaults, and the daemon-centric routing is properly wired.
 final class DaemonArchitectureContractTests: XCTestCase {
 
     // MARK: - 1. Windows pair endpoint path prefix
@@ -84,16 +81,65 @@ final class DaemonArchitectureContractTests: XCTestCase {
         XCTAssertFalse(decoded.legacyBrainServerEnabled)
     }
 
-    // MARK: - 10. GatewayAndroidConnector is deprecated (compile-time guard)
+    // MARK: - 10. GatewayAndroidConnector is never instantiated in JarvisController
 
-    func testGatewayAndroidConnectorIsAnnotatedDeprecated() {
-        // The @available(*, deprecated) attribute means this will generate a compiler
-        // warning if used. We verify the class can still be instantiated (it is inert,
-        // not fatal), but we do NOT call any external WebSocket methods.
-        // If this test compiles, the deprecated annotation is present and correct.
-        // Suppress the deprecation warning with the underscore pattern.
-        let connector = GatewayAndroidConnector()
-        XCTAssertEqual(connector.connectedCount, 0, "Deprecated connector should start with no clients")
+    func testJarvisControllerDoesNotReferenceGatewayAndroidConnector() {
+        // Read JarvisController.swift source and verify GatewayAndroidConnector is not referenced
+        // (other than the @available deprecated annotation on the class itself).
+        let sourceURL = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent()           // JarvisMacTests/
+            .deletingLastPathComponent()           // Mac/
+            .appendingPathComponent("JarvisMac/Core/JarvisController.swift")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            XCTFail("Could not read JarvisController.swift")
+            return
+        }
+        XCTAssertFalse(
+            source.contains("GatewayAndroidConnector"),
+            "JarvisController must not reference GatewayAndroidConnector — external WebSocket is owned by JarvisBrainDaemon"
+        )
+    }
+
+    func testMacBrainServerHasNoAndroidConnectorProperty() {
+        // Verify MacBrainServer.swift does not declare an androidConnector property.
+        let sourceURL = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("JarvisMac/MacBrain/MacBrainServer.swift")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            XCTFail("Could not read MacBrainServer.swift")
+            return
+        }
+        XCTAssertFalse(
+            source.contains("androidConnector"),
+            "MacBrainServer must not own androidConnector — external WebSocket is owned by JarvisBrainDaemon"
+        )
+    }
+
+    func testStartBrainServerDoesNotReferenceMacBridgeProtocolV2() {
+        // Verify JarvisController's startBrainServer() function does not wire MacBridgeProtocolV2.
+        let sourceURL = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("JarvisMac/Core/JarvisController.swift")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            XCTFail("Could not read JarvisController.swift")
+            return
+        }
+        // Verify: either MacBridgeProtocolV2 is not mentioned in startBrainServer context,
+        // or any mention is inside a deprecated/dead code comment.
+        // Simple check: if it appears it must only be in a comment or @available annotation.
+        let lines = source.components(separatedBy: .newlines)
+        let liveLines = lines.filter {
+            $0.contains("MacBridgeProtocolV2") &&
+            !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") &&
+            !$0.contains("deprecated") &&
+            !$0.contains("@available")
+        }
+        XCTAssertTrue(
+            liveLines.isEmpty,
+            "MacBridgeProtocolV2 must not be wired at runtime. Found live references:\n\(liveLines.joined(separator: "\n"))"
+        )
     }
 
     // MARK: - 11. MacBrainServer does not expose v2Routes or androidConnector as public API
@@ -177,24 +223,9 @@ final class DaemonArchitectureContractTests: XCTestCase {
     }
 }
 
-// MARK: - Daemon-side contract notes (require JarvisBrainDaemon test target)
+// MARK: - Daemon-side contract tests
 //
-// The following invariants are verified in DaemonAuthStore / DaemonOfflineQueue
-// but cannot be tested from JarvisMacTests because those types are in the
-// JarvisBrainDaemon executable target:
-//
-// DaemonAuthStore:
-//   - Empty bearer returns false (isAuthorized("") == false)
-//   - generate + complete pairing round-trip returns non-nil token
-//   - Wrong code fails (completePairing(code: "000000", ...) == nil)
-//   - Revoked device is not authorized after revokeDevice(id:)
-//   - Windows pairing sets platform to "windows" on PairedDevice
-//   - Corrupt JSON: load() backs up to .bak and starts with empty registry
-//   - storeLock prevents concurrent write corruption (NSLock usage verified by code review)
-//
-// DaemonOfflineQueue:
-//   - Caps at maxDepth=50 (enqueue 60 → depth <= 50)
-//   - replay-unsafe types (reply.final, orchestrate.speak) are not queued
-//   - drain() returns all queued items and clears queue (depth == 0)
-//   - drainedCount increments by drain count (drainedCount == 2 after draining 2)
-//   - diagnosticsSummary includes "drained=N"
+// DaemonAuthStore and DaemonOfflineQueue invariants are tested in
+// Mac/JarvisBrainDaemonTests/DaemonCoreTests.swift (JarvisBrainDaemonTests target).
+// Those tests use source-based replicas of the daemon logic since the daemon
+// is an executable target that cannot be @testable import-ed.
