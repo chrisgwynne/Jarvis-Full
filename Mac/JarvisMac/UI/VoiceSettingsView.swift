@@ -99,6 +99,9 @@ struct VoiceSettingsView: View {
 
                     // ── TTS Diagnostics ───────────────────────────────────────
                     ttsDiagnosticsSection
+
+                    // ── Voice Lab ─────────────────────────────────────────────
+                    voiceLabSection
                 }
                 .formStyle(.grouped)
             }
@@ -735,6 +738,26 @@ struct VoiceSettingsView: View {
                     Text(err).foregroundStyle(.red).font(.caption)
                 }
             }
+        }
+    }
+
+    // MARK: - Voice Lab section
+
+    private var voiceLabSection: some View {
+        Section {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Compare TTS backends side-by-side, run benchmarks, and set the active voice.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open Voice Lab") {
+                    controller.openOverlay(.voiceLab)
+                }
+            }
+        } header: {
+            Text("Voice Lab")
         }
     }
 
