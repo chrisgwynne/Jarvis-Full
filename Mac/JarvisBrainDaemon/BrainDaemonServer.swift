@@ -16,6 +16,8 @@ final class BrainDaemonServer {
 
     /// Tracks when the last ping was sent per client, for RTT measurement.
     private var lastPingSentAt: [String: Date] = [:]
+    /// Accumulates raw TCP bytes per client until complete WebSocket frames can be parsed.
+    private var receiveBuffers: [String: [UInt8]] = [:]
 
     let port: Int
 
@@ -375,7 +377,7 @@ final class BrainDaemonServer {
                 send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
                 return
             }
-            let dict: [String: Any] = ["deviceToken": rawToken]
+            let dict: [String: Any] = ["sessionToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
         case ("POST", "/v1/mac/pair/code"):
@@ -598,45 +600,50 @@ final class BrainDaemonServer {
                 return
             }
             if let data, !data.isEmpty {
-                let bytes = Array(data)
-                guard bytes.count >= 2 else {
-                    self.receiveWebSocketFrames(conn: conn, clientId: clientId, platform: platform)
-                    return
-                }
-                let opcode = bytes[0] & 0x0F
+                // Accumulate into per-client buffer so partial and coalesced TCP reads
+                // are handled correctly — one NWConnection receive call may deliver
+                // a partial frame or multiple complete frames.
+                var buf = self.receiveBuffers[clientId] ?? []
+                buf.append(contentsOf: data)
 
-                switch opcode {
-                case 0x01, 0x02:  // text or binary
-                    // Task 4c: record lastSeen on any frame
-                    DaemonAuthStore.shared.recordSeen(deviceId: clientId)
-                    if let text = Self.parseWebSocketFrame(bytes) {
-                        // Wrap raw client frame in DaemonMessageEnvelope and route to other clients.
+                // Drain all complete frames from the buffer.
+                var disconnectRequested = false
+                while !buf.isEmpty {
+                    guard let (result, consumed) = Self.parseNextWebSocketFrame(buf) else { break }
+                    buf = Array(buf[consumed...])
+
+                    switch result {
+                    case .text(let text):
+                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
                         self.wrapAndRoute(rawJSON: text, fromClientId: clientId, platform: platform)
                         self.dispatchAndroidMessage(text: text, clientId: clientId, conn: conn, platform: platform)
+                    case .close:
+                        let closeFrame = Data([0x88, 0x00])
+                        conn.send(content: closeFrame, completion: .contentProcessed { _ in })
+                        disconnectRequested = true
+                    case .ping:
+                        let pongFrame = Data([0x8A, 0x00])
+                        conn.send(content: pongFrame, completion: .contentProcessed { _ in })
+                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                    case .pong:
+                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        if let sentAt = self.lastPingSentAt.removeValue(forKey: clientId) {
+                            let rttMs = Date().timeIntervalSince(sentAt) * 1000.0
+                            DaemonDiagnostics.shared.websocketRttMs = rttMs
+                            self.serverLog.debug("WS ping RTT for \(clientId): \(rttMs, format: .fixed(precision: 1))ms")
+                        }
+                    case .other:
+                        break
                     }
 
-                case 0x08:  // close
-                    // Send close frame back, then close
-                    let closeFrame = Data([0x88, 0x00])
-                    conn.send(content: closeFrame, completion: .contentProcessed { _ in })
+                    if disconnectRequested { break }
+                }
+
+                self.receiveBuffers[clientId] = buf
+
+                if disconnectRequested {
                     self.disconnectClient(clientId: clientId, platform: platform, conn: conn)
                     return
-
-                case 0x09:  // ping — send pong immediately
-                    let pongFrame = Data([0x8A, 0x00])
-                    conn.send(content: pongFrame, completion: .contentProcessed { _ in })
-                    DaemonAuthStore.shared.recordSeen(deviceId: clientId)
-
-                case 0x0A:  // pong — update lastSeen, record RTT
-                    DaemonAuthStore.shared.recordSeen(deviceId: clientId)
-                    if let sentAt = self.lastPingSentAt.removeValue(forKey: clientId) {
-                        let rttMs = Date().timeIntervalSince(sentAt) * 1000.0
-                        DaemonDiagnostics.shared.websocketRttMs = rttMs
-                        self.serverLog.debug("WS ping RTT for \(clientId): \(rttMs, format: .fixed(precision: 1))ms")
-                    }
-
-                default:
-                    self.serverLog.info("Unknown WS opcode \(opcode) from \(clientId)")
                 }
             }
             if isComplete {
@@ -644,6 +651,61 @@ final class BrainDaemonServer {
             } else {
                 self.receiveWebSocketFrames(conn: conn, clientId: clientId, platform: platform)
             }
+        }
+    }
+
+    private enum WSFrameResult {
+        case text(String)
+        case close
+        case ping
+        case pong
+        case other
+    }
+
+    /// Parses the next complete WebSocket frame from the front of `bytes`.
+    /// Returns (result, bytesConsumed) when a complete frame is available, or nil for partial frames.
+    private static func parseNextWebSocketFrame(_ bytes: [UInt8]) -> (WSFrameResult, Int)? {
+        guard bytes.count >= 2 else { return nil }
+        let opcode = bytes[0] & 0x0F
+        let masked = (bytes[1] & 0x80) != 0
+        var payloadLen = Int(bytes[1] & 0x7F)
+        var offset = 2
+        if payloadLen == 126 {
+            guard bytes.count >= 4 else { return nil }
+            payloadLen = Int(bytes[2]) << 8 | Int(bytes[3])
+            offset = 4
+        } else if payloadLen == 127 {
+            guard bytes.count >= 10 else { return nil }
+            payloadLen = 0
+            for i in 2..<10 { payloadLen = payloadLen << 8 | Int(bytes[i]) }
+            offset = 10
+        }
+        var maskKey = [UInt8](repeating: 0, count: 4)
+        if masked {
+            guard bytes.count >= offset + 4 else { return nil }
+            maskKey = Array(bytes[offset..<offset+4])
+            offset += 4
+        }
+        guard bytes.count >= offset + payloadLen else { return nil }
+
+        let frameSize = offset + payloadLen
+
+        switch opcode {
+        case 0x01, 0x02:  // text or binary
+            var payload = Array(bytes[offset..<offset+payloadLen])
+            if masked { for i in 0..<payload.count { payload[i] ^= maskKey[i % 4] } }
+            guard let text = String(bytes: payload, encoding: .utf8) else {
+                return (.other, frameSize)
+            }
+            return (.text(text), frameSize)
+        case 0x08:
+            return (.close, frameSize)
+        case 0x09:
+            return (.ping, frameSize)
+        case 0x0A:
+            return (.pong, frameSize)
+        default:
+            return (.other, frameSize)
         }
     }
 
@@ -682,6 +744,7 @@ final class BrainDaemonServer {
 
     private func disconnectClient(clientId: String, platform: String, conn: NWConnection) {
         conn.cancel()
+        receiveBuffers.removeValue(forKey: clientId)
         DaemonMessageRouter.shared.unregisterClient(id: clientId)
         switch platform {
         case "windows":
@@ -743,35 +806,6 @@ final class BrainDaemonServer {
     }
 
     // MARK: - WebSocket frame codec (RFC 6455)
-
-    private static func parseWebSocketFrame(_ bytes: [UInt8]) -> String? {
-        guard bytes.count >= 2 else { return nil }
-        let opcode = bytes[0] & 0x0F
-        guard opcode == 1 || opcode == 2 else { return nil }
-        let masked = (bytes[1] & 0x80) != 0
-        var payloadLen = Int(bytes[1] & 0x7F)
-        var offset = 2
-        if payloadLen == 126 {
-            guard bytes.count >= 4 else { return nil }
-            payloadLen = Int(bytes[2]) << 8 | Int(bytes[3])
-            offset = 4
-        } else if payloadLen == 127 {
-            guard bytes.count >= 10 else { return nil }
-            payloadLen = 0
-            for i in 2..<10 { payloadLen = payloadLen << 8 | Int(bytes[i]) }
-            offset = 10
-        }
-        var maskKey = [UInt8](repeating: 0, count: 4)
-        if masked {
-            guard bytes.count >= offset + 4 else { return nil }
-            maskKey = Array(bytes[offset..<offset+4])
-            offset += 4
-        }
-        guard bytes.count >= offset + payloadLen else { return nil }
-        var payload = Array(bytes[offset..<offset+payloadLen])
-        if masked { for i in 0..<payload.count { payload[i] ^= maskKey[i % 4] } }
-        return String(bytes: payload, encoding: .utf8)
-    }
 
     private func sendWebSocketText(_ text: String, conn: NWConnection) {
         let payload = Array(text.utf8)

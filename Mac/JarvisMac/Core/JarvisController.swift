@@ -1402,7 +1402,7 @@ final class JarvisController {
         // Phase 4 — wire DaemonAppBridge → Mac brain runtime (daemon-centric architecture)
         // DaemonAppBridge always connects to the daemon (JarvisBrainDaemon on port 8765).
         // When the daemon is not running, DaemonAppBridge retries with exponential backoff.
-        DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform in
+        DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform, correlationId in
             guard let self else { return }
             let ctx = RemoteDeviceContext(
                 deviceId: deviceId,
@@ -1410,7 +1410,7 @@ final class JarvisController {
                 deviceName: nil,
                 capabilities: [],
                 receivedAt: Date(),
-                routeId: UUID().uuidString
+                routeId: correlationId
             )
             Task { @MainActor in
                 let response = await self.handleRemoteTranscript(transcript, context: ctx)

@@ -54,7 +54,7 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
     private DateTimeOffset? _lastSuccessfulConnectAt;
     private DateTimeOffset? _degradedModeEnteredAt;
     private BridgeStatus _status = new(BridgeState.Disabled, DateTimeOffset.UtcNow, 0, null, null);
-    private readonly BlockingCollection<SidecarFrame> _outbound = new(OutboundQueueCap);
+    private BlockingCollection<SidecarFrame> _outbound = new(OutboundQueueCap);
     private long _outboundSeq;
     private long _lastInboundSeq;
     private double? _lastHeartbeatRttMs;
@@ -113,6 +113,9 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         if (_runLoop is not null) return Task.CompletedTask;
+        // Recreate the outbound queue if it was completed by a previous StopAsync call.
+        if (_outbound.IsAddingCompleted)
+            _outbound = new BlockingCollection<SidecarFrame>(OutboundQueueCap);
         _cts     = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _runLoop = Task.Run(() => RunAsync(_cts.Token));
         return Task.CompletedTask;
@@ -124,6 +127,8 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
         _cts.Cancel();
         _outbound.CompleteAdding();
         try { if (_runLoop is not null) await _runLoop.ConfigureAwait(false); } catch { }
+        _runLoop = null;
+        _cts = null;
         SetStatus(BridgeState.Disabled, null);
     }
 

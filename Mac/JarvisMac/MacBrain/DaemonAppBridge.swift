@@ -20,8 +20,8 @@ final class DaemonAppBridge: ObservableObject {
     private var pingTask: Task<Void, Never>?
 
     /// Called when a transcript.final arrives from Android/Windows via the daemon.
-    /// Parameters: (transcript, sourceDeviceId, sourcePlatform)
-    var onTranscript: ((String, String, String) -> Void)?
+    /// Parameters: (transcript, sourceDeviceId, sourcePlatform, correlationId)
+    var onTranscript: ((String, String, String, String) -> Void)?
     /// Called when a tool.result arrives.
     var onToolResult: ((Data) -> Void)?
     /// Called when an android.event arrives from the Android app via the daemon.
@@ -143,6 +143,10 @@ final class DaemonAppBridge: ObservableObject {
         let payload = json["payload"] as? [String: Any] ?? [:]
         let deviceId = json["sourceDeviceId"] as? String ?? ""
         let platform = json["sourcePlatform"] as? String ?? "android"
+        // Preserve the correlation id so Mac reply can be matched back to the source request.
+        let correlationId = json["correlationId"] as? String
+                         ?? json["messageId"] as? String
+                         ?? UUID().uuidString
 
         switch type {
         case "transcript.final":
@@ -151,7 +155,7 @@ final class DaemonAppBridge: ObservableObject {
                           ?? payload["transcript"] as? String
                           ?? ""
             if !transcript.isEmpty {
-                Task { @MainActor in self.onTranscript?(transcript, deviceId, platform) }
+                Task { @MainActor in self.onTranscript?(transcript, deviceId, platform, correlationId) }
             }
         // Canonical execution result type (Phase P9)
         case "execution.result":
@@ -197,6 +201,33 @@ final class DaemonAppBridge: ObservableObject {
                     self.onFileTransferCreated?(transferId, filename, mimeType, sizeBytes, openOnMac, suggestedAction, userVisibleName)
                 }
             }
+
+        // MARK: Cross-device frame types
+        case "presence.update":
+            Task { @MainActor in self.onPresenceUpdate?(payload) }
+
+        case "proactive.comm.prompt":
+            Task { @MainActor in self.onCommPrompt?(payload) }
+
+        case "handoff.request":
+            let key = payload["key"] as? String ?? ""
+            let value = payload["value"] as? String ?? ""
+            if !key.isEmpty {
+                Task { @MainActor in self.onHandoffReceived?(key, value) }
+            }
+
+        case "clipboard.update":
+            let text = payload["text"] as? String ?? ""
+            if !text.isEmpty {
+                Task { @MainActor in self.onClipboardUpdate?(text) }
+            }
+
+        case "notification.forward":
+            Task { @MainActor in self.onNotificationForward?(payload) }
+
+        case "context.update":
+            Task { @MainActor in self.onContextUpdate?(payload) }
+
         default:
             logger.debug("DaemonAppBridge: received type=\(type, privacy: .public)")
         }

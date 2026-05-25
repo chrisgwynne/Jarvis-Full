@@ -556,7 +556,7 @@ class BrainGatewayWebSocketClient(
         if (sent) {
             LatencyTracker.mark(LatencyTracker.TRANSCRIPT_SENT_TO_DAEMON)
         }
-        Log.d(TAG, "sendTranscript: ${text.take(80)}")
+        Log.d(TAG, "sendTranscript: len=${text.length}")
     }
 
     // ── Send ──────────────────────────────────────────────────────────────────

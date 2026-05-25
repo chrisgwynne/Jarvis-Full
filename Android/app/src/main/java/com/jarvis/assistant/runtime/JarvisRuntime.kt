@@ -2276,10 +2276,10 @@ class JarvisRuntime(
                     // [TRANSCRIPT_RAW] / [TRANSCRIPT_NORMALIZED] are the
                     // canonical grep targets for routing audits — emit them
                     // exactly once per turn, right after STT_COMPLETE.
-                    Log.d(TAG, "[TRANSCRIPT_RAW] \"$transcript\"")
+                    Log.d(TAG, "[TRANSCRIPT_RAW] len=${transcript.length}")
                     val transcriptNormalisedLog = com.jarvis.assistant.voice.routing
                         .TranscriptNormalizer.normalizeForMatching(transcript)
-                    Log.d(TAG, "[TRANSCRIPT_NORMALIZED] \"$transcriptNormalisedLog\"")
+                    Log.d(TAG, "[TRANSCRIPT_NORMALIZED] len=${transcriptNormalisedLog.length}")
 
                     // ── Brain Gateway relay ──────────────────────────────────
                     // When connected to the Mac brain daemon, forward the transcript
