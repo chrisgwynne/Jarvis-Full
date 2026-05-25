@@ -3209,19 +3209,26 @@ final class JarvisController {
         remoteResponseCapture = nil
         suppressNextSpeak = false
 
-        let responseText = capturedResponse ?? ""
+        let rawResponseText = capturedResponse ?? ""
 
         // 8. Show remote activity in Mac UI if enabled
         if prefs.current.showRemoteActivityInMacUI {
             state.lastRemoteActivityText = "[\(context.platform)] \(String(trimmed.prefix(80)))"
         }
 
-        // 9. Determine outcome
+        // 9a. Empty / whitespace guard — never send a blank reply.
+        //     The remote device's TTS engine must not receive empty text.
+        let responseText = cappedForRemoteTts(rawResponseText)
         if responseText.isEmpty {
+            // If the raw text was also blank the pipeline produced nothing useful.
+            // Log the reason and return an error so the device recovers gracefully.
+            let reason = rawResponseText.isEmpty ? "no_response_generated" : "response_blank_after_cap"
             state.remoteBrainErrorCount += 1
-            return .error("no_response_generated", routeId: context.routeId)
+            return .error(reason, routeId: context.routeId)
         }
 
+        // 9b. Final outcome — responseText is already capped to 3 sentences / 320 chars
+        //     matching Android's ResponseFormatter contract.
         state.remoteTranscriptHandledCount += 1
         state.lastRemoteReplyAt = Date()
         state.remoteReplySentCount += 1
@@ -7839,6 +7846,50 @@ final class JarvisController {
     }
 
     // MARK: - Text helpers
+
+    /// Apply a spoken-reply cap matching Android's ResponseFormatter rules.
+    ///
+    /// Remote replies are spoken by the Android or Windows TTS engine.  Android's
+    /// `ResponseFormatter` caps at 3 sentences / 320 chars, so this function mirrors
+    /// that contract on the Mac side before the reply is sent over the wire.
+    ///
+    /// Rules applied in order:
+    ///   1. Whitespace-only guard — returns empty string (caller must handle).
+    ///   2. Strip leading/trailing whitespace.
+    ///   3. Cap at `maxSentences` sentences (3 by default).
+    ///   4. Hard-cap at `maxChars` (320 by default), breaking on sentence boundary.
+    func cappedForRemoteTts(_ text: String, maxSentences: Int = 3, maxChars: Int = 320) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        // Split on sentence-ending punctuation followed by whitespace.
+        // This mirrors ResponseFormatter.splitSentences() in Android.
+        var sentences: [String] = []
+        var current = ""
+        for char in trimmed {
+            current.append(char)
+            if (char == "." || char == "!" || char == "?") {
+                let s = current.trimmingCharacters(in: .whitespaces)
+                if !s.isEmpty { sentences.append(s) }
+                current = ""
+            }
+        }
+        // Remaining non-punctuated tail
+        let tail = current.trimmingCharacters(in: .whitespaces)
+        if !tail.isEmpty { sentences.append(tail) }
+
+        let capped = sentences.prefix(maxSentences).joined(separator: " ")
+        guard capped.count > maxChars else { return capped }
+
+        // Hard char cap — prefer sentence boundary inside the limit.
+        let truncated = String(capped.prefix(maxChars))
+        let terminators: [Character] = [".", "!", "?"]
+        if let lastTerm = truncated.lastIndex(where: { terminators.contains($0) }),
+           truncated.distance(from: truncated.startIndex, to: lastTerm) > maxChars / 2 {
+            return String(truncated[...lastTerm]).trimmingCharacters(in: .whitespaces)
+        }
+        return truncated.trimmingCharacters(in: .whitespaces)
+    }
 
     /// Truncate `text` to at most `maxChars` characters, breaking on sentence
     /// boundaries where possible, for spoken summaries.

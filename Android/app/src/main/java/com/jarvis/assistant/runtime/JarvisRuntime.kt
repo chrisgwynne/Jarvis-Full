@@ -4017,6 +4017,19 @@ class JarvisRuntime(
                                 continue
                             }
                             is ToolDispatcher.DispatchResult.AugmentedLlm -> {
+                                // BRAIN OWNERSHIP NOTE: a local device tool returned an
+                                // augmented transcript that still requires LLM completion
+                                // (e.g. camera-vision or HAContext). This local LLM call
+                                // is device-local by design — the gateway cannot handle
+                                // it mid-tool because the tool context lives here. If the
+                                // Mac brain is Connected we log a degraded-local-llm marker
+                                // so this path remains visible in routing audits.
+                                if (brainGatewayClient.status.value ==
+                                    com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                                ) {
+                                    Log.d(TAG, "[DEGRADED_LOCAL_LLM] reason=augmented_llm " +
+                                        "gateway=connected tool_context=true")
+                                }
                                 val response = callLlm(r.augmentedTranscript, isOnline)
                                 speakAndRecord(response)
                                 machine.transition(JarvisState.Listening)
@@ -4033,6 +4046,15 @@ class JarvisRuntime(
                             }
                             is ToolDispatcher.DispatchResult.LlmFollowUp -> {
                                 if (r.spokenFeedback.isNotBlank()) speakAndRecord(r.spokenFeedback)
+                                // BRAIN OWNERSHIP NOTE: local tool requested an LLM follow-up
+                                // to enrich its result. If the gateway is Connected this is
+                                // intentional local LLM use — the follow-up context is device-local.
+                                if (brainGatewayClient.status.value ==
+                                    com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                                ) {
+                                    Log.d(TAG, "[DEGRADED_LOCAL_LLM] reason=llm_follow_up " +
+                                        "gateway=connected tool_context=true")
+                                }
                                 // fall through to LLM for follow-up
                             }
                         }
@@ -4110,6 +4132,11 @@ class JarvisRuntime(
                     }
 
                     // ── LLM inference via PromptAssembler + streaming ─────────────
+                    // BRAIN OWNERSHIP: this path is ONLY reached when the Mac brain gateway
+                    // is NOT Connected (the Connected branch did `continue` above at the
+                    // Brain Gateway relay block). This is the degraded / offline fallback.
+                    // If you see [ROUTE_FINAL_HANDLER] in logs WITH a Connected gateway,
+                    // that is a routing regression — add a test for it.
                     Log.d(TAG, "[ROUTE_FINAL_HANDLER] handler=local_llm transcript.len=${transcript.length}")
                     Log.d(TAG, "[FALLBACK_LOCAL_LLM_BEGIN] reason=no_local_match")
                     Log.d(TAG, "[MEMORY_RETRIEVE_BEGIN] transcript.len=${transcript.length}")
@@ -4841,7 +4868,19 @@ class JarvisRuntime(
     }
 
     private suspend fun speakAndRecord(text: String) {
+        // Empty/whitespace guard: never attempt TTS on an empty reply.
+        // ResponseFormatter.format() can return "" when the entire content was
+        // reasoning chain-of-thought — we must not speak that silence.
+        if (text.isBlank()) {
+            Log.d(TAG, "[SPEAK_SUPPRESSED] reason=blank_input")
+            return
+        }
         val base = ResponseFormatter.format(text)
+        // Post-format blank guard: if stripping markup left nothing, skip TTS.
+        if (base.isBlank()) {
+            Log.d(TAG, "[SPEAK_SUPPRESSED] reason=blank_after_format")
+            return
+        }
         // In driving mode, truncate to first 2 sentences to keep responses brief
         val formatted = if (drivingModeManager.isDriving) {
             base.split(Regex("(?<=[.!?])\\s+")).take(2).joinToString(" ")

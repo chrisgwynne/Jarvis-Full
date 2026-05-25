@@ -109,4 +109,34 @@ class ResponseFormatterTest {
         assertTrue(result.contains("Paris"))
         assertTrue(result.contains("thinking"))
     }
+
+    // ── Blank / empty input ──────────────────────────────────────────────────
+
+    @Test fun `empty string returns empty string`() {
+        assertEquals("", ResponseFormatter.format(""))
+    }
+
+    @Test fun `whitespace-only string returns empty string after reasoning strip`() {
+        // A string of only spaces: the reasoning-tag strip doesn't match, the
+        // markdown strip collapses whitespace, then the blank guard triggers.
+        val result = ResponseFormatter.format("   ")
+        // The trim at the top returns "" which then causes the fallback to raw.trim() = ""
+        assertTrue("whitespace-only should yield empty or whitespace-only",
+            result.isBlank())
+    }
+
+    @Test fun `only-reasoning tag returns empty string`() {
+        val raw = "<think>everything here is internal</think>"
+        val result = ResponseFormatter.format(raw)
+        // After stripping the think block nothing remains.
+        // format() returns "" for fully-reasoning content.
+        assertEquals("", result)
+    }
+
+    @Test fun `format of blank text is blank — speakAndRecord must guard`() {
+        // Regression: if the LLM returns a pure CoT block, format() returns "".
+        // The speakAndRecord blank guard (added in this sprint) must catch this.
+        val formatted = ResponseFormatter.format("<reasoning>all internal</reasoning>")
+        assertEquals("", formatted)
+    }
 }
