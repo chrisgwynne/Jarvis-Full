@@ -76,6 +76,23 @@ object ListenerDiagnostics {
     /** Effective role string, e.g. "FULL_ASSISTANT" or "BRIDGE_ONLY". */
     @Volatile var currentRole: String = "UNKNOWN"
 
+    // ── Remote reply tracking ─────────────────────────────────────────────────
+
+    /** Route ID of the currently pending remote (Mac brain) reply, or null if not waiting. */
+    @Volatile var pendingRemoteRouteId: String? = null
+
+    /** Wall-clock ms when AwaitingRemoteReply was entered; 0 if not waiting. */
+    @Volatile var awaitingRemoteReplySinceMs: Long = 0L
+
+    /** Number of remote reply attempts that timed out (8-second guard). */
+    val remoteReplyTimeouts = AtomicInteger(0)
+
+    /** Number of reply.final frames dropped because no route was pending. */
+    val staleReplyDrops = AtomicInteger(0)
+
+    /** Number of reply.final frames dropped because correlationId did not match pending route. */
+    val mismatchedReplyDrops = AtomicInteger(0)
+
     // ── Watchdog tracking ─────────────────────────────────────────────────────
 
     /** Number of watchdog-triggered wake-detector restarts since process start. */
@@ -121,6 +138,11 @@ object ListenerDiagnostics {
         currentRole                  = currentRole,
         watchdogRestartCount         = watchdogRestartCount.get(),
         lastWatchdogRestartMs        = lastWatchdogRestartMs,
+        pendingRemoteRouteId         = pendingRemoteRouteId,
+        awaitingRemoteReplySinceMs   = awaitingRemoteReplySinceMs,
+        remoteReplyTimeouts          = remoteReplyTimeouts.get(),
+        staleReplyDrops              = staleReplyDrops.get(),
+        mismatchedReplyDrops         = mismatchedReplyDrops.get(),
     )
 
     // ── Test helpers ──────────────────────────────────────────────────────────
@@ -142,6 +164,11 @@ object ListenerDiagnostics {
         currentRole           = "UNKNOWN"
         watchdogRestartCount.set(0)
         lastWatchdogRestartMs = 0L
+        pendingRemoteRouteId = null
+        awaitingRemoteReplySinceMs = 0L
+        remoteReplyTimeouts.set(0)
+        staleReplyDrops.set(0)
+        mismatchedReplyDrops.set(0)
     }
 }
 
@@ -167,6 +194,11 @@ data class DiagnosticsSnapshot(
     val currentRole:                   String,
     val watchdogRestartCount:          Int,
     val lastWatchdogRestartMs:         Long,
+    val pendingRemoteRouteId:          String?,
+    val awaitingRemoteReplySinceMs:    Long,
+    val remoteReplyTimeouts:           Int,
+    val staleReplyDrops:               Int,
+    val mismatchedReplyDrops:          Int,
 ) {
     /**
      * Compact multi-line summary suitable for the debug overlay card message field.
