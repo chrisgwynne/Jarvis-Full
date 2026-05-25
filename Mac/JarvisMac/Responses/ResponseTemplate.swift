@@ -560,6 +560,9 @@ enum ResponseKey {
     // Speech Latency Diagnostics
     static let showSpeechLatency = "diag.show_speech_latency"
 
+    // Voice Lab
+    static let showVoiceLab = "diag.show_voice_lab"
+
     // Focus Awareness (Sprint W)
     static let showFocus      = "context.show_focus"
     static let explainFocus   = "context.explain_focus"

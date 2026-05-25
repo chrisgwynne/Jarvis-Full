@@ -37,6 +37,7 @@ final class JarvisController {
     var tts: TextToSpeaking
     private let appleTTS: AVSpeechTTS     // always alive as Apple fallback
     let piperTTS: PiperTTS       // always alive; active only when selected
+    let ttsRouter: TTSBackendRouter      // routes speak() to the active backend
     let pronunciationDictionary: PronunciationDictionary
     let speechPreprocessor: SpeechPreprocessor
     private(set) var wakeWord: WakeWordDetecting
@@ -397,8 +398,19 @@ final class JarvisController {
         pTTS.fallbackTTS = aTTS
         self.appleTTS = aTTS
         self.piperTTS  = pTTS
-        // Active engine depends on saved pref
-        self.tts = prefs.current.ttsEngine == .piper ? pTTS : aTTS
+        // Build the modular TTS router; it acts as the single tts endpoint.
+        let piperBackend     = PiperTTSBackend(piper: pTTS)
+        let systemBackend    = SystemTTSBackend(apple: aTTS)
+        let supertonicBackend = SupertonicTTSBackend()
+        let routerBackendId  = prefs.current.ttsBackendId
+        let router = TTSBackendRouter(
+            piper:      piperBackend,
+            system:     systemBackend,
+            supertonic: supertonicBackend,
+            preferredBackendId: routerBackendId
+        )
+        self.ttsRouter = router
+        self.tts = router
         // Speech preprocessing (pronunciation + markdown stripping)
         let pronDict = PronunciationDictionary()
         self.pronunciationDictionary = pronDict
@@ -760,6 +772,7 @@ final class JarvisController {
         // Extracted to `rewireSpeakingObserver()` so it can be called again
         // when the TTS engine is switched at runtime.
         rewireSpeakingObserver()
+        ttsRouter.start()
 
         // 7. Wake word — gated by subsystemWakeWordEnabled
         if prefs.current.subsystemWakeWordEnabled {
@@ -4398,6 +4411,11 @@ final class JarvisController {
             speak(renderer.render(ResponseKey.showSpeechLatency))
             state.sessionLastOverlayKind = .speechLatency
 
+        case .showVoiceLab:
+            openOverlay(.voiceLab)
+            speak(renderer.render(ResponseKey.showVoiceLab))
+            state.sessionLastOverlayKind = .voiceLab
+
         // Focus awareness (Sprint W)
         case .showFocus:
             openOverlay(.runtimeDiagnostics)
@@ -7558,13 +7576,17 @@ final class JarvisController {
         prefs.update { $0.ttsEngine = engine }
         switch engine {
         case .appleSystem:
-            tts = appleTTS
+            let id = "system_apple"
+            ttsRouter.setActiveBackend(id: id)
+            prefs.update { $0.ttsBackendId = id }
         case .piper:
             piperTTS.configure(prefs: prefs.current)
-            tts = piperTTS
+            let id = "piper_onnx"
+            ttsRouter.setActiveBackend(id: id)
+            prefs.update { $0.ttsBackendId = id }
         }
-        // Re-wire observer to the new engine's stream — the old task is
-        // watching a stream that no longer emits updates.
+        // tts is the router (stable stream) — rewiring is a no-op but
+        // kept for safety in case a caller swapped tts directly.
         rewireSpeakingObserver()
         refreshTTSState()
     }
@@ -7614,7 +7636,24 @@ final class JarvisController {
     /// Refreshes AppState TTS diagnostics from the currently active engine.
     func refreshTTSState() {
         state.ttsEngine = prefs.current.ttsEngine
-        if let apple = tts as? AVSpeechTTS {
+        // Resolve the active backend through the router when available.
+        let active: any TextToSpeaking
+        if let router = tts as? TTSBackendRouter {
+            active = router.resolvedBackend
+        } else {
+            active = tts
+        }
+        if let sb = active as? SystemTTSBackend {
+            let v = sb.apple.resolvedVoice
+            state.ttsVoiceName       = v?.name ?? "System Default"
+            state.ttsVoiceIdentifier = v?.identifier ?? ""
+            state.ttsVoiceLanguage   = v?.language ?? ""
+        } else if let pb = active as? PiperTTSBackend {
+            let p = pb.piper
+            state.ttsVoiceName       = URL(fileURLWithPath: p.modelPath).lastPathComponent
+            state.ttsVoiceIdentifier = p.modelPath
+            state.ttsVoiceLanguage   = "custom"
+        } else if let apple = active as? AVSpeechTTS {
             if let v = apple.resolvedVoice {
                 state.ttsVoiceName       = v.name
                 state.ttsVoiceIdentifier = v.identifier
@@ -7624,7 +7663,7 @@ final class JarvisController {
                 state.ttsVoiceIdentifier = ""
                 state.ttsVoiceLanguage   = ""
             }
-        } else if let piper = tts as? PiperTTS {
+        } else if let piper = active as? PiperTTS {
             state.ttsVoiceName       = URL(fileURLWithPath: piper.modelPath).lastPathComponent
             state.ttsVoiceIdentifier = piper.modelPath
             state.ttsVoiceLanguage   = "custom"

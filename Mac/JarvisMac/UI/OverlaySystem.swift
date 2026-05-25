@@ -47,6 +47,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
     case ambientContext       // AmbientContextEngine debug / developer overlay
     case runtimeDiagnostics  // RuntimeCoordinator subsystem health + EventStore
     case speechLatency        // Speech-to-speech latency diagnostics
+    case voiceLab             // TTS backend comparison + benchmarking
     case spatialHUD          // in-app hand-gesture spatial interaction panel
     case haCamera            // Home Assistant camera snapshot viewer
     case haAllCameras        // Grid of all HA cameras
@@ -81,6 +82,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .ambientContext:       return "Ambient"
         case .runtimeDiagnostics:  return "Runtime"
         case .speechLatency:        return "Latency"
+        case .voiceLab:             return "Voice Lab"
         case .spatialHUD:           return "Spatial"
         case .haCamera:             return "Camera"
         case .haAllCameras:         return "Cameras"
@@ -116,6 +118,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .ambientContext:       return "eye.circle.fill"
         case .runtimeDiagnostics:  return "cpu.fill"
         case .speechLatency:        return "waveform.and.mic"
+        case .voiceLab:             return "waveform.badge.mic"
         case .spatialHUD:           return "hand.raised.fill"
         case .haCamera:             return "camera.fill"
         case .haAllCameras:         return "camera.on.rectangle.fill"
@@ -151,6 +154,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .ambientContext:       return .compact
         case .runtimeDiagnostics:  return .medium
         case .speechLatency:        return .medium
+        case .voiceLab:             return .medium
         case .spatialHUD:           return .large
         case .haCamera:             return .large
         case .haAllCameras:         return .large
@@ -186,6 +190,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .ambientContext:       return .teal
         case .runtimeDiagnostics:  return .indigo
         case .speechLatency:        return .green
+        case .voiceLab:             return .purple
         case .spatialHUD:           return .cyan
         case .haCamera:             return .orange
         case .haAllCameras:         return .orange
@@ -215,7 +220,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
              .github, .home, .shopify, .obsidian, .androidBridge, .phone,
              .help, .reddit, .brain, .ambientContext, .runtimeDiagnostics, .spatialHUD,
              .haCamera, .haAllCameras, .haDiagnostics, .surveillance,
-             .pingPong, .speechLatency:
+             .pingPong, .speechLatency, .voiceLab:
             return true
         }
     }
@@ -890,6 +895,8 @@ private struct OverlayPanelView: View {
             RuntimeDiagnosticsOverlayView()
         case .speechLatency:
             SpeechLatencyView()
+        case .voiceLab:
+            VoiceLabView(router: controller.ttsRouter)
         case .spatialHUD:
             // Spatial interaction is now ambient and always running.
             // This overlay shows read-only diagnostics for the live coordinator.

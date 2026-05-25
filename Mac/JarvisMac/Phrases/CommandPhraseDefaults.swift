@@ -661,6 +661,14 @@ enum CommandPhraseDefaults {
             ("pipeline timing",                 .exact),
         ]),
 
+        def("show_voice_lab", "Show Voice Lab", .screen,
+            "Open the Voice Lab for TTS backend comparison and benchmarking.", .low, [
+            ("voice lab",                       .exact),
+            ("show voice lab",                  .exact),
+            ("tts comparison",                  .exact),
+            ("voice benchmark",                 .exact),
+        ]),
+
         def("show_runtime_diagnostics", "Show Runtime Diagnostics", .screen,
             "Open the runtime subsystem health overlay.", .low, [
             ("runtime diagnostics",             .exact),

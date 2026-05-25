@@ -2028,6 +2028,13 @@ enum ResponsePlaybook {
             "Showing latency overlay.",
         ],
 
+        // Voice Lab
+        ResponseKey.showVoiceLab: [
+            "Opening Voice Lab.",
+            "Here's the TTS backend comparison.",
+            "Launching Voice Lab.",
+        ],
+
         // Focus Awareness (Sprint W)
         ResponseKey.showFocus: [
             "Opening focus diagnostics.",

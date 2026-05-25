@@ -573,6 +573,9 @@ struct IntentRouter {
         if t.contains("speech latency") || t.contains("latency diagnostics") || t.contains("pipeline timing") {
             return .showSpeechLatency
         }
+        if t.contains("voice lab") || t.contains("tts comparison") || t.contains("voice benchmark") {
+            return .showVoiceLab
+        }
         if t.contains("ping pong") || t.contains("pingpong") || t.contains("ping-pong")
             || t == "pong" || t.contains("play pong") {
             return .playPingPong
