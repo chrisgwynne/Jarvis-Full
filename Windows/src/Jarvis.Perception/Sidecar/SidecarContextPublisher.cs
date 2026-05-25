@@ -1,3 +1,4 @@
+using Jarvis.Core.Context;
 using Jarvis.Core.Conversation;
 using Jarvis.Core.Settings;
 using Jarvis.Core.Sidecar;
@@ -18,6 +19,8 @@ public sealed class SidecarContextPublisher : ISidecarContextPublisher
     private readonly IContextBudgeter _budgeter;
     private readonly IMacBridgeCoordinator _bridge;
     private readonly Func<SidecarSettings> _settings;
+    private readonly Func<AwarenessSettings>? _awarenessSettings;
+    private readonly IWindowsContextEngine? _contextEngine;
     private readonly object _gate = new();
     private string? _lastHash;
     private int _published;
@@ -29,13 +32,17 @@ public sealed class SidecarContextPublisher : ISidecarContextPublisher
         IConversationContextBuilder builder,
         IContextBudgeter budgeter,
         IMacBridgeCoordinator bridge,
-        Func<SidecarSettings> settings)
+        Func<SidecarSettings> settings,
+        IWindowsContextEngine? contextEngine = null,
+        Func<AwarenessSettings>? awarenessSettings = null)
     {
         _perception = perception;
         _builder = builder;
         _budgeter = budgeter;
         _bridge = bridge;
         _settings = settings;
+        _contextEngine = contextEngine;
+        _awarenessSettings = awarenessSettings;
     }
 
     public int Published { get { lock (_gate) return _published; } }
@@ -90,6 +97,23 @@ public sealed class SidecarContextPublisher : ISidecarContextPublisher
             LastHighlighted = compact.LastHighlighted?.Label
         };
 
+        // Enrich with context-engine fields (focus, presence, timeline).
+        // Skip enrichment when foreground-app tracking is disabled (privacy).
+        var trackingEnabled = _awarenessSettings?.Invoke().TrackForegroundApp ?? true;
+        if (trackingEnabled)
+        {
+            var engineCtx = _contextEngine?.Current;
+            if (engineCtx is not null)
+            {
+                payload.FocusMinutes = engineCtx.Focus.FocusDuration.TotalMinutes;
+                payload.PresenceMode = engineCtx.PresenceMode.ToString();
+                payload.ProductivityScore = engineCtx.Focus.ProductivityScore;
+                payload.AppSwitchesLast10Min = engineCtx.Focus.AppSwitchesLast10Min;
+                payload.RecentApps = engineCtx.RecentProcessNames.Length > 0 ? engineCtx.RecentProcessNames : null;
+                payload.TimelineSummary = engineCtx.Timeline.ToCompactSummary().NullIfEmpty();
+            }
+        }
+
         await _bridge.SendAsync(new SidecarFrame
         {
             Type = SidecarFrameTypes.Context,
@@ -100,4 +124,9 @@ public sealed class SidecarContextPublisher : ISidecarContextPublisher
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+}
+
+file static class StringExtensions
+{
+    public static string? NullIfEmpty(this string? s) => string.IsNullOrEmpty(s) ? null : s;
 }

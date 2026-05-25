@@ -28,7 +28,30 @@ public sealed class AppUsageTracker : IAppUsageTracker
         "paypal",
         "1password",
         "bitwarden",
-        "keepass"
+        "keepass",
+        // Authentication / account flows
+        "login",
+        "sign in",
+        "sign-in",
+        "signin",
+        // E-commerce / financial
+        "checkout",
+        "payment",
+        "billing",
+        "card",
+        // Health / medical
+        "health",
+        "medical",
+        "insurance",
+        // Government / tax
+        "tax",
+        "irs",
+        "hmrc",
+        "gov.uk",
+        // Adult content
+        "adult",
+        "nsfw",
+        "xxx"
     };
 
     private readonly IDesktopAwarenessService _awareness;

@@ -1,3 +1,4 @@
+using Jarvis.Core.Diagnostics;
 using Jarvis.Core.Focus;
 using Jarvis.Core.Presence;
 using Jarvis.Core.Proactive;
@@ -18,6 +19,7 @@ public sealed class ProactiveNudgeEngine : IProactiveNudgeEngine
     private readonly IFocusSessionTracker _focusTracker;
     private readonly IPresenceModeManager _presenceManager;
     private readonly Func<ProactivitySettings> _settings;
+    private readonly IDiagnostics? _diagnostics;
     private readonly object _gate = new();
 
     // Dedup: key → last fired at
@@ -30,11 +32,13 @@ public sealed class ProactiveNudgeEngine : IProactiveNudgeEngine
     public ProactiveNudgeEngine(
         IFocusSessionTracker focusTracker,
         IPresenceModeManager presenceManager,
-        Func<ProactivitySettings> settings)
+        Func<ProactivitySettings> settings,
+        IDiagnostics? diagnostics = null)
     {
         _focusTracker = focusTracker;
         _presenceManager = presenceManager;
         _settings = settings;
+        _diagnostics = diagnostics;
     }
 
     public event EventHandler<ProactiveNudge>? NudgeReady;
@@ -64,7 +68,11 @@ public sealed class ProactiveNudgeEngine : IProactiveNudgeEngine
 
         // Global suppression
         if (mode is PresenceMode.Gaming or PresenceMode.Presentation or PresenceMode.Silent)
+        {
+            _diagnostics?.Record(DiagnosticLevel.Debug, "proactive", "nudge.suppressed",
+                new Dictionary<string, object?> { ["reason"] = mode.ToString() });
             return;
+        }
 
         var now = DateTimeOffset.UtcNow;
         TimeSpan prevDuration;

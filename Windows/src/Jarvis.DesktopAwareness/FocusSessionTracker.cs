@@ -1,4 +1,5 @@
 using Jarvis.Core.Awareness;
+using Jarvis.Core.Diagnostics;
 using Jarvis.Core.Focus;
 using Jarvis.Core.Settings;
 using Jarvis.Core.Snapshot;
@@ -30,10 +31,11 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
 
     private readonly IAppUsageTracker _usageTracker;
     private readonly Func<AwarenessSettings> _settings;
+    private readonly IDiagnostics? _diagnostics;
     private readonly object _gate = new();
 
     // Bounded sliding window (last 10 min, max MaxWindowEntries)
-    private readonly List<AppUsageEntry> _window = new(MaxWindowEntries + 1);
+    private readonly Queue<AppUsageEntry> _window = new(MaxWindowEntries + 1);
 
     private DateTimeOffset _sessionStart = DateTimeOffset.UtcNow;
     private int _distractionCount;
@@ -42,10 +44,11 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
     private int _lastFiredSwitches = 0;
     private bool _started;
 
-    public FocusSessionTracker(IAppUsageTracker usageTracker, Func<AwarenessSettings> settings)
+    public FocusSessionTracker(IAppUsageTracker usageTracker, Func<AwarenessSettings> settings, IDiagnostics? diagnostics = null)
     {
         _usageTracker = usageTracker;
         _settings = settings;
+        _diagnostics = diagnostics;
         _current = MakeInitialMetrics();
     }
 
@@ -57,6 +60,7 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
         if (_started) return Task.CompletedTask;
         _usageTracker.EntryAdded += OnEntryAdded;
         _started = true;
+        _diagnostics?.Record(DiagnosticLevel.Info, "focus", "tracker started");
         return Task.CompletedTask;
     }
 
@@ -65,6 +69,7 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
         if (!_started) return Task.CompletedTask;
         _usageTracker.EntryAdded -= OnEntryAdded;
         _started = false;
+        _diagnostics?.Record(DiagnosticLevel.Info, "focus", "tracker stopped");
         return Task.CompletedTask;
     }
 
@@ -79,15 +84,15 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
             var cutoff = now.AddMinutes(-10);
 
             // Add new entry and trim beyond 10-min window AND max 50 entries
-            _window.Add(entry);
+            _window.Enqueue(entry);
 
             // Remove entries older than 10 min from front
-            while (_window.Count > 0 && _window[0].StartedAt < cutoff)
-                _window.RemoveAt(0);
+            while (_window.Count > 0 && _window.Peek().StartedAt < cutoff)
+                _window.Dequeue();
 
             // Enforce max capacity
             while (_window.Count > MaxWindowEntries)
-                _window.RemoveAt(0);
+                _window.Dequeue();
 
             int switches = _window.Count;
 
@@ -104,8 +109,8 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
 
             var focusDuration = now - _sessionStart;
             var state = InferState(entry, switches, focusDuration);
-            var primaryApp = GetMode(_window.TakeLast(20).Select(e => e.ProcessName));
-            var primaryWorkflow = GetModeWorkflow(_window.TakeLast(20).Select(e => e.Workflow));
+            var primaryApp = GetMode(_window.Skip(Math.Max(0, _window.Count - 20)).Select(e => e.ProcessName));
+            var primaryWorkflow = GetModeWorkflow(_window.Skip(Math.Max(0, _window.Count - 20)).Select(e => e.Workflow));
             var productivityScore = ComputeProductivityScore(focusDuration, _distractionCount);
 
             newMetrics = new FocusMetrics(

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Jarvis.Core.Diagnostics;
 using Jarvis.Core.Memory;
 
 namespace Jarvis.Settings;
@@ -22,6 +23,12 @@ public sealed class SessionMemoryStore : ISessionMemoryStore
     };
 
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly IDiagnostics? _diagnostics;
+
+    public SessionMemoryStore(IDiagnostics? diagnostics = null)
+    {
+        _diagnostics = diagnostics;
+    }
 
     public async Task<IReadOnlyList<WorkSession>> GetTodayAsync()
     {
@@ -45,6 +52,8 @@ public sealed class SessionMemoryStore : ISessionMemoryStore
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
             var line = JsonSerializer.Serialize(session, JsonOpts);
             await File.AppendAllTextAsync(FilePath, line + "\n").ConfigureAwait(false);
+            _diagnostics?.Record(DiagnosticLevel.Info, "memory", "memory.session.saved",
+                new Dictionary<string, object?> { ["bytes"] = System.Text.Encoding.UTF8.GetByteCount(line) });
             await TrimIfOversizedAsync().ConfigureAwait(false);
         }
         finally

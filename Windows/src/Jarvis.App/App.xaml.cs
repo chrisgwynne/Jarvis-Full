@@ -581,6 +581,11 @@ public partial class App : System.Windows.Application
                 BridgeDegraded = status.State == BridgeState.Degraded
             });
         });
+
+        // Also update dashboard VM with live bridge status.
+        var vm = _services.GetService<DashboardViewModel>();
+        if (vm is not null)
+            Dispatcher.BeginInvoke(() => vm.BridgeStatus = status.State.ToString());
     }
 
     private void OnBridgeFrame(object? sender, SidecarFrame frame)
@@ -978,7 +983,9 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<IConversationContextBuilder>(),
             sp.GetRequiredService<IContextBudgeter>(),
             sp.GetRequiredService<IMacBridgeCoordinator>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar));
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
+            contextEngine: sp.GetService<Jarvis.Core.Context.IWindowsContextEngine>(),
+            awarenessSettings: () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
         services.AddSingleton<IRemoteExecutionBridge>(sp => new RemoteExecutionBridge(
             sp.GetRequiredService<IMacBridgeCoordinator>(),
             sp.GetRequiredService<IAutomationExecutor>(),
@@ -1020,16 +1027,20 @@ public partial class App : System.Windows.Application
         // Focus + presence + proactive
         services.AddSingleton<IFocusSessionTracker>(sp => new FocusSessionTracker(
             sp.GetRequiredService<IAppUsageTracker>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness,
+            sp.GetService<IDiagnostics>()));
         services.AddSingleton<IPresenceModeManager>(sp => new PresenceModeManager(
             sp.GetRequiredService<IFocusSessionTracker>(),
             sp.GetRequiredService<IAppUsageTracker>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
-        services.AddSingleton<ISessionMemoryStore, SessionMemoryStore>();
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness,
+            sp.GetService<IDiagnostics>()));
+        services.AddSingleton<ISessionMemoryStore>(sp => new SessionMemoryStore(
+            sp.GetService<IDiagnostics>()));
         services.AddSingleton<IProactiveNudgeEngine>(sp => new ProactiveNudgeEngine(
             sp.GetRequiredService<IFocusSessionTracker>(),
             sp.GetRequiredService<IPresenceModeManager>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Proactivity));
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Proactivity,
+            sp.GetService<IDiagnostics>()));
 
         // Context engine
         services.AddSingleton<Jarvis.Core.Context.IWindowsContextSnapshotBuilder, Jarvis.Perception.Context.WindowsContextSnapshotBuilder>();
@@ -1047,7 +1058,8 @@ public partial class App : System.Windows.Application
         {
             var vm = new DashboardViewModel();
             var engine = sp.GetRequiredService<Jarvis.Core.Context.IWindowsContextEngine>();
-            engine.ContextChanged += (_, snap) => vm.ApplyContextSnapshot(snap);
+            engine.ContextChanged += (_, snap) =>
+                System.Windows.Application.Current.Dispatcher.BeginInvoke(() => vm.ApplyContextSnapshot(snap));
             return vm;
         });
     }

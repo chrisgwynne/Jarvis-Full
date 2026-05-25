@@ -1,4 +1,5 @@
 using Jarvis.Core.Awareness;
+using Jarvis.Core.Diagnostics;
 using Jarvis.Core.Focus;
 using Jarvis.Core.Presence;
 using Jarvis.Core.Settings;
@@ -18,21 +19,25 @@ public sealed class PresenceModeManager : IPresenceModeManager
     private readonly IFocusSessionTracker _focusTracker;
     private readonly IAppUsageTracker _usageTracker;
     private readonly Func<AwarenessSettings> _settings;
+    private readonly IDiagnostics? _diagnostics;
     private readonly object _gate = new();
 
     private PresenceMode _current = PresenceMode.Work;
     private bool _isUserOverride;
+    private volatile bool _isOverrideFast;
     private PresenceMode _overrideMode;
     private bool _started;
 
     public PresenceModeManager(
         IFocusSessionTracker focusTracker,
         IAppUsageTracker usageTracker,
-        Func<AwarenessSettings> settings)
+        Func<AwarenessSettings> settings,
+        IDiagnostics? diagnostics = null)
     {
         _focusTracker = focusTracker;
         _usageTracker = usageTracker;
         _settings = settings;
+        _diagnostics = diagnostics;
     }
 
     public PresenceMode Current => _current;
@@ -64,6 +69,7 @@ public sealed class PresenceModeManager : IPresenceModeManager
         lock (_gate)
         {
             _isUserOverride = true;
+            _isOverrideFast = true;
             _overrideMode = mode;
             if (_current != mode)
             {
@@ -81,11 +87,21 @@ public sealed class PresenceModeManager : IPresenceModeManager
         {
             _isUserOverride = false;
         }
+        _isOverrideFast = false;
         Recompute();
     }
 
-    private void OnMetricsChanged(object? sender, FocusMetrics _) => Recompute();
-    private void OnEntryAdded(object? sender, AppUsageEntry _) => Recompute();
+    private void OnMetricsChanged(object? sender, FocusMetrics _)
+    {
+        if (_isOverrideFast) return;
+        Recompute();
+    }
+
+    private void OnEntryAdded(object? sender, AppUsageEntry _)
+    {
+        if (_isOverrideFast) return;
+        Recompute();
+    }
 
     private void Recompute()
     {
@@ -102,7 +118,11 @@ public sealed class PresenceModeManager : IPresenceModeManager
             }
         }
         if (changed.HasValue)
+        {
+            _diagnostics?.Record(DiagnosticLevel.Info, "presence", "mode.inferred",
+                new Dictionary<string, object?> { ["mode"] = changed.Value.ToString() });
             ModeChanged?.Invoke(this, changed.Value);
+        }
     }
 
     private PresenceMode Infer()

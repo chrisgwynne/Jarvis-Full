@@ -120,6 +120,46 @@ All components follow the same pattern:
 - `StopAsync()` detaches them
 - Events are fired from background threads; WPF consumers must `Dispatcher.BeginInvoke`
 
+## SidecarContextPublisher Enrichment Path
+
+`SidecarContextPublisher` builds the base `ContextPayload` from the `ConversationContext` produced by `IContextBudgeter` (which applies redaction and truncation). It then enriches the payload with real-time context-engine data:
+
+```
+SidecarContextPublisher.PublishCurrentAsync()
+  │
+  ├── IConversationContextBuilder.Build()   → base ConversationContext (redacted)
+  ├── IContextBudgeter.Budget()             → compact form with SnapshotHash
+  │
+  ├── [Privacy gate] PrivacyMode == true → return (no frame sent)
+  ├── [Privacy gate] TrackForegroundApp == false → skip enrichment
+  │
+  └── IWindowsContextEngine.Current         → enriched fields
+        ├── FocusMinutes  = Focus.FocusDuration.TotalMinutes
+        ├── PresenceMode  = PresenceMode.ToString()
+        ├── ProductivityScore = Focus.ProductivityScore
+        ├── AppSwitchesLast10Min = Focus.AppSwitchesLast10Min
+        ├── RecentApps    = RecentProcessNames (null if empty)
+        └── TimelineSummary = Timeline.ToCompactSummary()
+```
+
+The enrichment step is skipped entirely when:
+- `SidecarSettings.PrivacyMode == true` (no frame sent at all)
+- `AwarenessSettings.TrackForegroundApp == false` (frame sent, enriched fields are null)
+- `IWindowsContextEngine` was not injected (no-op, enriched fields are null)
+
+### DI Wiring
+
+```csharp
+services.AddSingleton<ISidecarContextPublisher>(sp => new SidecarContextPublisher(
+    perception: sp.GetRequiredService<PerceptionService>(),
+    builder: sp.GetRequiredService<IConversationContextBuilder>(),
+    budgeter: sp.GetRequiredService<IContextBudgeter>(),
+    bridge: sp.GetRequiredService<IMacBridgeCoordinator>(),
+    settings: () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
+    contextEngine: sp.GetService<IWindowsContextEngine>(),
+    awarenessSettings: () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
+```
+
 ## Privacy rules
 
 - **Stored:** process names, workflow categories, dwell durations, focus metrics
