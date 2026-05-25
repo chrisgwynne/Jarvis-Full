@@ -74,7 +74,25 @@ class TtsEngine(context: Context) : TextToSpeech.OnInitListener {
 
     /** Speak [text] aloud and suspend until playback is complete. */
     suspend fun speak(text: String) {
-        if (!ready.get() || text.isBlank()) return
+        if (text.isBlank()) return
+
+        // Wait briefly for the engine's async init to complete.  Without this,
+        // a speak() called before onInit fires (notably the wake-word ack on the
+        // first activation after launch) is silently dropped — the user hears
+        // the chime then total silence and the mic appears to close immediately
+        // because no audible feedback ever followed the wake.
+        if (!ready.get()) {
+            var waited = 0
+            while (!ready.get() && waited < 2_000) {
+                delay(50)
+                waited += 50
+            }
+            if (!ready.get()) {
+                Log.w(TAG, "[SPEAK_SUPPRESSED] reason=tts_init_timeout waited_ms=$waited text.len=${text.length}")
+                return
+            }
+            Log.d(TAG, "[TTS_INIT_AWAITED] resumed after ${waited}ms")
+        }
 
         lastSpokenText = text
 

@@ -2087,16 +2087,30 @@ class JarvisRuntime(
         }
 
         pipelineJob = scope.launch {
+            var reachedListenLoop = false
             try {
                 LatencyTracker.mark("WAKE_DETECTED")
                 // Open a new memory session for this activation.
                 // Also clear follow-up entity context so pronouns from a previous
                 // session don't bleed into a new one.
-                sessionId   = memoryWriter.newSessionId()
-                sessionOpen = true
-                memoryWriter.openSession(sessionId)
-                followUpCoordinator.entityTracker.clear()
-                sessionIntelligenceCoordinator.onSessionStarted(sessionId)
+                //
+                // Each pre-listen step is wrapped in [runCatching] — a DB hiccup,
+                // a flaky Bluetooth stack, or a SpeakerStore that's not finished
+                // migrating must not abort the entire pipeline before the mic
+                // even opens.  Before this guard, a single throw here landed in
+                // the outer catch and ran backToWakeWord() with no audible
+                // feedback to the user — the symptom was "chime, then silence,
+                // then mic closes" because nothing between chime and listen
+                // actually completed.
+                runCatching {
+                    sessionId   = memoryWriter.newSessionId()
+                    sessionOpen = true
+                    memoryWriter.openSession(sessionId)
+                    followUpCoordinator.entityTracker.clear()
+                    sessionIntelligenceCoordinator.onSessionStarted(sessionId)
+                }.onFailure { e ->
+                    Log.w(TAG, "[WAKE_STEP_FAILED] step=open_session ${e.javaClass.simpleName}: ${e.message}", e)
+                }
 
                 machine.transitionAnd(JarvisState.WakeDetected) { syncState(JarvisState.WakeDetected) }
 
@@ -2117,10 +2131,14 @@ class JarvisRuntime(
                 // during passive listening causes Spotify to pause permanently.
                 // Focus is requested just before TTS starts and released immediately
                 // after — see speakAndRecord() and the streamAndSpeak() paths.
-                val scoConnected = bluetoothSco.connect()
-                if (scoConnected) {
-                    Log.d(TAG, "SCO active — routing audio through headset")
-                    DeviceStateStore.update { copy(headsetConnected = true) }
+                runCatching {
+                    val scoConnected = bluetoothSco.connect()
+                    if (scoConnected) {
+                        Log.d(TAG, "SCO active — routing audio through headset")
+                        DeviceStateStore.update { copy(headsetConnected = true) }
+                    }
+                }.onFailure { e ->
+                    Log.w(TAG, "[WAKE_STEP_FAILED] step=sco_connect ${e.javaClass.simpleName}: ${e.message}", e)
                 }
                 LatencyTracker.mark("TURN_TIMING_WAKE_READY")
 
@@ -2142,13 +2160,20 @@ class JarvisRuntime(
                     "+${android.os.SystemClock.elapsedRealtime() - micHandoffStart}ms")
 
                 // Load neural speaker encoder once (no-op on subsequent sessions).
-                SpeakerEmbeddingEngine.init(context)
+                runCatching { SpeakerEmbeddingEngine.init(context) }
+                    .onFailure { e ->
+                        Log.w(TAG, "[WAKE_STEP_FAILED] step=speaker_engine_init ${e.javaClass.simpleName}: ${e.message}", e)
+                    }
 
                 // First-run onboarding: no owner name recorded yet — prompt for setup.
                 // Re-read from DB to avoid a race with the async load in start().
                 if (!anyoneRegistered) {
-                    anyoneRegistered = withContext(Dispatchers.IO) { speakerStore.anyoneRegistered() }
-                    anyoneEnrolled   = withContext(Dispatchers.IO) { speakerStore.anyoneEnrolled() }
+                    runCatching {
+                        anyoneRegistered = withContext(Dispatchers.IO) { speakerStore.anyoneRegistered() }
+                        anyoneEnrolled   = withContext(Dispatchers.IO) { speakerStore.anyoneEnrolled() }
+                    }.onFailure { e ->
+                        Log.w(TAG, "[WAKE_STEP_FAILED] step=speaker_store_read ${e.javaClass.simpleName}: ${e.message}", e)
+                    }
                 }
                 if (!anyoneRegistered) {
                     speakAndRecord("Hi! I'm Jarvis. I haven't been set up yet — what's your name?")
@@ -2186,15 +2211,35 @@ class JarvisRuntime(
                 // Falls back to a random ack for all other activations.
                 // Skipped during first-run setup / voice enrollment.
                 if (!sessionSpeaker.awaitingOwnerName && !sessionSpeaker.awaitingVoiceEnrollmentSample) {
-                    val brief = tryMorningBriefing()
+                    val brief = runCatching { tryMorningBriefing() }
+                        .onFailure { e ->
+                            Log.w(TAG, "[WAKE_STEP_FAILED] step=morning_briefing ${e.javaClass.simpleName}: ${e.message}", e)
+                        }
+                        .getOrNull()
                     Log.d(TAG, "[AUDIO_FOCUS_REQUEST] wake ack")
                     audioFocus.requestFocus()
-                    tts.speak(brief ?: WakeAcknowledgements.random())
-                    audioFocus.abandonFocus()
-                    Log.d(TAG, "[AUDIO_FOCUS_ABANDON] wake ack done")
+                    try {
+                        tts.speak(brief ?: WakeAcknowledgements.random())
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // A failed ack must NOT kill the listen path.  Without
+                        // this guard the user heard chime then silence and the
+                        // mic appeared to close because the outer catch ran
+                        // backToWakeWord() before speechCapture.listen() opened.
+                        Log.w(TAG, "[WAKE_STEP_FAILED] step=ack_speak ${e.javaClass.simpleName}: ${e.message}", e)
+                    } finally {
+                        audioFocus.abandonFocus()
+                        Log.d(TAG, "[AUDIO_FOCUS_ABANDON] wake ack done")
+                    }
                 }
 
                 var consecutiveFastFails = 0
+                // Flips true once we reach speechCapture.listen() at least
+                // once.  The outer catch uses this to label pre-listen aborts
+                // (the "chime then nothing" symptom) distinctly from mid-turn
+                // aborts so logcat names the failure mode without ambiguity.
+                reachedListenLoop = true
 
                 // ── Conversation loop ──────────────────────────────────────────
                 while (true) {
@@ -4191,7 +4236,14 @@ class JarvisRuntime(
             } catch (e: CancellationException) {
                 throw e   // service stopped or silence() called — do not restart
             } catch (e: Exception) {
-                Log.e(TAG, "Pipeline error: ${e.message}", e)
+                // Tag pre-listen aborts distinctly from mid-turn aborts so
+                // logcat names the "chime then nothing" failure mode without
+                // ambiguity.  Before this split, both routes logged the same
+                // "Pipeline error" line and there was no way to tell from a
+                // bug report whether the mic had opened or not.
+                val tag = if (reachedListenLoop)
+                    "PIPELINE_ABORTED_MID_TURN" else "PIPELINE_ABORTED_PRE_LISTEN"
+                Log.e(TAG, "[$tag] ${e.javaClass.simpleName}: ${e.message}", e)
                 closeSessionAsync()
                 releaseResources()
                 backToWakeWord()
