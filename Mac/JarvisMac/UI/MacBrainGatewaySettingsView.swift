@@ -197,9 +197,9 @@ struct MacBrainGatewaySettingsView: View {
                     }
                 } else {
                     Button("Generate Pairing Code") {
-                        let code = authStore.generatePairingCode()
-                        pairingCountdown = Int(code.expiresAt.timeIntervalSinceNow)
-                        startPairingTimer()
+                        Task {
+                            await generateDaemonPairingCode()
+                        }
                     }
                     .buttonStyle(.borderless)
                     Text("Generates a one-time 6-digit code the Android app uses to receive a scoped device token.")
@@ -316,6 +316,24 @@ struct MacBrainGatewaySettingsView: View {
             return "wss://\(lan):\(port)/v1/android/ws"
         }
         return "wss://<your-ip>:\(port)/v1/android/ws"
+    }
+
+    private func generateDaemonPairingCode() async {
+        guard let url = URL(string: "http://127.0.0.1:8765/v1/android/pair/code") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        if let token = GatewayAuthStore.shared.gatewayToken {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let code = json["code"] as? String,
+              let expiresStr = json["expiresAt"] as? String,
+              let expiresAt = ISO8601DateFormatter().date(from: expiresStr) else { return }
+        let pairing = ActivePairingCode(code: code, expiresAt: expiresAt)
+        authStore.setActivePairingCode(pairing)
+        pairingCountdown = Int(expiresAt.timeIntervalSinceNow)
+        startPairingTimer()
     }
 
     private func startPairingTimer() {

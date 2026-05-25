@@ -57,6 +57,10 @@ final class GatewayAuthStore {
         return p
     }
 
+    func setActivePairingCode(_ code: ActivePairingCode) {
+        activePairingCode = code
+    }
+
     /// Validates code and registers device. Returns raw device token on success (shown once).
     func completePairing(code: String, deviceId: String, deviceName: String) -> String? {
         guard let active = activePairingCode, !active.isExpired, active.code == code else { return nil }
