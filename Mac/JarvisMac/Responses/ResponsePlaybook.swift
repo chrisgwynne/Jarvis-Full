@@ -1192,6 +1192,54 @@ enum ResponsePlaybook {
         ResponseKey.githubWizardNextQ: [
             "{question}",
         ],
+        ResponseKey.githubNoPRs: [
+            "No open PRs found in {repo}.",
+            "{repo} has no open pull requests.",
+        ],
+        ResponseKey.githubPRCreatePrompt: [
+            "To open a PR, tell me the title, and I'll need the head branch name.",
+            "Sure. What's the PR title, and which branch should it come from?",
+        ],
+        ResponseKey.githubNoStalePRs: [
+            "No stale PRs in {repo}.",
+            "{repo} is all clear — no stale pull requests.",
+        ],
+        ResponseKey.githubStalePRs: [
+            "{count} stale PR{plural} in {repo}: {titles}.",
+            "{repo} has {count} stale PR{plural}: {titles}.",
+        ],
+        ResponseKey.githubIssueCreateFail: [
+            "Couldn't create the issue. Check your token permissions.",
+            "Issue creation failed — make sure your GitHub token has the right permissions.",
+        ],
+        ResponseKey.githubIssueTitleAsk: [
+            "What should I title the issue?",
+            "What would you like to call the issue?",
+        ],
+        ResponseKey.githubNoCommits: [
+            "No recent commits found in {repo}.",
+            "{repo} has no recent commits.",
+        ],
+        ResponseKey.githubCommits: [
+            "{count} recent commit{plural} in {repo}: {msgs}.",
+            "{repo} — {count} recent commit{plural}: {msgs}.",
+        ],
+        ResponseKey.githubNoRepos: [
+            "No repositories found.",
+            "I couldn't find any GitHub repositories.",
+        ],
+        ResponseKey.githubTopRepos: [
+            "Your top repos: {names}{more}.",
+            "Here are your top repos: {names}{more}.",
+        ],
+        ResponseKey.githubMostActive: [
+            "Most active repos: {names}.",
+            "Your most active repositories are {names}.",
+        ],
+        ResponseKey.githubNoPRsToReview: [
+            "No open PRs to review in {repo}.",
+            "{repo} has nothing waiting for your review.",
+        ],
 
         // MARK: Shopify
         ResponseKey.shopifyOrders: [

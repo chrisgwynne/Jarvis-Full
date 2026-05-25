@@ -333,6 +333,18 @@ enum ResponseKey {
     static let githubActionRejected  = "github.action_rejected"
     static let githubError           = "github.error"
     static let githubWizardNextQ     = "github.wizard_next_q"
+    static let githubNoPRs           = "github.no_prs"
+    static let githubPRCreatePrompt  = "github.pr_create_prompt"
+    static let githubNoStalePRs      = "github.no_stale_prs"
+    static let githubStalePRs        = "github.stale_prs"
+    static let githubIssueCreateFail = "github.issue_create_failed"
+    static let githubIssueTitleAsk   = "github.issue_title_ask"
+    static let githubNoCommits       = "github.no_commits"
+    static let githubCommits         = "github.commits"
+    static let githubNoRepos         = "github.no_repos"
+    static let githubTopRepos        = "github.top_repos"
+    static let githubMostActive      = "github.most_active"
+    static let githubNoPRsToReview   = "github.no_prs_to_review"
 
     // LLM errors
     static let llmTimeout          = "llm.timeout"

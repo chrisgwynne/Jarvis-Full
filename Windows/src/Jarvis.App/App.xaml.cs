@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Windows;
 using Jarvis.App.Dashboard;
+using Jarvis.Core.Logging;
+using Jarvis.Settings;
 using Jarvis.App.Overlay;
 using Jarvis.App.Tray;
 using Jarvis.Core.Awareness;
@@ -1023,11 +1025,16 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<ISpeechRecognitionProvider>(),
             () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
             sp.GetService<IDiagnostics>()));
-        services.AddSingleton<ILocalTtsService>(sp => new Jarvis.App.Sidecar.WinRtTtsService(
-            sp.GetRequiredService<ITtsLeaseCoordinator>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
-            sp.GetService<IDiagnostics>(),
-            sp.GetService<AudioDiagnostics>()));
+        services.AddSingleton<IReplyLogger, JsonlReplyLogger>();
+        services.AddSingleton<ILocalTtsService>(sp =>
+        {
+            var inner = new Jarvis.App.Sidecar.WinRtTtsService(
+                sp.GetRequiredService<ITtsLeaseCoordinator>(),
+                () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
+                sp.GetService<IDiagnostics>(),
+                sp.GetService<AudioDiagnostics>());
+            return new LoggingTtsService(inner, sp.GetRequiredService<IReplyLogger>());
+        });
         services.AddSingleton<IPartialTranscriptCoordinator>(sp => new PartialTranscriptCoordinator(
             sp.GetRequiredService<IMacBridgeCoordinator>(),
             sp.GetRequiredService<IEchoSuppressionCoordinator>(),

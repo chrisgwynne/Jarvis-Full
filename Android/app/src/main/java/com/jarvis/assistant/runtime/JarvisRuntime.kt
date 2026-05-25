@@ -127,6 +127,8 @@ import com.jarvis.assistant.remote.macbrain.HttpMacBrainClient
 import com.jarvis.assistant.remote.macbrain.MacBrainClient
 import com.jarvis.assistant.speaker.audio.SpeakerAudioCapture
 import com.jarvis.assistant.speaker.audio.SpeakerEmbeddingEngine
+import com.jarvis.assistant.logging.JarvisReplyLogger
+import com.jarvis.assistant.logging.ReplySource
 
 /**
  * JarvisRuntime — the central orchestrator for the voice pipeline.
@@ -618,6 +620,11 @@ class JarvisRuntime(
     @Volatile private var pendingCallInfo: CallEvent.IncomingRinging? = null
     private lateinit var sessionId   : String
     private var sessionOpen = false
+
+    // Reply log source tagging. Set before calling speakAndRecord() so the log entry
+    // has meaningful source attribution; consumed and reset to LLM after each call.
+    @Volatile var _pendingReplySource: ReplySource = ReplySource.LLM
+    @Volatile var _pendingPhraseKey: String? = null
 
     // Interruption / resume state — populated by streamAndSpeak() when the user
     // barges in mid-response.  Consumed and cleared on the next user turn.
@@ -4885,6 +4892,16 @@ class JarvisRuntime(
         val formatted = if (drivingModeManager.isDriving) {
             base.split(Regex("(?<=[.!?])\\s+")).take(2).joinToString(" ")
         } else base
+
+        // Central reply log — every spoken reply is recorded before TTS fires.
+        JarvisReplyLogger.get().append(
+            source = _pendingReplySource,
+            spokenText = formatted,
+            phraseKey = _pendingPhraseKey,
+        )
+        _pendingReplySource = ReplySource.LLM   // reset to default for next call
+        _pendingPhraseKey = null
+
         memoryWriter.writeTurn(sessionId, "assistant", formatted)
         brainEngine.collector.onJarvisResponse(formatted)
         DeviceStateStore.update { copy(lastAssistantResponse = formatted) }

@@ -323,6 +323,12 @@ final class JarvisController {
     /// sets this so its confirmation ("Turning on…") is suppressed.
     var suppressNextSpeak = false
 
+    /// Source tag for the next speak() call. Consumed and reset to .system after each speak.
+    /// Callers that know the semantic origin (template / llm / command) should set this before
+    /// calling speak() so the reply log has meaningful source attribution.
+    var _pendingReplySource: ReplySource = .system
+    var _pendingResponseKey: String? = nil
+
     // MARK: - Remote brain routing (Phase 4 daemon bridge)
     /// Closure installed during handleRemoteTranscript to capture the first spoken text.
     /// Cleared immediately after the routing pipeline returns.
@@ -6079,6 +6085,18 @@ final class JarvisController {
         lastSpeakCalledAt = Date()   // synchronous sentinel — post-loop reads this
         let preprocessed = speechPreprocessor.process(text)
         let finalText = applyAddress(to: preprocessed)
+
+        // Central reply log — every spoken reply is recorded here before TTS fires.
+        let logSource = _pendingReplySource
+        let logKey = _pendingResponseKey
+        _pendingReplySource = .system
+        _pendingResponseKey = nil
+        JarvisReplyLogger.shared.append(
+            source: logSource,
+            intent: nil,
+            responseKey: logKey,
+            spokenText: finalText)
+
         state.lastSpoken = finalText
         state.sessionLastSpoken = finalText
         state.lastBargeInReason = nil
