@@ -15,6 +15,7 @@ struct MacBrainGatewaySettingsView: View {
     @State private var pairingTimer: Timer? = nil
     @State private var codeCopied = false
     @State private var urlCopied = false
+    @State private var pairingError: String? = nil
 
     private var diag: GatewayDiagnostics { controller.gatewayDiagnostics }
     @State private var authStore: GatewayAuthStore = GatewayAuthStore.shared
@@ -197,13 +198,16 @@ struct MacBrainGatewaySettingsView: View {
                     }
                 } else {
                     Button("Generate Pairing Code") {
-                        Task {
-                            await generateDaemonPairingCode()
-                        }
+                        pairingError = nil
+                        Task { await generateDaemonPairingCode() }
                     }
                     .buttonStyle(.borderless)
-                    Text("Generates a one-time 6-digit code the Android app uses to receive a scoped device token.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if let err = pairingError {
+                        Text(err).font(.caption).foregroundStyle(.red)
+                    } else {
+                        Text("Generates a one-time 6-digit code the Android app uses to receive a scoped device token.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             } header: { Text("Pairing") }
 
@@ -320,16 +324,31 @@ struct MacBrainGatewaySettingsView: View {
 
     private func generateDaemonPairingCode() async {
         guard let url = URL(string: "http://127.0.0.1:8765/v1/android/pair/code") else { return }
+
+        // Ensure a gateway token exists — first time setup
+        let token = GatewayAuthStore.shared.gatewayToken ?? GatewayAuthStore.shared.regenerateGatewayToken()
+
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        if let token = GatewayAuthStore.shared.gatewayToken {
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 5
+
+        guard let (data, response) = try? await URLSession.shared.data(for: req) else {
+            pairingError = "Could not reach daemon on port 8765. Is it running?"
+            return
         }
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            pairingError = "Daemon rejected request (wrong token?). Restart the daemon."
+            return
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let code = json["code"] as? String,
               let expiresStr = json["expiresAt"] as? String,
-              let expiresAt = ISO8601DateFormatter().date(from: expiresStr) else { return }
+              let expiresAt = ISO8601DateFormatter().date(from: expiresStr) else {
+            pairingError = "Unexpected response from daemon."
+            return
+        }
+        pairingError = nil
         let pairing = ActivePairingCode(code: code, expiresAt: expiresAt)
         authStore.setActivePairingCode(pairing)
         pairingCountdown = Int(expiresAt.timeIntervalSinceNow)
