@@ -274,8 +274,8 @@ enum SupertonicAudioWriter {
 
 // MARK: - SupertonicInferenceEngine (requires ONNX Runtime)
 
-#if canImport(onnxruntime)
-import onnxruntime
+#if canImport(OnnxRuntimeBindings)
+import OnnxRuntimeBindings
 
 /// Owns the four ONNX Runtime sessions for Supertonic 3 inference.
 /// Thread safety: all public methods must be called from the synthesis queue.
@@ -478,4 +478,4 @@ enum SupertonicError: LocalizedError {
     }
 }
 
-#endif // canImport(onnxruntime)
+#endif // canImport(OnnxRuntimeBindings)

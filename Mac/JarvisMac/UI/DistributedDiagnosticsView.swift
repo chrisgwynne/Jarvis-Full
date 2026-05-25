@@ -273,8 +273,8 @@ private struct DiagnosticsSnapshot {
         s.lastCommand            = od.lastCommand
         s.lastStatus             = od.lastStatus
 
-        // Offline queue
-        s.queueDepth             = DaemonOfflineQueue.shared.depth
+        // Offline queue depth is reported by the daemon, not accessible from the Mac app target
+        s.queueDepth             = 0
 
         return s
     }

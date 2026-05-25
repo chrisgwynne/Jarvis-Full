@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 
 /// Settings view for the unified Mac Brain Gateway (port 8765).
 /// Replaces MacBrainSettingsView in Developer > Brain API sub-tab.
@@ -16,7 +17,7 @@ struct MacBrainGatewaySettingsView: View {
     @State private var urlCopied = false
 
     private var diag: GatewayDiagnostics { controller.gatewayDiagnostics }
-    private var authStore: GatewayAuthStore { GatewayAuthStore.shared }
+    @State private var authStore: GatewayAuthStore = GatewayAuthStore.shared
 
     var body: some View {
         Form {
@@ -166,28 +167,32 @@ struct MacBrainGatewaySettingsView: View {
             // ── Pairing ───────────────────────────────────────────────────
             Section {
                 if let code = authStore.activePairingCode, !code.isExpired {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(code.code)
-                                .font(.system(size: 36, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.green)
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top, spacing: 16) {
+                            // QR code
+                            let payload = "jarvis-pair://\(code.code)"
+                            QRCodeView(content: payload, size: 140)
+                                .cornerRadius(8)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(code.code)
+                                    .font(.system(size: 36, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.green)
                                 Text("Expires in \(pairingCountdown)s")
                                     .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
                                 Button {
-                                    let payload = "jarvis-pair://\(code.code)"
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(payload, forType: .string)
                                     codeCopied = true
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { codeCopied = false }
                                 } label: {
-                                    Label(codeCopied ? "Copied" : "Copy Code", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
+                                    Label(codeCopied ? "Copied" : "Copy Link", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
                                 }
                                 .buttonStyle(.borderless).font(.caption)
                             }
                         }
-                        Text("Enter this code in the Android Jarvis app to pair it as a trusted device. Code valid for 5 minutes.")
+                        Text("Scan the QR code or enter the 6-digit code in the Android Jarvis app. Valid for 5 minutes.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
@@ -330,5 +335,37 @@ struct MacBrainGatewaySettingsView: View {
                 diag.pairingCodeActive = false
             }
         }
+    }
+}
+
+// MARK: - QR Code
+
+private struct QRCodeView: View {
+    let content: String
+    let size: CGFloat
+
+    var body: some View {
+        if let img = generateQR() {
+            Image(nsImage: img)
+                .interpolation(.none)
+                .resizable()
+                .frame(width: size, height: size)
+        } else {
+            Color.secondary.opacity(0.2)
+                .frame(width: size, height: size)
+        }
+    }
+
+    private func generateQR() -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(content.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let scale = size / output.extent.width
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let rep = NSCIImageRep(ciImage: scaled)
+        let img = NSImage(size: rep.size)
+        img.addRepresentation(rep)
+        return img
     }
 }

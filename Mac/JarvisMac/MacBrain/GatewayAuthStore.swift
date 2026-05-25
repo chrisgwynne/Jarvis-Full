@@ -27,7 +27,7 @@ struct ActivePairingCode {
 ///
 /// Migration: on first launch, reads existing brain + WebSocket tokens and
 /// promotes the brain token to gateway token (via GatewayMigration).
-@MainActor
+@Observable @MainActor
 final class GatewayAuthStore {
     static let shared = GatewayAuthStore()
 

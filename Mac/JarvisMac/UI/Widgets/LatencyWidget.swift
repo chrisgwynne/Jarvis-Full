@@ -51,6 +51,7 @@ struct LatencyWidget: View {
         case .ttsStart:        return "TTS start"
         case .ttsComplete:     return "TTS total"
         case .bargeIn:         return "Barge-in"
+        default:               return stage.rawValue
         }
     }
 
@@ -62,6 +63,7 @@ struct LatencyWidget: View {
         case .actionExecute:           return .purple
         case .ttsStart, .ttsComplete:  return .yellow
         case .bargeIn:                 return .orange
+        default:                       return .secondary
         }
     }
 }

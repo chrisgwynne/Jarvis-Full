@@ -72,12 +72,7 @@ final class ToolArbitrationService {
             arbitrationCount += 1
         }
 
-        arbitrationLogger.debug(
-            "arbitration: outputKind=\(String(describing: outputKind)) " +
-            "outputDevice=\(result.outputDeviceId ?? "nil") " +
-            "mode=\(result.outputMode.rawValue) confidence=\(result.confidence) " +
-            "rationale=\(result.rationale)"
-        )
+        arbitrationLogger.debug("arbitration: outputKind=\(String(describing: outputKind)) outputDevice=\(result.outputDeviceId ?? "nil") mode=\(result.outputMode.rawValue) confidence=\(result.confidence) rationale=\(result.rationale)")
 
         return result
     }

@@ -37,7 +37,7 @@ enum MacActionHandler {
     // MARK: - open_app
 
     @MainActor
-    static func openApp(appName: String) async -> ActionResult {
+    static func openApp(appName: String) async -> RemoteActionResult {
         let key = appName.lowercased().trimmingCharacters(in: .whitespaces)
 
         // 1. Check known bundle IDs
@@ -55,12 +55,12 @@ enum MacActionHandler {
         if let appUrl = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.\(key)") {
             let opened = NSWorkspace.shared.open(appUrl)
             if opened {
-                return ActionResult(success: true, spokenSummary: "Opening \(appName) on the Mac.")
+                return RemoteActionResult(success: true, spokenSummary: "Opening \(appName) on the Mac.")
             }
         }
 
         logger.warning("mac-action: open_app — unknown app '\(appName, privacy: .public)'")
-        return ActionResult(
+        return RemoteActionResult(
             success: false,
             spokenSummary: "That Mac action is not supported yet.",
             errorCode: "unsupported_app",
@@ -69,7 +69,7 @@ enum MacActionHandler {
     }
 
     @MainActor
-    private static func launch(bundleId: String, displayName: String) -> ActionResult {
+    private static func launch(bundleId: String, displayName: String) -> RemoteActionResult {
         if bundleId == "com.jarvis.jarvisapp" {
             return openJarvis()
         }
@@ -78,10 +78,10 @@ enum MacActionHandler {
             cfg.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: cfg)
             logger.info("mac-action: opened \(bundleId, privacy: .public)")
-            return ActionResult(success: true, spokenSummary: "Opening \(displayName) on the Mac.")
+            return RemoteActionResult(success: true, spokenSummary: "Opening \(displayName) on the Mac.")
         }
         logger.warning("mac-action: app not installed bundleId=\(bundleId, privacy: .public)")
-        return ActionResult(
+        return RemoteActionResult(
             success: false,
             spokenSummary: "That app doesn't seem to be installed.",
             errorCode: "unsupported_app"
@@ -91,10 +91,10 @@ enum MacActionHandler {
     // MARK: - create_note
 
     @MainActor
-    static func createNote(title: String?, body: String?) async -> ActionResult {
+    static func createNote(title: String?, body: String?) async -> RemoteActionResult {
         // Open Notes first
         guard let notesURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Notes") else {
-            return ActionResult(
+            return RemoteActionResult(
                 success: false,
                 spokenSummary: "Notes doesn't seem to be installed.",
                 errorCode: "unsupported_action"
@@ -103,11 +103,11 @@ enum MacActionHandler {
 
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
-        NSWorkspace.shared.openApplication(at: notesURL, configuration: cfg)
+        try? await NSWorkspace.shared.openApplication(at: notesURL, configuration: cfg)
 
         // If no title/body, just open Notes
         guard title != nil || body != nil else {
-            return ActionResult(
+            return RemoteActionResult(
                 success: true,
                 spokenSummary: "Notes is open. What should I call the note?",
                 errorCode: "needs_more_info"
@@ -135,11 +135,11 @@ enum MacActionHandler {
             if error == nil {
                 logger.info("mac-action: created note '\(noteTitle, privacy: .public)' via AppleScript")
                 let summary = title != nil ? "Creating a note called \(noteTitle) on the Mac." : "Creating a note on the Mac."
-                return ActionResult(success: true, spokenSummary: summary)
+                return RemoteActionResult(success: true, spokenSummary: summary)
             } else {
                 // AppleScript failed — fall back to just opening Notes
                 logger.warning("mac-action: AppleScript failed for create_note — Notes opened only")
-                return ActionResult(
+                return RemoteActionResult(
                     success: true,
                     spokenSummary: "Notes is open. I couldn't create the note automatically — you may need to grant automation permission.",
                     errorCode: "needs_more_info"
@@ -147,14 +147,14 @@ enum MacActionHandler {
             }
         }
 
-        return ActionResult(success: true, spokenSummary: "Notes is open on the Mac.")
+        return RemoteActionResult(success: true, spokenSummary: "Notes is open on the Mac.")
     }
 
     // MARK: - show_camera
 
     @MainActor
-    static func showCamera() -> ActionResult {
-        return ActionResult(
+    static func showCamera() -> RemoteActionResult {
+        return RemoteActionResult(
             success: false,
             spokenSummary: "That Mac action is not supported yet.",
             errorCode: "unsupported_action",
@@ -165,7 +165,7 @@ enum MacActionHandler {
     // MARK: - open_jarvis
 
     @MainActor
-    static func openJarvis() -> ActionResult {
+    static func openJarvis() -> RemoteActionResult {
         NSApp.activate(ignoringOtherApps: true)
         // Bring main window to front
         for window in NSApp.windows {
@@ -173,6 +173,6 @@ enum MacActionHandler {
             break
         }
         logger.info("mac-action: Jarvis brought to front")
-        return ActionResult(success: true, spokenSummary: "Done on the Mac.")
+        return RemoteActionResult(success: true, spokenSummary: "Done on the Mac.")
     }
 }

@@ -127,6 +127,10 @@ final class AVSpeechTTS: NSObject, TextToSpeaking, AVSpeechSynthesizerDelegate, 
     let isSpeakingStream: AsyncStream<Bool>
     var isSpeaking: Bool { synth.isSpeaking }
 
+    // Serial queue at .userInitiated keeps AVSpeechSynthesizer calls off the
+    // main thread and avoids the QoS priority-inversion warning.
+    private let ttsQueue = DispatchQueue(label: "com.jarvis.tts", qos: .userInitiated)
+
     // Current voice config — updated by configure(prefs:)
     private var configuredVoiceId: String? = nil
     private var configuredRate: Float = AVSpeechUtteranceDefaultSpeechRate
@@ -164,21 +168,30 @@ final class AVSpeechTTS: NSObject, TextToSpeaking, AVSpeechSynthesizerDelegate, 
     func speak(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
-
-        let utterance = AVSpeechUtterance(string: trimmed)
-        utterance.voice           = resolvedVoice
-        utterance.rate            = configuredRate
-        utterance.pitchMultiplier = configuredPitch
-        utterance.volume          = configuredVolume
-        synth.speak(utterance)
+        let voice   = resolvedVoice
+        let rate    = configuredRate
+        let pitch   = configuredPitch
+        let volume  = configuredVolume
+        ttsQueue.async { [weak self] in
+            guard let self else { return }
+            if self.synth.isSpeaking { self.synth.stopSpeaking(at: .immediate) }
+            let utterance             = AVSpeechUtterance(string: trimmed)
+            utterance.voice           = voice
+            utterance.rate            = rate
+            utterance.pitchMultiplier = pitch
+            utterance.volume          = volume
+            self.synth.speak(utterance)
+        }
     }
 
     func stop() {
-        if synth.isSpeaking {
-            synth.stopSpeaking(at: .immediate)
-        } else {
-            continuation?.yield(false)
+        ttsQueue.async { [weak self] in
+            guard let self else { return }
+            if self.synth.isSpeaking {
+                self.synth.stopSpeaking(at: .immediate)
+            } else {
+                self.continuation?.yield(false)
+            }
         }
     }
 

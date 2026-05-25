@@ -39,7 +39,7 @@ final class SupertonicTTSBackend: TTSBackend, @unchecked Sendable {
     // MARK: Availability
 
     var isAvailable: Bool {
-        #if canImport(onnxruntime)
+        #if canImport(OnnxRuntimeBindings)
         return modelDirectory.allRequiredFilesPresent
         #else
         return false
@@ -66,7 +66,7 @@ final class SupertonicTTSBackend: TTSBackend, @unchecked Sendable {
     private(set) var lastSynthesisMs: Int     = 0
     private(set) var lastTextLength:  Int     = 0
 
-    #if canImport(onnxruntime)
+    #if canImport(OnnxRuntimeBindings)
     private var engine: SupertonicInferenceEngine?
     private var loadedStyle: SupertonicVoiceStyle?
     #endif
@@ -87,7 +87,7 @@ final class SupertonicTTSBackend: TTSBackend, @unchecked Sendable {
     // MARK: Preload
 
     func preload() async {
-        #if canImport(onnxruntime)
+        #if canImport(OnnxRuntimeBindings)
         guard isAvailable else { return }
         do {
             let dir    = modelDirectory
@@ -134,7 +134,7 @@ final class SupertonicTTSBackend: TTSBackend, @unchecked Sendable {
     // MARK: Synthesis pipeline
 
     private func runSynthesis(text: String) async {
-        #if canImport(onnxruntime)
+        #if canImport(OnnxRuntimeBindings)
         // Lazily load engine if preload() was not called.
         if engine == nil { await preload() }
 
@@ -233,7 +233,7 @@ final class SupertonicTTSBackend: TTSBackend, @unchecked Sendable {
     var diagnostics: TTSBackendDiagnostics {
         let missing = modelDirectory.missingFiles()
 
-        #if canImport(onnxruntime)
+        #if canImport(OnnxRuntimeBindings)
         let unavailableReason: String? = missing.isEmpty ? nil
             : "Missing Supertonic model files:\n"
               + missing.map { "  • \($0)" }.joined(separator: "\n")

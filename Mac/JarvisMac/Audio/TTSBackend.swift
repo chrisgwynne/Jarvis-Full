@@ -55,7 +55,7 @@ enum TTSTagStripper {
 
     private static let openCloseRegex: NSRegularExpression = {
         // Matches <tag>, </tag> – preserves content between them
-        (try? NSRegularExpression(pattern: "</?[a-zA-Z][^>]*>")) !
+        (try? NSRegularExpression(pattern: "</?[a-zA-Z][^>]*>"))!
     }()
 
     static func strip(_ text: String) -> String {

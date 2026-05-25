@@ -77,9 +77,8 @@ final class DaemonAppBridge: ObservableObject {
         let task = session.webSocketTask(with: request)
         self.connection = task
         task.resume()
-        isConnected = true
-        reconnectAttempts = 0
-        logger.info("DaemonAppBridge: connected to daemon")
+        // Don't mark connected or reset attempts here — wait for first successful message
+        logger.info("DaemonAppBridge: connecting to daemon (attempt \(self.reconnectAttempts + 1))")
 
         receive()
         startPing()
@@ -113,6 +112,10 @@ final class DaemonAppBridge: ObservableObject {
             guard let self else { return }
             switch result {
             case .success(let message):
+                Task { @MainActor in
+                    self.isConnected = true
+                    self.reconnectAttempts = 0
+                }
                 switch message {
                 case .string(let text):
                     self.handleText(text)

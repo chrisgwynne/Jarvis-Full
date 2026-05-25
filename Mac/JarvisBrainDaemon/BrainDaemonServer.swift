@@ -463,7 +463,7 @@ final class BrainDaemonServer {
             let iso3 = ISO8601DateFormatter()
             let result3 = events.map { ev -> [String: Any] in
                 var dict: [String: Any] = [
-                    "id": ev.id,
+                    "id": ev.eventId,
                     "channel": ev.channel.rawValue,
                     "contactHandle": ev.contactHandle,
                     "state": ev.state.rawValue,

@@ -50,7 +50,7 @@ final class RemoteActionExecutor {
     ) async {
         logger.info("remote-action: executing action=\(action, privacy: .public) requestId=\(requestId, privacy: .public)")
 
-        let result: ActionResult
+        let result: RemoteActionResult
         switch action {
         case "open_app":
             let appName = parameters["appName"] as? String ?? ""
@@ -64,7 +64,7 @@ final class RemoteActionExecutor {
         case "open_jarvis":
             result = MacActionHandler.openJarvis()
         default:
-            result = ActionResult(
+            result = RemoteActionResult(
                 success: false,
                 spokenSummary: "That Mac action is not supported yet.",
                 errorCode: "unsupported_action"
@@ -152,9 +152,9 @@ final class RemoteActionExecutor {
     }
 }
 
-// MARK: - ActionResult
+// MARK: - RemoteActionResult
 
-struct ActionResult {
+struct RemoteActionResult {
     let success: Bool
     let spokenSummary: String
     let errorCode: String?
