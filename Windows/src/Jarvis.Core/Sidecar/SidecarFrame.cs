@@ -86,6 +86,21 @@ public sealed class SidecarFrame
     [JsonPropertyName("intentJson")] public string? IntentJson { get; set; }
     [JsonPropertyName("outcome")] public string? Outcome { get; set; }
     [JsonPropertyName("message")] public string? Message { get; set; }
+
+    // Tool request/result fields (windows.tool.request / windows.tool.result)
+    [JsonPropertyName("toolName")] public string? ToolName { get; set; }
+    [JsonPropertyName("toolParameters")] public Dictionary<string, string>? ToolParameters { get; set; }
+    [JsonPropertyName("dryRun")] public bool? DryRun { get; set; }
+    [JsonPropertyName("toolSuccess")] public bool? ToolSuccess { get; set; }
+    [JsonPropertyName("toolSummary")] public string? ToolSummary { get; set; }
+    [JsonPropertyName("toolDetail")] public string? ToolDetail { get; set; }
+    [JsonPropertyName("artifactPath")] public string? ArtifactPath { get; set; }
+    [JsonPropertyName("privacyImpact")] public string? PrivacyImpact { get; set; }
+
+    // Memory query fields (windows.memory.query / windows.memory.answer)
+    [JsonPropertyName("memoryQuery")] public string? MemoryQuery { get; set; }
+    [JsonPropertyName("memoryAnswer")] public string? MemoryAnswer { get; set; }
+    [JsonPropertyName("memoryData")] public string? MemoryData { get; set; }   // JSON-encoded structured answer
 }
 
 /// <summary>Compact desktop snapshot pushed to the Mac. Mirrors <c>ConversationContext</c>
@@ -147,6 +162,16 @@ public static class SidecarFrameTypes
     public const string ChatReplyPartial  = "chat.reply.partial";
     public const string ChatReplyFinal    = "chat.reply.final";
     public const string TtsText           = "tts.text";
+
+    // ─── P8 tool + memory frames ─────────────────────────────────────────────────
+    /// <summary>Mac → Windows: invoke a named desktop tool with parameters.</summary>
+    public const string WindowsToolRequest  = "windows.tool.request";
+    /// <summary>Windows → Mac: result of a tool invocation.</summary>
+    public const string WindowsToolResult   = "windows.tool.result";
+    /// <summary>Mac → Windows: query local desktop memory (session history, focus, usage).</summary>
+    public const string WindowsMemoryQuery  = "windows.memory.query";
+    /// <summary>Windows → Mac: answer to a memory query.</summary>
+    public const string WindowsMemoryAnswer = "windows.memory.answer";
 
     // ─── P7 distributed-brain frames ────────────────────────────────────────────
     /// <summary>Mac → device: this device should suppress proactive speech.</summary>

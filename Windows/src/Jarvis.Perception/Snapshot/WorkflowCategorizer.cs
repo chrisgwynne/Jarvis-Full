@@ -11,46 +11,62 @@ namespace Jarvis.Perception.Snapshot;
 /// </summary>
 public sealed class WorkflowCategorizer : IWorkflowCategorizer
 {
-    private static readonly HashSet<string> IdeProcesses = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> IdeProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "Code", "Code - Insiders", "Cursor", "devenv", "rider64", "idea64", "pycharm64",
         "webstorm64", "clion64", "goland64", "sublime_text", "atom", "notepad++", "vim", "nvim", "emacs",
         "windsurf", "zed", "helix", "lapce"
     };
-    private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> IdeProcesses = IdeProcessNames;
+
+    internal static readonly HashSet<string> BrowserProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "msedge", "firefox", "brave", "opera", "arc", "vivaldi",
         "thorium", "librewolf", "brave-browser", "zen"
     };
-    private static readonly HashSet<string> TerminalProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> BrowserProcesses = BrowserProcessNames;
+
+    internal static readonly HashSet<string> TerminalProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "WindowsTerminal", "cmd", "powershell", "pwsh", "wt", "ConEmu64", "alacritty", "wezterm-gui"
     };
-    private static readonly HashSet<string> CommsProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> TerminalProcesses = TerminalProcessNames;
+
+    internal static readonly HashSet<string> CommsProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "slack", "Teams", "Discord", "WhatsApp", "Telegram", "outlook", "Spark", "thunderbird",
         "zoom", "webex", "Signal", "element", "wire", "mattermost"
     };
-    private static readonly HashSet<string> EditingProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> CommsProcesses = CommsProcessNames;
+
+    internal static readonly HashSet<string> EditingProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "Photoshop", "Illustrator", "AfterFX", "Premiere", "Resolve", "Figma", "Sketch", "Affinity Photo", "Affinity Designer",
         "Blender", "Krita", "inkscape", "darktable", "RawTherapee", "obs64", "obs32", "obs"
     };
-    private static readonly HashSet<string> MediaProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> EditingProcesses = EditingProcessNames;
+
+    internal static readonly HashSet<string> MediaProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "vlc", "Spotify", "Music.UI", "wmplayer", "mpv", "potplayer",
         "Netflix", "PrimeVideo", "YouTubeApp", "AppleMusic", "PodcastsApp"
     };
-    private static readonly HashSet<string> WritingProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> MediaProcesses = MediaProcessNames;
+
+    internal static readonly HashSet<string> WritingProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "WINWORD", "notion", "obsidian", "Typora", "Bear", "Ulysses", "scrivener"
     };
-    internal static readonly HashSet<string> GamingProcesses = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> WritingProcesses = WritingProcessNames;
+
+    internal static readonly HashSet<string> GamingProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "steam", "EpicGamesLauncher", "gameoverlayui", "RiotClientServices", "LeagueClient",
         "Minecraft.Windows", "javaw", "destiny2", "Warzone", "csgo", "dota2", "valorant",
         "RocketLeague", "overwatch", "fortnite"
     };
+    // Backward-compat alias (was 'GamingProcesses' — now exposed as GamingProcessNames for consistency)
+    internal static readonly HashSet<string> GamingProcesses = GamingProcessNames;
 
     public WorkflowCategory Categorize(SemanticSnapshotInputs inputs)
     {

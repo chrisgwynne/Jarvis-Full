@@ -72,6 +72,45 @@ API keys and session tokens are encrypted at rest using Windows DPAPI (Data Prot
 - **Bridge session tokens** (`BrainGatewayConfig.SessionToken`) are DPAPI-protected; only the current Windows user account can decrypt them
 - Raw token values are never logged; diagnostics show only the first 4 characters followed by `…`
 
+## Tool Layer Privacy (Phase 4)
+
+The desktop tool layer introduces additional privacy controls:
+
+### Tool privacy impacts
+
+| Tool | Impact | Default permission | Opt-in required |
+|---|---|---|---|
+| `open_app` | None | Enabled | No |
+| `focus_app` | None | Enabled | No |
+| `close_app` | None | Enabled via `AllowAppClose` | No |
+| `screenshot_window` | Screenshot (captures screen pixels) | Enabled via `AllowScreenshots` | No |
+| `clipboard_summary` | Clipboard (reads text content) | **Disabled** | Yes — `AllowClipboardRead = true` |
+| `volume_control` | None | Enabled | No |
+| `inspect_processes` | AppList (reads process names only) | Enabled | No |
+| `open_project` | FilePath (reads alias→path mapping) | Enabled | No |
+
+### Screenshot policy
+- Screenshots are saved to `%APPDATA%\Jarvis\Screenshots\` on the local machine only.
+- Screenshot file content is **never sent over the bridge** — only the local file path is returned.
+- Screenshots can be disabled globally via `Settings.Tools.AllowScreenshots = false`.
+
+### Clipboard policy
+- Clipboard reading is **disabled by default** (`AllowClipboardRead = false`).
+- When enabled, only a brief summary is returned (length, type, first 80 chars).
+- Clipboard content is never logged or stored beyond the single call.
+- Control characters are stripped from the preview.
+
+### Process list policy
+- `inspect_processes` returns process names and memory usage only.
+- Command-line arguments, environment variables, and file paths are never included.
+- System/infrastructure processes are filtered from results.
+- Results are not persisted or sent to Mac automatically — only when explicitly requested.
+
+### Tool execution policy
+- Tools are only invoked by name from the allowlist — no arbitrary shell execution.
+- All alias→executable mappings are hardcoded (no user-configurable shell strings).
+- Tool results containing `artifactPath` reference local files only; the Mac must explicitly request transfer.
+
 ## Network privacy
 
 - Context payloads are sent **only when the Mac bridge is connected** and the snapshot hash has changed

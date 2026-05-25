@@ -33,14 +33,18 @@ using Jarvis.Core.Sidecar;
 using Jarvis.Perception.Conversation;
 using Jarvis.Perception.Guidance;
 using Jarvis.Perception.Sidecar;
+using Jarvis.Core.Memory;
+using Jarvis.Core.Tools;
 using Jarvis.Perception.Browser;
 using Jarvis.Perception.Capture;
 using Jarvis.Perception.Classification;
 using Jarvis.Perception.Clipboard;
 using Jarvis.Perception.Ide;
+using Jarvis.Perception.Memory;
 using Jarvis.Perception.Ocr;
 using Jarvis.Perception.Selection;
 using Jarvis.Perception.Snapshot;
+using Jarvis.Perception.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MessageBox = System.Windows.MessageBox;
@@ -66,6 +70,8 @@ public partial class App : System.Windows.Application
     private IMacBridgeCoordinator? _macBridge;
     private ISidecarContextPublisher? _contextPublisher;
     private IRemoteExecutionBridge? _remoteExecutor;
+    private WindowsToolBridge? _toolBridge;
+    private WindowsMemoryBridge? _memoryBridge;
     private IMicrophoneCapture? _mic;
     private IPartialTranscriptCoordinator? _partialCoord;
     private IPlaybackInterruptionCoordinator? _interruptCoord;
@@ -183,6 +189,12 @@ public partial class App : System.Windows.Application
         _remoteExecutor = _services.GetRequiredService<IRemoteExecutionBridge>();
         _remoteExecutor.Attach();
 
+        // P8 — tool layer + memory bridges
+        _toolBridge = _services.GetRequiredService<WindowsToolBridge>();
+        _toolBridge.Attach();
+        _memoryBridge = _services.GetRequiredService<WindowsMemoryBridge>();
+        _memoryBridge.Attach();
+
         // P7 — wire the orchestration + fallback coordinators (they self-subscribe to
         // bridge events; resolving them is enough to start them).
         var orchestration = _services.GetRequiredService<IRemoteOrchestrationCoordinator>();
@@ -292,8 +304,58 @@ public partial class App : System.Windows.Application
         var vm = _services.GetRequiredService<DashboardViewModel>();
         _dashboardWindow = new DashboardWindow(vm);
         _dashboardWindow.Closed += (_, _) => _dashboardWindow = null;
+        _dashboardWindow.QuickActionRequested += OnDashboardQuickAction;
         _dashboardWindow.Show();
         _dashboardWindow.Activate();
+    }
+
+    private void OnDashboardQuickAction(object? sender, string action)
+    {
+        if (_services is null) return;
+        var registry = _services.GetService<IWindowsToolRegistry>();
+        var presenceManager = _services.GetService<IPresenceModeManager>();
+        var vm = _services.GetService<DashboardViewModel>();
+
+        switch (action)
+        {
+            case "toggle_focus":
+                if (presenceManager is not null)
+                {
+                    if (presenceManager.Current == PresenceMode.Focus && presenceManager.IsUserOverride)
+                        presenceManager.ClearOverride();
+                    else
+                        presenceManager.SetMode(PresenceMode.Focus);
+                }
+                break;
+
+            case "screenshot":
+                _ = Task.Run(async () =>
+                {
+                    var tool = registry?.Find("screenshot_window");
+                    if (tool is null) return;
+                    var req = new WindowsToolRequest("dashboard", "screenshot_window",
+                        new Dictionary<string, string>(), false, "dashboard", DateTimeOffset.UtcNow);
+                    var result = await tool.ExecuteAsync(req).ConfigureAwait(false);
+                    vm?.RecordToolRun("screenshot_window", result.Success, result.Summary, result.PrivacyImpact);
+                });
+                break;
+
+            case "running_apps":
+                _ = Task.Run(async () =>
+                {
+                    var tool = registry?.Find("inspect_processes");
+                    if (tool is null) return;
+                    var req = new WindowsToolRequest("dashboard", "inspect_processes",
+                        new Dictionary<string, string>(), false, "dashboard", DateTimeOffset.UtcNow);
+                    var result = await tool.ExecuteAsync(req).ConfigureAwait(false);
+                    vm?.RecordToolRun("inspect_processes", result.Success, result.Summary, result.PrivacyImpact);
+                    if (result.Detail is not null)
+                        _ = Dispatcher.BeginInvoke(() =>
+                            System.Windows.MessageBox.Show(result.Detail, "Running Apps",
+                                MessageBoxButton.OK, MessageBoxImage.None));
+                });
+                break;
+        }
     }
 
     private Jarvis.App.Llm.LlmSettingsWindow? _llmSettingsWindow;
@@ -797,6 +859,8 @@ public partial class App : System.Windows.Application
             if (_interruptCoord is IDisposable icd) icd.Dispose();
             if (_mic is not null) { try { await _mic.StopAsync(); } catch { } await _mic.DisposeAsync(); }
             _remoteExecutor?.Dispose();
+            _toolBridge?.Dispose();
+            _memoryBridge?.Dispose();
             if (_contextPublisher is not null) await _contextPublisher.DisposeAsync();
             if (_macBridge is not null)
             {
@@ -1062,5 +1126,42 @@ public partial class App : System.Windows.Application
                 System.Windows.Application.Current.Dispatcher.BeginInvoke(() => vm.ApplyContextSnapshot(snap));
             return vm;
         });
+
+        // ─── P8: Tool layer ──────────────────────────────────────────────────────────
+
+        // Register individual tools
+        services.AddSingleton<IWindowsTool, OpenAppTool>();
+        services.AddSingleton<IWindowsTool, FocusAppTool>();
+        services.AddSingleton<IWindowsTool>(sp => new CloseAppTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+        services.AddSingleton<IWindowsTool>(sp => new ScreenshotWindowTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+        services.AddSingleton<IWindowsTool>(sp => new ClipboardSummaryTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+        services.AddSingleton<IWindowsTool, VolumeMicTool>();
+        services.AddSingleton<IWindowsTool, ProcessInspectTool>();
+        services.AddSingleton<IWindowsTool>(sp => new OpenProjectTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Projects));
+
+        // Tool registry
+        services.AddSingleton<IWindowsToolRegistry>(sp => new WindowsToolRegistry(
+            sp.GetServices<IWindowsTool>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+
+        // Desktop memory query service
+        services.AddSingleton<IDesktopMemoryQueryService>(sp => new DesktopMemoryQueryService(
+            sp.GetRequiredService<ISessionMemoryStore>(),
+            sp.GetRequiredService<IAppUsageTracker>(),
+            sp.GetRequiredService<IFocusSessionTracker>()));
+
+        // Bridges (Attach() called in OnStartup)
+        services.AddSingleton<WindowsToolBridge>(sp => new WindowsToolBridge(
+            sp.GetRequiredService<IMacBridgeCoordinator>(),
+            sp.GetRequiredService<IWindowsToolRegistry>(),
+            sp.GetService<IDiagnostics>()));
+        services.AddSingleton<WindowsMemoryBridge>(sp => new WindowsMemoryBridge(
+            sp.GetRequiredService<IMacBridgeCoordinator>(),
+            sp.GetRequiredService<IDesktopMemoryQueryService>(),
+            sp.GetService<IDiagnostics>()));
     }
 }

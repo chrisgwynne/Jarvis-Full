@@ -4,8 +4,17 @@ using Jarvis.Core.Context;
 using Jarvis.Core.Focus;
 using Jarvis.Core.Presence;
 using Jarvis.Core.Snapshot;
+using Jarvis.Core.Tools;
 
 namespace Jarvis.Perception.Dashboard;
+
+/// <summary>Immutable record of a recent tool invocation shown in the dashboard.</summary>
+public sealed record RecentToolRun(
+    string ToolName,
+    bool Success,
+    string Summary,
+    ToolPrivacyImpact PrivacyImpact,
+    DateTimeOffset At);
 
 /// <summary>
 /// View model for a dashboard panel that reflects the current Windows context engine
@@ -29,6 +38,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private double _productivityScore;
     private PresenceMode _presenceMode = PresenceMode.Work;
     private string _smartSuggestion = "";
+
+    // Tool run history (bounded at 10)
+    private readonly Queue<RecentToolRun> _recentToolRunsQueue = new(11);
+    private readonly object _toolRunGate = new();
+    private IReadOnlyList<RecentToolRun> _recentToolRunsSnapshot = Array.Empty<RecentToolRun>();
 
     public string CurrentWorkflow
     {
@@ -94,6 +108,21 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         get => _smartSuggestion;
         private set => Set(ref _smartSuggestion, value);
+    }
+
+    /// <summary>The last (up to 10) tool runs recorded for this session.</summary>
+    public IReadOnlyList<RecentToolRun> RecentToolRuns => _recentToolRunsSnapshot;
+
+    /// <summary>Records a tool invocation in the bounded history and fires PropertyChanged.</summary>
+    public void RecordToolRun(string toolName, bool success, string summary, ToolPrivacyImpact privacyImpact)
+    {
+        lock (_toolRunGate)
+        {
+            if (_recentToolRunsQueue.Count >= 10) _recentToolRunsQueue.Dequeue();
+            _recentToolRunsQueue.Enqueue(new RecentToolRun(toolName, success, summary, privacyImpact, DateTimeOffset.UtcNow));
+            _recentToolRunsSnapshot = _recentToolRunsQueue.ToList().AsReadOnly();
+        }
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RecentToolRuns)));
     }
 
     /// <summary>Applies a new context snapshot, updating workflow, recent apps, timeline, focus, and presence.</summary>

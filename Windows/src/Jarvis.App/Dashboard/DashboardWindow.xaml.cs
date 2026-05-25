@@ -10,11 +10,19 @@ public partial class DashboardWindow : Window
 {
     private const double ProductivityBarMaxWidth = 380.0;
 
+    /// <summary>Raised when the user clicks a quick-action button.</summary>
+    public event EventHandler<string>? QuickActionRequested;
+
     public DashboardWindow(DashboardViewModel vm)
     {
         InitializeComponent();
         DataContext = vm;
-        vm.PropertyChanged += (_, _) => Dispatcher.BeginInvoke(Refresh);
+        vm.PropertyChanged += (_, e) =>
+        {
+            Dispatcher.BeginInvoke(Refresh);
+            if (e.PropertyName == nameof(DashboardViewModel.RecentToolRuns))
+                Dispatcher.BeginInvoke(RefreshToolRuns);
+        };
         Loaded += (_, _) => Refresh();
     }
 
@@ -56,6 +64,43 @@ public partial class DashboardWindow : Window
             ? "Session tracking initializing..."
             : timeline;
     }
+
+    private void RefreshToolRuns()
+    {
+        if (DataContext is not DashboardViewModel vm) return;
+        var runs = vm.RecentToolRuns;
+
+        if (runs.Count == 0)
+        {
+            RecentToolRunsCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        RecentToolRunsCard.Visibility = Visibility.Visible;
+        RecentToolRunsList.ItemsSource = runs
+            .OrderByDescending(r => r.At)
+            .Take(5)
+            .Select(r => new
+            {
+                StatusGlyph = r.Success ? "✓" : "✗",
+                Summary = $"{r.ToolName}: {r.Summary}",
+                TimeDisplay = r.At.LocalDateTime.ToString("HH:mm")
+            })
+            .ToList();
+    }
+
+    // ─── Quick Action handlers ─────────────────────────────────────────────────
+
+    private void OnFocusModeBtn(object sender, RoutedEventArgs e) =>
+        QuickActionRequested?.Invoke(this, "toggle_focus");
+
+    private void OnScreenshotBtn(object sender, RoutedEventArgs e) =>
+        QuickActionRequested?.Invoke(this, "screenshot");
+
+    private void OnRunningAppsBtn(object sender, RoutedEventArgs e) =>
+        QuickActionRequested?.Invoke(this, "running_apps");
+
+    // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static string FormatPresenceMode(PresenceMode mode) => mode switch
     {

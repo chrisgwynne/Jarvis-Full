@@ -29,8 +29,32 @@ public sealed record JarvisSettings
     /// <summary>Proactive nudge settings: distraction alerts, focus milestones, suppression rules.</summary>
     public ProactivitySettings Proactivity { get; init; } = new();
 
+    /// <summary>Desktop tool layer settings — controls which tools are enabled and their safety thresholds.</summary>
+    public ToolsSettings Tools { get; init; } = new();
+
+    /// <summary>Project shortcut aliases for the open_project tool.</summary>
+    public ProjectSettings Projects { get; init; } = new();
+
     public static JarvisSettings Defaults => new();
 }
+
+public sealed record ToolsSettings
+{
+    public bool Enabled { get; init; } = true;
+    public bool RequireConfirmationForDestructive { get; init; } = true;
+    public bool AllowScreenshots { get; init; } = true;
+    public bool AllowClipboardRead { get; init; } = false;   // opt-in
+    public bool AllowAppClose { get; init; } = true;
+    public bool AllowForceClose { get; init; } = false;      // opt-in
+    public bool ToolDiagnostics { get; init; } = false;      // developer
+}
+
+public sealed record ProjectSettings
+{
+    public ProjectAlias[] Aliases { get; init; } = Array.Empty<ProjectAlias>();
+}
+
+public sealed record ProjectAlias(string Alias, string Path, string? App = null);
 
 public sealed record QuotaSettings
 {
