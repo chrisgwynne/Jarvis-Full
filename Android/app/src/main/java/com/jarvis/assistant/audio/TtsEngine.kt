@@ -145,8 +145,22 @@ class TtsEngine(context: Context) : TextToSpeech.OnInitListener {
      * Single attempt.  Returns true on clean completion (onDone/onStop), false
      * if the engine signalled a network-related error so the caller can retry
      * with a different voice.
+     *
+     * Wrapped with a 20 s hard timeout because on some devices the native
+     * UtteranceProgressListener never fires onDone — leaving the coroutine
+     * suspended forever, audio focus held, and the state machine stuck in
+     * Speaking.  [TtsCoordinator] has an outer 30 s fence; this inner one
+     * is tighter so we surrender to the fallback path sooner.
      */
     private suspend fun speakOnce(text: String): Boolean =
+        (kotlinx.coroutines.withTimeoutOrNull(20_000L) { speakOnceInner(text) } ?: run {
+            Log.w(TAG, "[TTS_SPEAK_TIMEOUT] no listener callback within 20s — stopping")
+            try { tts.stop() } catch (_: Exception) {}
+            try { tts.setOnUtteranceProgressListener(null) } catch (_: Exception) {}
+            false
+        })
+
+    private suspend fun speakOnceInner(text: String): Boolean =
         suspendCancellableCoroutine { cont ->
             val utteranceId = "jarvis_${System.currentTimeMillis()}"
             val resumed = AtomicBoolean(false)

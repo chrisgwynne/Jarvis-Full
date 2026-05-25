@@ -1247,6 +1247,7 @@ class JarvisRuntime(
         com.jarvis.assistant.reliability.ListenerDiagnostics.currentRole = "FULL_ASSISTANT"
         startWakeWordDetection()
         startListenerWatchdog()
+        startGatewayDisconnectRecovery()
         startCallEventCollection()
         scope.launch(Dispatchers.IO) {
             memoryWriter.prune()
@@ -1746,6 +1747,13 @@ class JarvisRuntime(
         bargeIn.release()
         tts.stop()
         ttsEngine.shutdown()
+        // Clear remote-reply correlation so a late reply on the WS doesn't
+        // re-enter the pipeline after the service has been torn down.
+        // Without this, a reply arriving during the stop sequence
+        // re-triggered speakAndRecord() on a half-released runtime.
+        pendingRemoteRouteId = null
+        com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
+        com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs = 0L
         // Release recording manager BEFORE bluetooth/focus teardown so the mic
         // is freed even if the user stops the service mid-recording.
         toolRegistry.release()
@@ -1980,75 +1988,186 @@ class JarvisRuntime(
      */
     private fun startListenerWatchdog() {
         scope.launch {
-            var hasRestartedThisSession = false
+            // Rolling backoff on wake-detector restarts.  Each consecutive
+            // failure within RESTART_WINDOW_MS multiplies the next allowed
+            // restart delay so we don't burn battery hammering a broken
+            // hardware state — but we NEVER stop trying.  The previous
+            // "one-shot per session" guard left the assistant permanently
+            // mute if the detector died twice; users had to force-stop the
+            // app to recover, which is the single most painful regression
+            // in this runtime.
+            var consecutiveDetectorRestarts = 0
+            var lastDetectorRestartMs = 0L
+            // Rolling stuck-state counters — each state gets its own so
+            // recovering one doesn't reset the cooldown for another.
+            var lastForceRecoveryMs = mutableMapOf<String, Long>()
+            val MIN_FORCE_RECOVERY_GAP_MS = 6_000L
+            val RESTART_BACKOFF_MS        = longArrayOf(0L, 1_000L, 4_000L, 10_000L, 30_000L)
+            val RESTART_WINDOW_MS         = 120_000L
+
+            // Per-state stuck thresholds.  Anything inside the gap is
+            // considered legitimate processing; over the gap is a wedge that
+            // must self-heal regardless of the reason.
+            val THINKING_STUCK_MS         = 60_000L
+            val LISTENING_STUCK_MS        = 45_000L
+            val SPEAKING_STUCK_MS         = 30_000L
+            val AWAITING_REMOTE_STUCK_MS  = 12_000L   // hard fence past the inline 8 s timer
+            val WAKE_DETECTED_STUCK_MS    = 10_000L
+            val INTERRUPTED_STUCK_MS      = 20_000L
+
+            // Helper to force a clean reset to wake-word listening with
+            // dedup gap — never lets two recoveries fire in the same window.
+            suspend fun forceRecover(label: String) {
+                val now = System.currentTimeMillis()
+                val last = lastForceRecoveryMs[label] ?: 0L
+                if (now - last < MIN_FORCE_RECOVERY_GAP_MS) return
+                lastForceRecoveryMs[label] = now
+                Log.w(TAG, "[SELF_HEAL] reason=$label — force reset to wake-word listening")
+                com.jarvis.assistant.reliability.ListenerDiagnostics
+                    .recordListenStop("self_heal_$label")
+                runCatching { speechCapture.cancel() }
+                runCatching { tts.stop() }
+                runCatching { audioFocus.abandonFocus() }
+                runCatching { pendingRemoteRouteId = null }
+                runCatching {
+                    com.jarvis.assistant.reliability.ListenerDiagnostics
+                        .pendingRemoteRouteId = null
+                }
+                runCatching { closeSessionAsync() }
+                runCatching { releaseResources() }
+                runCatching { backToWakeWord() }
+            }
+
             while (isActive) {
-                delay(8_000L)
+                delay(4_000L)   // tighter than the old 8 s — stuck states recover sooner
 
                 // Only watch when Android owns the full-assistant role.
                 if (bridgeModeActive) continue
 
                 val now = System.currentTimeMillis()
 
-                // Phase 5 Fix 15: Self-healing checks.
+                // ── Per-state stuck detection ───────────────────────────────
+                // Each branch resets state and re-arms wake-word listening.
+                // Order matters only for log clarity — at most one branch
+                // fires per tick because forceRecover transitions state.
 
-                // 1. Stuck Thinking: if in Thinking state for > 60s
                 if (machine.isIn<JarvisState.Thinking>()) {
-                    val thinkingStart = com.jarvis.assistant.reliability.ListenerDiagnostics.lastThinkingStartMs
-                    if (thinkingStart > 0 && now - thinkingStart > 60_000L) {
-                        Log.w(TAG, "[SELF_HEAL] stuck_thinking detected (60s) — force reset")
-                        com.jarvis.assistant.reliability.ListenerDiagnostics.recordListenStop("self_heal_stuck_thinking")
-                        closeSessionAsync()
-                        releaseResources()
-                        backToWakeWord()
+                    val started = com.jarvis.assistant.reliability.ListenerDiagnostics.lastThinkingStartMs
+                    if (started > 0 && now - started > THINKING_STUCK_MS) {
+                        forceRecover("stuck_thinking")
                         continue
                     }
                 }
 
-                // 2. Stuck Listening: if in Listening state for > 45s
                 if (machine.isIn<JarvisState.Listening>()) {
-                    val listeningStart = com.jarvis.assistant.reliability.ListenerDiagnostics.lastListeningStartMs
-                    if (listeningStart > 0 && now - listeningStart > 45_000L) {
-                        Log.w(TAG, "[SELF_HEAL] stuck_listening detected (45s) — force reset")
-                        com.jarvis.assistant.reliability.ListenerDiagnostics.recordListenStop("self_heal_stuck_listening")
-                        speechCapture.cancel()
-                        closeSessionAsync()
-                        releaseResources()
-                        backToWakeWord()
+                    val started = com.jarvis.assistant.reliability.ListenerDiagnostics.lastListeningStartMs
+                    if (started > 0 && now - started > LISTENING_STUCK_MS) {
+                        forceRecover("stuck_listening")
                         continue
                     }
                 }
 
-                // Not in IdleWake → detector may legitimately be null (pipeline active, call, etc.)
+                if (machine.isIn<JarvisState.Speaking>()) {
+                    val started = com.jarvis.assistant.reliability.ListenerDiagnostics.lastSpeakingStartMs
+                    if (started > 0 && now - started > SPEAKING_STUCK_MS) {
+                        forceRecover("stuck_speaking")
+                        continue
+                    }
+                }
+
+                if (machine.current is JarvisState.AwaitingRemoteReply) {
+                    val started = com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs
+                    if (started > 0 && now - started > AWAITING_REMOTE_STUCK_MS) {
+                        forceRecover("stuck_awaiting_remote")
+                        continue
+                    }
+                }
+
+                if (machine.isIn<JarvisState.WakeDetected>()) {
+                    val started = com.jarvis.assistant.reliability.ListenerDiagnostics.lastWakeDetectedStartMs
+                    if (started > 0 && now - started > WAKE_DETECTED_STUCK_MS) {
+                        forceRecover("stuck_wake_detected")
+                        continue
+                    }
+                }
+
+                if (machine.isIn<JarvisState.Interrupted>()) {
+                    val started = com.jarvis.assistant.reliability.ListenerDiagnostics.lastInterruptedStartMs
+                    if (started > 0 && now - started > INTERRUPTED_STUCK_MS) {
+                        forceRecover("stuck_interrupted")
+                        continue
+                    }
+                }
+
+                // ── Dead wake-detector check (IdleWake only) ────────────────
+                // Anything other than IdleWake legitimately has the detector
+                // off (call active, pipeline running, etc).
                 if (!machine.isIn<JarvisState.IdleWake>()) continue
 
                 val wakeCount = com.jarvis.assistant.reliability.ListenerDiagnostics
                     .activeWakeDetectorCount.get()
-
-                // Setup job still in flight — count will increment momentarily; not an error.
                 if (wakeCount > 0 || wakeWordSetupJob?.isActive == true) continue
 
-                // Detector is unexpectedly gone in IdleWake/FULL_ASSISTANT.
+                // Detector is missing in IdleWake — pick a backoff slot.  The
+                // restart counter resets to 0 if we've had RESTART_WINDOW_MS
+                // of quiet, so a healthy session doesn't accumulate scars.
+                if (now - lastDetectorRestartMs > RESTART_WINDOW_MS) {
+                    consecutiveDetectorRestarts = 0
+                }
+                val backoffIdx = consecutiveDetectorRestarts.coerceAtMost(RESTART_BACKOFF_MS.lastIndex)
+                val minGap     = RESTART_BACKOFF_MS[backoffIdx]
+                if (now - lastDetectorRestartMs < minGap) continue
+
                 val lastReason = com.jarvis.assistant.reliability.ListenerDiagnostics
                     .lastListenStopReason
-                Log.w(TAG, "[listener_watchdog] wake detector missing in IdleWake " +
-                    "wakeCount=$wakeCount lastStopReason=$lastReason " +
-                    "alreadyRestarted=$hasRestartedThisSession")
-
-                if (hasRestartedThisSession) {
-                    Log.w(TAG, "[listener_watchdog] already restarted once this session — " +
-                        "not looping; manual restart required")
-                    continue
-                }
-
-                hasRestartedThisSession = true
-                com.jarvis.assistant.reliability.ListenerDiagnostics.watchdogRestartCount.incrementAndGet()
-                com.jarvis.assistant.reliability.ListenerDiagnostics.lastWatchdogRestartMs =
-                    System.currentTimeMillis()
                 Log.w(TAG, "[listener_watchdog_restart] reason=unexpected_wake_detector_stop " +
-                    "lastStopReason=$lastReason")
-                startWakeWordDetection()
-                Log.w(TAG, "[LISTENING_DEAD_STATE_RECOVERED] watchdog_interval=8s restarted wake detector")
-                ListeningLifecycleMonitor.transition(ListeningLifecycleMonitor.Phase.WakeListening, "watchdog_recovery")
+                    "lastStopReason=$lastReason attempt=${consecutiveDetectorRestarts + 1}")
+                consecutiveDetectorRestarts++
+                lastDetectorRestartMs = now
+                com.jarvis.assistant.reliability.ListenerDiagnostics.watchdogRestartCount.incrementAndGet()
+                com.jarvis.assistant.reliability.ListenerDiagnostics.lastWatchdogRestartMs = now
+                runCatching { startWakeWordDetection() }
+                    .onFailure { e ->
+                        Log.e(TAG, "[listener_watchdog_restart] startWakeWordDetection threw " +
+                            "${e.javaClass.simpleName}: ${e.message}", e)
+                    }
+                Log.w(TAG, "[LISTENING_DEAD_STATE_RECOVERED] watchdog restarted wake detector")
+                ListeningLifecycleMonitor.transition(
+                    ListeningLifecycleMonitor.Phase.WakeListening, "watchdog_recovery")
+            }
+        }
+    }
+
+    /**
+     * Collect the Brain Gateway WebSocket status flow.  When the socket
+     * drops while we're holding a pendingRemoteRouteId, recover immediately
+     * instead of waiting out the [REMOTE_REPLY_TIMEOUT_MS] guard — the
+     * client already knows the reply will never arrive.  Without this, a
+     * mid-conversation WS drop left Jarvis silent for the full timeout
+     * window every time.
+     */
+    private fun startGatewayDisconnectRecovery() {
+        scope.launch {
+            brainGatewayClient.status.collect { status ->
+                val pending = pendingRemoteRouteId ?: return@collect
+                if (status == com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected) return@collect
+                Log.w(TAG, "[GATEWAY_DISCONNECTED_WHILE_WAITING] status=$status routeId=$pending — recovering")
+                pendingRemoteRouteId = null
+                com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
+                com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs = 0L
+                if (machine.current is JarvisState.AwaitingRemoteReply) {
+                    runCatching {
+                        if (!machine.transition(JarvisState.IdleWake)) {
+                            machine.forceTransition(JarvisState.IdleWake)
+                        }
+                    }
+                    syncState(machine.current)
+                    runCatching { startWakeWordDetection() }
+                        .onFailure { e ->
+                            Log.e(TAG, "[GATEWAY_DISCONNECTED_WHILE_WAITING] startWakeWordDetection threw " +
+                                "${e.javaClass.simpleName}: ${e.message}", e)
+                        }
+                }
             }
         }
     }
@@ -2373,23 +2492,36 @@ class JarvisRuntime(
                         val awaitState = JarvisState.AwaitingRemoteReply(routeId, System.currentTimeMillis())
                         machine.transition(awaitState)
                         syncState(awaitState)
-                        // 8-second guard: if Mac brain doesn't reply, recover to wake.
+                        // Hard guard: if Mac brain doesn't reply within
+                        // [REMOTE_REPLY_TIMEOUT_MS], force-recover.  Unlike
+                        // the previous implementation this no longer requires
+                        // the state machine to still be in AwaitingRemoteReply
+                        // — any state we're stuck in past the deadline gets
+                        // pulled back to IdleWake and the wake detector is
+                        // re-armed.  Permanent silence after a remote stall
+                        // was the most common "Jarvis stopped working" report.
                         scope.launch {
                             kotlinx.coroutines.delay(REMOTE_REPLY_TIMEOUT_MS)
-                            if (pendingRemoteRouteId == routeId) {
-                                Log.w(TAG, "[REMOTE_REPLY_TIMEOUT] routeId=$routeId")
-                                com.jarvis.assistant.reliability.ListenerDiagnostics
-                                    .remoteReplyTimeouts.incrementAndGet()
-                                pendingRemoteRouteId = null
-                                com.jarvis.assistant.reliability.ListenerDiagnostics
-                                    .pendingRemoteRouteId = null
-                                if (machine.current is JarvisState.AwaitingRemoteReply) {
-                                    val ok = machine.transition(JarvisState.IdleWake)
-                                    if (!ok) machine.forceTransition(JarvisState.IdleWake)
-                                    syncState(machine.current)
-                                    startWakeWordDetection()
+                            if (pendingRemoteRouteId != routeId) return@launch
+                            Log.w(TAG, "[REMOTE_REPLY_TIMEOUT] routeId=$routeId — force recovery")
+                            com.jarvis.assistant.reliability.ListenerDiagnostics
+                                .remoteReplyTimeouts.incrementAndGet()
+                            pendingRemoteRouteId = null
+                            com.jarvis.assistant.reliability.ListenerDiagnostics
+                                .pendingRemoteRouteId = null
+                            com.jarvis.assistant.reliability.ListenerDiagnostics
+                                .awaitingRemoteReplySinceMs = 0L
+                            runCatching {
+                                if (!machine.transition(JarvisState.IdleWake)) {
+                                    machine.forceTransition(JarvisState.IdleWake)
                                 }
                             }
+                            syncState(machine.current)
+                            runCatching { startWakeWordDetection() }
+                                .onFailure { e ->
+                                    Log.e(TAG, "[REMOTE_REPLY_TIMEOUT] startWakeWordDetection threw " +
+                                        "${e.javaClass.simpleName}: ${e.message}", e)
+                                }
                         }
                         // Loop check at top: AwaitingRemoteReply is not Listening/Interrupted,
                         // so the while loop will break here. Recovery happens in handleRemoteReply.
@@ -4271,13 +4403,36 @@ class JarvisRuntime(
         }
         pendingRemoteRouteId = null
         com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
+        com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs = 0L
         scope.launch {
-            if (machine.current !is JarvisState.AwaitingRemoteReply) return@launch
-            speakAndRecord(replyText)
-            val ok = machine.transition(JarvisState.IdleWake)
-            if (!ok) machine.forceTransition(JarvisState.IdleWake)
-            syncState(machine.current)
-            startWakeWordDetection()
+            // try/finally — a TTS failure (provider hang, audio focus
+            // denial, exception in speakAndRecord) must NEVER leave the
+            // state machine stuck in AwaitingRemoteReply.  The finally
+            // ALWAYS recovers to IdleWake and re-arms the wake detector.
+            try {
+                if (machine.current !is JarvisState.AwaitingRemoteReply &&
+                    machine.current !is JarvisState.Speaking) {
+                    Log.w(TAG, "[REMOTE_REPLY_STATE_DRIFT] " +
+                        "current=${machine.current::class.simpleName} — speaking anyway")
+                }
+                speakAndRecord(replyText)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "[REMOTE_REPLY_SPEAK_FAILED] ${e.javaClass.simpleName}: ${e.message}", e)
+            } finally {
+                runCatching {
+                    if (!machine.transition(JarvisState.IdleWake)) {
+                        machine.forceTransition(JarvisState.IdleWake)
+                    }
+                }
+                syncState(machine.current)
+                runCatching { startWakeWordDetection() }
+                    .onFailure { e ->
+                        Log.e(TAG, "[REMOTE_REPLY_RECOVERY] startWakeWordDetection threw " +
+                            "${e.javaClass.simpleName}: ${e.message}", e)
+                    }
+            }
         }
     }
 
@@ -4291,12 +4446,24 @@ class JarvisRuntime(
         Log.w(TAG, "[REMOTE_NACK_RECEIVED] routeId=$pending")
         pendingRemoteRouteId = null
         com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
+        com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs = 0L
         scope.launch {
-            if (machine.current !is JarvisState.AwaitingRemoteReply) return@launch
-            val ok = machine.transition(JarvisState.IdleWake)
-            if (!ok) machine.forceTransition(JarvisState.IdleWake)
+            // Always recover regardless of current state — a NACK is a
+            // terminal signal.  Previously this guarded on
+            // AwaitingRemoteReply only, which left the assistant stuck if
+            // a concurrent transition (rare but possible during barge-in)
+            // had already moved us elsewhere.
+            runCatching {
+                if (!machine.transition(JarvisState.IdleWake)) {
+                    machine.forceTransition(JarvisState.IdleWake)
+                }
+            }
             syncState(machine.current)
-            startWakeWordDetection()
+            runCatching { startWakeWordDetection() }
+                .onFailure { e ->
+                    Log.e(TAG, "[REMOTE_NACK_RECOVERY] startWakeWordDetection threw " +
+                        "${e.javaClass.simpleName}: ${e.message}", e)
+                }
         }
     }
 
@@ -5168,6 +5335,12 @@ class JarvisRuntime(
                 com.jarvis.assistant.reliability.ListenerDiagnostics.lastListeningStartMs = now
             is JarvisState.Thinking ->
                 com.jarvis.assistant.reliability.ListenerDiagnostics.lastThinkingStartMs = now
+            is JarvisState.Speaking ->
+                com.jarvis.assistant.reliability.ListenerDiagnostics.lastSpeakingStartMs = now
+            is JarvisState.WakeDetected ->
+                com.jarvis.assistant.reliability.ListenerDiagnostics.lastWakeDetectedStartMs = now
+            is JarvisState.Interrupted ->
+                com.jarvis.assistant.reliability.ListenerDiagnostics.lastInterruptedStartMs = now
             else -> Unit
         }
 
