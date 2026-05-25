@@ -100,9 +100,18 @@ internal fun SettingsRootScreen(
         )
     }
 
-    // Build the visible category list based on dev mode
+    // Build the visible category list based on dev mode.
+    //
+    // Normal mode: only the 10 user-facing categories (developerOnly = false).
+    // Dev mode:    those 10 plus the consolidated DeveloperDiagnostics entry.
+    //              Per-topic diagnostic screens and legacy raw-config screens
+    //              are reached from inside DeveloperDiagnostics, NOT from the
+    //              home — surfacing them all here is the cluttered behaviour
+    //              the Settings cleanup explicitly removed.
     val visibleCategories = remember(devMode) {
-        SettingsCategory.entries.filter { it.developerOnly == false || devMode }
+        SettingsCategory.entries.filter { cat ->
+            !cat.developerOnly || (devMode && cat == SettingsCategory.DeveloperDiagnostics)
+        }
     }
 
     // Search: flat filtered list when a query is active

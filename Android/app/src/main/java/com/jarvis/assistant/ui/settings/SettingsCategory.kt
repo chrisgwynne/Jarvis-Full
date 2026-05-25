@@ -37,35 +37,31 @@ import androidx.compose.ui.graphics.vector.ImageVector
 /**
  * Every settings destination in the app.
  *
- * ## Adding a new category
+ * ## Visibility
  *
- *   1. Add an entry here with [title], [description], [icon], [route],
- *      [section], and optionally [developerOnly].
+ * The settings home (`SettingsRootScreen`) shows ONLY entries with
+ * `developerOnly = false`.  That set is the 10 user-facing categories
+ * plus one consolidated `DeveloperDiagnostics` row that itself is
+ * `developerOnly = true` — visible only when Developer Mode is on.
+ *
+ * Every other entry exists for one of three reasons:
+ *  1. It's a developer-only diagnostic screen (`*Diagnostics`) — reached
+ *     from inside `DeveloperDiagnostics`.
+ *  2. It's a legacy raw-config screen (`BrainGateway`, `MacBridge`,
+ *     `MacBrain`) — kept for direct deep-link use only.
+ *  3. It's an internal sub-screen of `MacIntegration` (`HomeAssistant`,
+ *     `Calendar`, `Todoist`) or a tool sub-screen — reached
+ *     programmatically.
+ *
+ * ## Adding a new top-level category
+ *
+ *   1. Add an entry here with `developerOnly = false` and a section.
  *   2. Add a `composable(route)` case in [SettingsScreen]'s NavHost.
  *   3. Create the screen composable in
  *      `com.jarvis.assistant.ui.settings.screens`.
- *
- * ## Developer-only categories
- *
- * Set [developerOnly] = true for any diagnostic / engineering screen, or for
- * any screen whose content has been absorbed into a unified hub screen.
- * These entries are hidden from the settings home when Developer Mode is off.
- * Their routes still exist in the NavHost so deep-links from debug tooling
- * and programmatic navigation from hub screens work regardless.
- *
- * ## Sprint 4 — Route Consolidation
- *
- * The following screens are now absorbed into unified hub screens and demoted
- * to developerOnly so normal users see only the hub:
- *
- *  - Conversation, AppControl, ActionsApps, Messaging → PhoneControl
- *  - Vision                                           → CameraVision
- *  - AmbientIntelligence                              → Proactivity
- *  - Memory, TrustAutonomy                            → Privacy
- *
- * Sub-screens navigated from hub screens (Routines, ContactAliases,
- * SavedLocations, Wearables) are also developerOnly but their routes remain
- * for direct programmatic navigation.
+ *   4. If it represents new functionality, update the UI test in
+ *      `SettingsCategoryVisibilityTest` so the visible-row contract is
+ *      enforced.
  */
 internal enum class SettingsCategory(
     val title: String,
@@ -77,135 +73,71 @@ internal enum class SettingsCategory(
     val developerOnly: Boolean = false,
 ) {
 
-    // ── Voice & Listening ─────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // USER-FACING TOP-LEVEL (10)
+    // ────────────────────────────────────────────────────────────────────────
 
     Voice(
-        title       = "Voice & Wake",
-        description = "Wake word, speech recognition, TTS voice, interrupt detection and audio routing",
+        title       = "Voice",
+        description = "Wake word, speech recognition and Jarvis's spoken voice",
         icon        = Icons.Filled.RecordVoiceOver,
         route       = "settings/voice",
         section     = SettingsSection.VoiceListening,
     ),
-    Phrases(
-        title       = "Response Phrases",
-        description = "Customise exactly what Jarvis says for each response type",
-        icon        = Icons.Filled.TextFields,
-        route       = "settings/phrases",
-        section     = SettingsSection.VoiceListening,
+
+    Conversation(
+        title       = "Conversation",
+        description = "How Jarvis replies, follow-ups and turn-taking",
+        icon        = Icons.Filled.ChatBubbleOutline,
+        route       = "settings/conversation",
+        section     = SettingsSection.Conversation,
     ),
-    Faq(
-        title       = "FAQ & Commands",
-        description = "What Jarvis can do and how to ask",
-        icon        = Icons.AutoMirrored.Filled.HelpOutline,
-        route       = "settings/faq",
-        section     = SettingsSection.VoiceListening,
+    Messaging(
+        title       = "Messaging",
+        description = "Notification access, message context and reply settings",
+        icon        = Icons.Filled.Forum,
+        route       = "settings/messaging",
+        section     = SettingsSection.Conversation,
     ),
 
-    // ── Notifications & Proactivity ───────────────────────────────────────────
-
-    Proactivity(
-        title       = "Proactivity",
-        description = "When Jarvis speaks up on its own, routine learning and ambient intelligence",
-        icon        = Icons.Filled.Bolt,
-        route       = "settings/proactivity",
-        section     = SettingsSection.NotificationsProactivity,
+    // "AI Provider" sits as the first row of the Intelligence section
+    // because everything else in Intelligence depends on it.
+    Advanced(
+        title       = "AI Provider",
+        description = "Choose the language model that powers responses",
+        icon        = Icons.Filled.Tune,
+        route       = "settings/advanced",
+        section     = SettingsSection.Intelligence,
     ),
-    Notifications(
-        title       = "Notifications",
-        description = "Alerts and status messages",
-        icon        = Icons.Filled.NotificationsNone,
-        route       = "settings/notifications",
-        section     = SettingsSection.NotificationsProactivity,
+    AmbientIntelligence(
+        title       = "Ambient Intelligence",
+        description = "When Jarvis notices things on its own and what it does about them",
+        icon        = Icons.Filled.AutoAwesome,
+        route       = "settings/ambient",
+        section     = SettingsSection.Intelligence,
+    ),
+    Memory(
+        title       = "Memory",
+        description = "What Jarvis remembers about you and how long it keeps it",
+        icon        = Icons.Filled.Memory,
+        route       = "settings/memory",
+        section     = SettingsSection.Intelligence,
+    ),
+    TrustAutonomy(
+        title       = "Trust & Autonomy",
+        description = "How much Jarvis can do without asking first",
+        icon        = Icons.Filled.VerifiedUser,
+        route       = "settings/trust_autonomy",
+        section     = SettingsSection.Intelligence,
     ),
 
-    // ── Phone Control ─────────────────────────────────────────────────────────
-
-    /** Hub screen — absorbs Conversation, AppControl, ActionsApps, Messaging. */
-    PhoneControl(
-        title       = "Phone Control",
-        description = "Messaging, app control, saved contacts, locations and voice routines",
-        icon        = Icons.Filled.PhoneAndroid,
-        route       = "settings/phone_control",
-        section     = SettingsSection.AppsActions,
-    ),
-    /** Hub screen — absorbs Vision; links to Wearables for SDK diagnostics. */
-    CameraVision(
-        title       = "Camera & Vision",
-        description = "Camera, screenshots, visual memory and Meta glasses",
+    Vision(
+        title       = "Vision",
+        description = "Camera, screenshots, OCR and visual memory",
         icon        = Icons.Filled.CameraAlt,
-        route       = "settings/camera_vision",
-        section     = SettingsSection.AppsActions,
+        route       = "settings/vision",
+        section     = SettingsSection.Intelligence,
     ),
-
-    // sub-screens navigated programmatically from PhoneControl
-    AppControl(
-        title         = "App Control",
-        description   = "Voice commands to open, close and navigate apps",
-        icon          = Icons.Filled.PhoneAndroid,
-        route         = "settings/app_control",
-        section       = SettingsSection.AppsActions,
-        developerOnly = true,
-    ),
-    ActionsApps(
-        title         = "Actions & Apps",
-        description   = "Tools, search and connected apps",
-        icon          = Icons.Filled.Shield,
-        route         = "settings/actions",
-        section       = SettingsSection.AppsActions,
-        developerOnly = true,
-    ),
-    Routines(
-        title         = "Routines",
-        description   = "Saved sequences you can run by name",
-        icon          = Icons.AutoMirrored.Filled.PlaylistPlay,
-        route         = "settings/routines",
-        section       = SettingsSection.AppsActions,
-        developerOnly = true,
-    ),
-    ContactAliases(
-        title         = "Contact Aliases",
-        description   = "Nicknames like \"wifey\" or \"mum\" that route to a contact",
-        icon          = Icons.Filled.Person,
-        route         = "settings/contact_aliases",
-        section       = SettingsSection.AppsActions,
-        developerOnly = true,
-    ),
-    SavedLocations(
-        title         = "Saved Locations",
-        description   = "Home, work and custom addresses for navigation",
-        icon          = Icons.Filled.Place,
-        route         = "settings/saved_locations",
-        section       = SettingsSection.AppsActions,
-        developerOnly = true,
-    ),
-    // sub-screen navigated programmatically from CameraVision
-    Wearables(
-        title         = "Wearables",
-        description   = "Meta AI glasses — registration, permissions and diagnostics",
-        icon          = Icons.Filled.Visibility,
-        route         = "settings/wearables",
-        section       = SettingsSection.AppsActions,
-        developerOnly = true,
-    ),
-
-    // ── Appearance ────────────────────────────────────────────────────────────
-
-    Appearance(
-        title       = "Appearance",
-        description = "Theme and display density",
-        icon        = Icons.Filled.Palette,
-        route       = "settings/appearance",
-        section     = SettingsSection.Appearance,
-    ),
-    Personality(
-        title       = "Personality",
-        description = "Sarcasm, humour, pushback and serious-mode auto-detect",
-        icon        = Icons.Filled.EmojiPeople,
-        route       = "settings/personality",
-        section     = SettingsSection.Appearance,
-    ),
-
-    // ── Mac Integration ───────────────────────────────────────────────────────
 
     MacIntegration(
         title       = "Mac Integration",
@@ -215,15 +147,37 @@ internal enum class SettingsCategory(
         section     = SettingsSection.MacIntegration,
     ),
 
-    // ── Connected services (navigated from MacIntegrationScreen) ─────────────
-    // Hidden from root; accessible via the Mac Integration hub and in dev mode.
+    AboutHelp(
+        title       = "About & Help",
+        description = "App version, what Jarvis can do and how to ask",
+        icon        = Icons.AutoMirrored.Filled.HelpOutline,
+        route       = "settings/about_help",
+        section     = SettingsSection.About,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // DEVELOPER ROW (1, only visible in Developer Mode)
+    // ────────────────────────────────────────────────────────────────────────
+
+    DeveloperDiagnostics(
+        title         = "Developer Diagnostics",
+        description   = "Connection, voice, vision, routing, session and latency tools",
+        icon          = Icons.Filled.BugReport,
+        route         = "settings/developer_diagnostics",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — reached from inside MacIntegration, not from root
+    // ────────────────────────────────────────────────────────────────────────
 
     HomeAssistant(
         title         = "Smart home",
         description   = "Connect Jarvis to your local Home Assistant instance",
         icon          = Icons.Filled.Home,
         route         = "settings/homeassistant",
-        section       = SettingsSection.MacIntegration,
+        section       = SettingsSection.SystemDiagnostics,
         developerOnly = true,
     ),
     Calendar(
@@ -231,7 +185,7 @@ internal enum class SettingsCategory(
         description   = "Calendar awareness and schedule context",
         icon          = Icons.Filled.DateRange,
         route         = "settings/calendar",
-        section       = SettingsSection.MacIntegration,
+        section       = SettingsSection.SystemDiagnostics,
         developerOnly = true,
     ),
     Todoist(
@@ -239,40 +193,137 @@ internal enum class SettingsCategory(
         description   = "Todoist sync for voice-driven task management",
         icon          = Icons.Filled.CheckCircle,
         route         = "settings/todoist",
-        section       = SettingsSection.MacIntegration,
-        developerOnly = true,
-    ),
-
-    // ── Privacy & Data ────────────────────────────────────────────────────────
-
-    Privacy(
-        title       = "Privacy & Data",
-        description = "Permissions, accounts, memory, autonomy settings and data controls",
-        icon        = Icons.Filled.Security,
-        route       = "settings/privacy",
-        section     = SettingsSection.PrivacyData,
-    ),
-    ResponsePreferences(
-        title       = "Response Preferences",
-        description = "Teach Jarvis how to format responses by domain",
-        icon        = Icons.Filled.FilterList,
-        route       = "settings/response_preferences",
-        section     = SettingsSection.PrivacyData,
-    ),
-
-    // ── System & Diagnostics ──────────────────────────────────────────────────
-    // All developerOnly = true.
-    // Absorbed screens are preserved here so their routes remain reachable
-    // via developer mode and programmatic navigation.
-
-    Advanced(
-        title         = "AI Provider",
-        description   = "LLM provider, access key and remote backend",
-        icon          = Icons.Filled.Tune,
-        route         = "settings/advanced",
         section       = SettingsSection.SystemDiagnostics,
         developerOnly = true,
     ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — Voice sub-screens (reached from inside Voice)
+    // ────────────────────────────────────────────────────────────────────────
+
+    Phrases(
+        title         = "Response Phrases",
+        description   = "Customise exactly what Jarvis says for each response type",
+        icon          = Icons.Filled.TextFields,
+        route         = "settings/phrases",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — Vision / Tool sub-screens (reached programmatically)
+    // ────────────────────────────────────────────────────────────────────────
+
+    Wearables(
+        title         = "Wearables",
+        description   = "Meta AI glasses — registration, permissions and diagnostics",
+        icon          = Icons.Filled.Visibility,
+        route         = "settings/wearables",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    AppControl(
+        title         = "App Control",
+        description   = "Voice commands to open, close and navigate apps",
+        icon          = Icons.Filled.PhoneAndroid,
+        route         = "settings/app_control",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    ActionsApps(
+        title         = "Actions & Apps",
+        description   = "Tools, search and connected apps",
+        icon          = Icons.Filled.Shield,
+        route         = "settings/actions",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Routines(
+        title         = "Routines",
+        description   = "Saved sequences you can run by name",
+        icon          = Icons.AutoMirrored.Filled.PlaylistPlay,
+        route         = "settings/routines",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    ContactAliases(
+        title         = "Contact Aliases",
+        description   = "Nicknames like \"wifey\" or \"mum\" that route to a contact",
+        icon          = Icons.Filled.Person,
+        route         = "settings/contact_aliases",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    SavedLocations(
+        title         = "Saved Locations",
+        description   = "Home, work and custom addresses for navigation",
+        icon          = Icons.Filled.Place,
+        route         = "settings/saved_locations",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — historical user-facing screens kept reachable in dev mode
+    // (Appearance, Personality, Notifications, FAQ, Proactivity hub,
+    //  ResponsePreferences).  Their content is reachable from elsewhere or
+    //  no longer surfaced; routes preserved to avoid breaking deep links.
+    // ────────────────────────────────────────────────────────────────────────
+
+    Appearance(
+        title         = "Appearance",
+        description   = "Theme and display density",
+        icon          = Icons.Filled.Palette,
+        route         = "settings/appearance",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Personality(
+        title         = "Personality",
+        description   = "Sarcasm, humour, pushback and serious-mode auto-detect",
+        icon          = Icons.Filled.EmojiPeople,
+        route         = "settings/personality",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Notifications(
+        title         = "Notifications",
+        description   = "Alerts and status messages",
+        icon          = Icons.Filled.NotificationsNone,
+        route         = "settings/notifications",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Faq(
+        title         = "FAQ & Commands",
+        description   = "What Jarvis can do and how to ask",
+        icon          = Icons.AutoMirrored.Filled.HelpOutline,
+        route         = "settings/faq",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Proactivity(
+        title         = "Proactivity (legacy)",
+        description   = "Old proactive coordinator screen — use Ambient Intelligence instead",
+        icon          = Icons.Filled.Bolt,
+        route         = "settings/proactivity",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    ResponsePreferences(
+        title         = "Response Preferences",
+        description   = "Teach Jarvis how to format responses by domain",
+        icon          = Icons.Filled.FilterList,
+        route         = "settings/response_preferences",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — per-topic diagnostic screens (reached from inside
+    //            DeveloperDiagnostics, never from root).
+    // ────────────────────────────────────────────────────────────────────────
+
     ConnectionDiagnostics(
         title         = "Connection Diagnostics",
         description   = "Raw Gateway, Bridge and Brain connection state, counters and logs",
@@ -282,7 +333,7 @@ internal enum class SettingsCategory(
         developerOnly = true,
     ),
     LocalDiagnostics(
-        title         = "Diagnostics",
+        title         = "Local Diagnostics",
         description   = "Recent local routes and remote-touched audit",
         icon          = Icons.Filled.Bolt,
         route         = "settings/diagnostics",
@@ -362,7 +413,11 @@ internal enum class SettingsCategory(
         developerOnly = true,
     ),
 
-    // ── Legacy Mac connection screens ─────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — legacy raw-config screens.  Always developer-only.  Routes
+    //            preserved so they can still be deep-linked from
+    //            DeveloperDiagnostics if a build engineer needs them.
+    // ────────────────────────────────────────────────────────────────────────
 
     BrainGateway(
         title         = "Gateway (Legacy)",
@@ -385,65 +440,6 @@ internal enum class SettingsCategory(
         description   = "Raw Mac Brain config — use Mac Integration instead",
         icon          = Icons.Filled.Psychology,
         route         = "settings/mac_brain",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-
-    // ── Absorbed screens (preserved routes, developer-only) ───────────────────
-    // These screens have been merged into hub screens for normal users.
-    // They remain navigable in developer mode and via programmatic navigation.
-
-    /** Absorbed into PhoneControl. */
-    Conversation(
-        title         = "Conversation",
-        description   = "How Jarvis replies and routes messages",
-        icon          = Icons.Filled.ChatBubbleOutline,
-        route         = "settings/conversation",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-    /** Absorbed into PhoneControl. */
-    Messaging(
-        title         = "Messaging",
-        description   = "Notification access, message context and reply settings",
-        icon          = Icons.Filled.Forum,
-        route         = "settings/messaging",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-    /** Absorbed into CameraVision. */
-    Vision(
-        title         = "Vision",
-        description   = "Camera, screenshots, OCR and visual memory",
-        icon          = Icons.Filled.CameraAlt,
-        route         = "settings/vision",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-    /** Absorbed into Proactivity. */
-    AmbientIntelligence(
-        title         = "Ambient Intelligence",
-        description   = "Local signal learning, routine nudges and context awareness",
-        icon          = Icons.Filled.AutoAwesome,
-        route         = "settings/ambient",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-    /** Absorbed into Privacy. */
-    Memory(
-        title         = "Memory",
-        description   = "Speaker profiles and stored history",
-        icon          = Icons.Filled.Memory,
-        route         = "settings/memory",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-    /** Absorbed into Privacy. */
-    TrustAutonomy(
-        title         = "Trust & Autonomy",
-        description   = "How Jarvis decides what to do without asking",
-        icon          = Icons.Filled.VerifiedUser,
-        route         = "settings/trust_autonomy",
         section       = SettingsSection.SystemDiagnostics,
         developerOnly = true,
     ),
