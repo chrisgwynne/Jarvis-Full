@@ -16,6 +16,22 @@ enum LatencyStage: String, CaseIterable {
     case ttsComplete      = "tts_complete"
     case bargeIn          = "barge_in"
 
+    // Stages added for full speech-to-speech audit
+    case vadFinal                  = "vad_final"
+    case transcriptCorrectionStart = "transcript_correction_start"
+    case transcriptCorrectionEnd   = "transcript_correction_end"
+    case commandMatchStart         = "command_match_start"
+    case commandMatchEnd           = "command_match_end"
+    case llmFirstToken             = "llm_first_token"
+    case responseCompositionStart  = "response_composition_start"
+    case responseCompositionEnd    = "response_composition_end"
+    case replyLoggerStart          = "reply_logger_start"
+    case replyLoggerEnd            = "reply_logger_end"
+    case firstAudioBuffer          = "first_audio_buffer"
+    case playbackStarted           = "playback_started"
+    case toolStart                 = "tool_start"
+    case toolEnd                   = "tool_end"
+
     // Cross-device pipeline stages
     case transcriptSent       = "transcript_sent"       // Android sent transcript.final to daemon
     case daemonReceived       = "daemon_received"        // daemon received transcript.final
@@ -53,8 +69,13 @@ final class LatencyTracker {
 
     /// Record an instantaneous timestamp for `stage`.
     func mark(_ stage: LatencyStage, at: Date = Date()) {
+        if stage == .wakeDetect {
+            SpeechTurnStore.shared.completeTurn() // finalize any incomplete previous turn
+            SpeechTurnStore.shared.beginTurn()
+        }
         lock.lock(); defer { lock.unlock() }
         marks[stage] = at
+        SpeechTurnStore.shared.mark(stage, at: at)
     }
 
     /// Record a measured duration (ms) directly.
@@ -117,6 +138,7 @@ final class LatencyTracker {
     }
 
     func reset() {
+        SpeechTurnStore.shared.completeTurn()
         lock.lock(); defer { lock.unlock() }
         marks.removeAll()
         recent.removeAll()

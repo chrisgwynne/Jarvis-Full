@@ -345,6 +345,14 @@ internal enum class SettingsCategory(
         section       = SettingsSection.SystemDiagnostics,
         developerOnly = true,
     ),
+    SpeechLatency(
+        title         = "Speech Latency",
+        description   = "Per-turn pipeline timings — last 20 turns, p50/p95, stage breakdown",
+        icon          = Icons.Filled.GraphicEq,
+        route         = "settings/speech_latency",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
     ExperimentalFlags(
         title         = "Experimental Features",
         description   = "Toggle experimental Jarvis subsystems",

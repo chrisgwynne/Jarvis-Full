@@ -181,6 +181,11 @@ fun SettingsScreen(
                 onBack = popToRoot, onClose = onBack
             )
         }
+        composable(SettingsCategory.SpeechLatency.route) {
+            com.jarvis.assistant.ui.settings.screens.SpeechLatencyScreen(
+                onBack = popToRoot, onClose = onBack
+            )
+        }
         composable(SettingsCategory.BrainGateway.route) {
             com.jarvis.assistant.ui.settings.screens.BrainGatewaySettingsScreen(
                 vm                = vm,
