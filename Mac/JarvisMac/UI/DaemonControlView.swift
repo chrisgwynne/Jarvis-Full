@@ -3,6 +3,9 @@ import SwiftUI
 /// Embedded Settings panel showing JarvisBrainDaemon status and lifecycle controls.
 struct DaemonControlView: View {
     @ObservedObject var manager: DaemonManager
+    /// AppState for daemon-unavailable banner. Optional so legacy call-sites that
+    /// haven't wired AppState yet continue to compile (banner is simply hidden).
+    var appState: AppState? = nil
     @State private var connectedDevices: [DaemonClient.DaemonDeviceInfo] = []
     @State private var devicesFetchFailed: Bool = false
     @State private var devicesRefreshTimer: Timer?
@@ -32,6 +35,25 @@ struct DaemonControlView: View {
                 if manager.status == .unhealthy {
                     Label("Process running but gateway unreachable — port may not be bound.", systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
+                }
+
+                // Limited local mode banner — shown when daemon is enabled but unreachable
+                if appState?.daemonUnavailable == true {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Jarvis daemon unavailable", systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout).fontWeight(.semibold).foregroundStyle(.orange)
+                        Text("Jarvis is running in limited local mode until the daemon reconnects.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color.orange.opacity(0.12))
+                    .cornerRadius(8)
+
+                    Button("Reconnect") {
+                        // Triggers a reconnect attempt via DaemonManager
+                        manager.pollStatus()
+                    }
+                    .buttonStyle(.bordered)
                 }
 
                 // Port ownership row

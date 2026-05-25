@@ -8,9 +8,11 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
-}
+// foojay-resolver-convention removed: version 0.10.0 does not exist on
+// Maven Central (the artifact was never published there).  JVM toolchain
+// auto-provisioning is not required because the JetBrains JDK 21 is
+// already present in the Gradle JDK cache ($GRADLE_USER_HOME/jdks).
+// Re-add when upgrading to a version that is actually available, e.g. 1.0.0.
 
 // ── Meta Wearables DAT credential plumbing ───────────────────────────────
 // The DAT SDK is hosted on GitHub Packages

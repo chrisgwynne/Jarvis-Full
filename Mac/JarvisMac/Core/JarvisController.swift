@@ -420,15 +420,15 @@ final class JarvisController {
             enabled:     { prefs.current.geminiEnabled },
             apiKey:      { Keychain.get(KeychainAccount.geminiAPIKey) }
         )
-        let lmStudioProv = LMStudioProvider(
-            baseURL:   { prefs.current.lmStudioBaseURL },
-            modelName: { prefs.current.lmStudioModel },
-            enabled:   { prefs.current.lmStudioEnabled }
+        let localProv = LlamaCppProvider(
+            baseURL:   { prefs.current.llamaCppBaseURL },
+            modelName: { prefs.current.llamaCppModel },
+            enabled:   { prefs.current.llamaCppEnabled }
         )
-        let localRouter = LLMRouter(xai:      xaiProv,
-                                    miniMax:  miniMaxProv,
-                                    gemini:   geminiProv,
-                                    lmStudio: lmStudioProv)
+        let localRouter = LLMRouter(xai:     xaiProv,
+                                    miniMax: miniMaxProv,
+                                    gemini:  geminiProv,
+                                    local:   localProv)
         self.llmRouter = localRouter
 
         // ── Vision pipeline: two separate paths for different use-cases ──────────
@@ -1399,50 +1399,69 @@ final class JarvisController {
         JarvisRuntimeCoordinator.shared.speakText          = { [weak self] text in self?.speak(text) }
         JarvisRuntimeCoordinator.shared.openOverlay        = { [weak self] kind in self?.openOverlay(kind) }
 
-        // Phase 4 — wire DaemonAppBridge → Mac brain runtime
-        if prefs.current.daemonEnabled {
-            DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform in
-                guard let self else { return }
-                let ctx = RemoteDeviceContext(
-                    deviceId: deviceId,
-                    platform: platform,
-                    deviceName: nil,
-                    capabilities: [],
-                    receivedAt: Date(),
-                    routeId: UUID().uuidString
-                )
-                Task { @MainActor in
-                    let response = await self.handleRemoteTranscript(transcript, context: ctx)
-                    await self.sendRemoteReply(response, to: ctx)
-                }
+        // Phase 4 — wire DaemonAppBridge → Mac brain runtime (daemon-centric architecture)
+        // DaemonAppBridge always connects to the daemon (JarvisBrainDaemon on port 8765).
+        // When the daemon is not running, DaemonAppBridge retries with exponential backoff.
+        DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform in
+            guard let self else { return }
+            let ctx = RemoteDeviceContext(
+                deviceId: deviceId,
+                platform: platform,
+                deviceName: nil,
+                capabilities: [],
+                receivedAt: Date(),
+                routeId: UUID().uuidString
+            )
+            Task { @MainActor in
+                let response = await self.handleRemoteTranscript(transcript, context: ctx)
+                await self.sendRemoteReply(response, to: ctx)
             }
-            DaemonAppBridge.shared.onAndroidEvent = { [weak self] command, data, deviceId in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.androidEventReceiver?.receiveRawData(command: command, data: data, deviceId: deviceId)
-                }
-            }
-            // Route execution.result frames to AndroidToolOrchestrator so pending
-            // submitTool() calls resolve with the Android execution outcome.
-            DaemonAppBridge.shared.onToolResult = { [weak self] data in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.androidToolOrchestrator.handleResult(data: data)
-                }
-            }
-            DaemonAppBridge.shared.connect()
         }
+        DaemonAppBridge.shared.onAndroidEvent = { [weak self] command, data, deviceId in
+            guard let self else { return }
+            Task { @MainActor in
+                self.androidEventReceiver?.receiveRawData(command: command, data: data, deviceId: deviceId)
+            }
+        }
+        // Route execution.result frames to AndroidToolOrchestrator so pending
+        // submitTool() calls resolve with the Android execution outcome.
+        DaemonAppBridge.shared.onToolResult = { [weak self] data in
+            guard let self else { return }
+            Task { @MainActor in
+                self.androidToolOrchestrator.handleResult(data: data)
+            }
+        }
+        DaemonAppBridge.shared.onPresenceUpdate = { [weak self] _ in
+            CrossDeviceViewModel.shared.isDaemonConnected = true
+        }
+        DaemonAppBridge.shared.onCommPrompt = { payload in
+            CommWatchdogCoordinator.shared.handle(payload)
+        }
+        DaemonAppBridge.shared.onHandoffReceived = { key, value in
+            HandoffCoordinator.shared.receive(key: key, value: value)
+        }
+        DaemonAppBridge.shared.onClipboardUpdate = { text in
+            HandoffCoordinator.shared.receiveClipboard(text)
+        }
+        DaemonAppBridge.shared.connect()
+        RemoteActionExecutor.shared.wire(to: DaemonAppBridge.shared)
 
-        // Direct mode (no daemon): provide a send callback so AndroidToolOrchestrator
-        // can reach Android via GatewayAndroidConnector when the daemon is not in use.
-        // NOTE: GatewayAndroidConnector.onMessage is already wired elsewhere for inbound
-        // frames; this closure covers the outbound execution.request direction only.
-        // brainServer is set by startBrainServer() which runs during bootstrap; by the
-        // time submitTool() is ever called it will already be populated.
         androidToolOrchestrator.onDirectSend = { [weak self] envelope in
-            guard let self, !self.prefs.current.daemonEnabled else { return }
-            if let data = try? JSONSerialization.data(withJSONObject: envelope) {
-                self.brainServer?.androidConnector?.broadcast(data)
+            // In daemon-centric architecture, tool requests route through DaemonAppBridge.
+            // Direct broadcast via androidConnector is no longer supported.
+            guard let self else { return }
+            if let data = try? JSONSerialization.data(withJSONObject: envelope),
+               let text = String(data: data, encoding: .utf8) {
+                let envelope: [String: Any] = [
+                    "id": UUID().uuidString,
+                    "type": "execution.request",
+                    "sourceDeviceId": "mac",
+                    "sourcePlatform": "mac",
+                    "target": ["type": "android"],
+                    "timestamp": ISO8601DateFormatter().string(from: Date()),
+                    "payload": envelope
+                ]
+                DaemonAppBridge.shared.send(envelope)
             }
         }
 
@@ -5518,27 +5537,28 @@ final class JarvisController {
     // MARK: - Mac Brain HTTP server
 
     func startBrainServer() {
-        // If the daemon is running and owns port 8765, skip starting the in-app server
-        // to avoid a port conflict. The daemon persists across app restarts.
-        if prefs.current.daemonEnabled {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let daemonAlive = await DaemonManager.shared.checkDaemonHealth()
-                if daemonAlive {
-                    Log.net.info("[BrainGateway] Daemon owns port 8765 — skipping in-app server")
-                    return
-                }
-                // Daemon enabled but not running — fall through to legacy server if opted in
-                if self.prefs.current.legacyBrainServerEnabled {
-                    self._startBrainServerLegacy()
-                }
-            }
+        guard prefs.current.daemonEnabled else {
+            // Daemon disabled at prefs level — start local brain-context + camera HTTP only
+            // (loopback only, brain-context routes, NO external WebSocket hosting)
+            _startLocalBrainContextServer()
             return
         }
-        _startBrainServerLegacy()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let daemonAlive = await DaemonManager.shared.checkDaemonHealth()
+            if daemonAlive {
+                Log.net.info("[BrainGateway] Daemon owns port 8765 — skipping in-app server")
+                self.state.daemonUnavailable = false
+                return
+            }
+            // Daemon not running — surface diagnostic, do NOT bind port 8765
+            Log.net.error("[BrainGateway] JarvisBrainDaemon is not running. Cross-device features unavailable.")
+            self.state.daemonUnavailable = true
+            self._startLocalBrainContextServer()
+        }
     }
 
-    private func _startBrainServerLegacy() {
+    private func _startLocalBrainContextServer() {
         let engine = BrainContextEngine()
         engine.memoryProvider     = MemoryContextProvider()
         engine.projectProvider    = ProjectContextProvider()
@@ -5578,59 +5598,7 @@ final class JarvisController {
             cameraDiagnostics.log(.serverEnabled)
         }
 
-        // Wire Android WebSocket connector on /v1/android/ws.
-        let androidConnector = GatewayAndroidConnector()
-        androidConnector.diagnostics = gatewayDiagnostics
-        androidConnector.onMessage = { [weak self] data, respond in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                // Route execution.result frames to AndroidToolOrchestrator (direct mode).
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let msgType = json["type"] as? String,
-                   msgType == "execution.result" {
-                    self.androidToolOrchestrator.handleResult(data: data)
-                    return
-                }
-                // Forward everything else to AndroidBridgeManager via the existing WebSocketServer delegate.
-                self.wsServer.delegate?.server(self.wsServer, didReceive: data, respond: respond)
-            }
-        }
-        server.androidConnector = androidConnector
-        // Log deprecation notice if legacy port is still active.
-        let legacyPortActive = prefs.current.legacyAndroidPortEnabled
-        let gatewayPort = prefs.current.brainServerPort
-        if legacyPortActive {
-            gatewayDiagnostics.deprecatedAndroidPortEnabled = true
-            Log.net.warning("Legacy Android port 17872 is active. Update Android app to use the new /v1/android/ws endpoint on port \(gatewayPort, privacy: .public)")
-        }
-
-        // Wire V2 distributed brain routes when enabled.
-        if prefs.current.distributedBrainEnabled {
-            let v2 = MacBridgeProtocolV2.shared
-            server.v2Routes = v2
-            // Wire execution delivery back to RemoteExecutionCoordinator.
-            RemoteExecutionCoordinator.shared.onSendRequest = { [weak v2] req, deviceId in
-                v2?.pushEvent(type: .executionRequest, payload: [
-                    "requestId": req.id,
-                    "kind": req.kind.rawValue,
-                    "targetDevice": deviceId
-                ])
-            }
-            // Wire attention context provider.
-            AttentionContextProvider.shared = AttentionContextProvider()
-            AttentionContextProvider.shared?.isMacListening = state.isListening
-            // Wire attention coordinator refresh.
-            GlobalAttentionCoordinator.shared.isMacListeningProvider = { [weak self] in
-                self?.state.isListening ?? false
-            }
-            GlobalAttentionCoordinator.shared.isMacSpeakingProvider = { [weak self] in
-                self?.state.isSpeaking ?? false
-            }
-            // Wire reference resolver
-            DistributedReferenceResolver.shared.conversation = DistributedConversationCoordinator.shared
-            DistributedReferenceResolver.shared.presence = GlobalPresenceAggregator.shared
-        }
-
+        // Local brain-context + camera HTTP only — loopback-only, no external WebSocket hosting.
         server.start(
             port: prefs.current.brainServerPort,
             bindLocalOnly: prefs.current.brainServerBindLocalOnly

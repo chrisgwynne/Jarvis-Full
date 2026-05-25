@@ -6,10 +6,6 @@ import SwiftUI
 struct MacBrainSettingsView: View {
     let controller: JarvisController
 
-    @State private var tokenDraft: String = ""
-    @State private var tokenCopied = false
-    @State private var tokenRegenConfirm = false
-
     private var diag: BrainDiagnostics { controller.brainDiagnostics }
 
     var body: some View {
@@ -93,53 +89,6 @@ struct MacBrainSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Network") }
 
-            // ── Auth token ─────────────────────────────────────────────────
-            Section {
-                LabeledContent("Bearer token") {
-                    HStack(spacing: 6) {
-                        SecureField("Not configured", text: $tokenDraft)
-                            .onAppear {
-                                tokenDraft = Keychain.get(KeychainAccount.brainServerToken) ?? ""
-                            }
-                            .onChange(of: tokenDraft) { _, v in
-                                let trimmed = v.trimmingCharacters(in: .whitespaces)
-                                if trimmed.isEmpty {
-                                    Keychain.remove(KeychainAccount.brainServerToken)
-                                } else {
-                                    Keychain.set(trimmed, for: KeychainAccount.brainServerToken)
-                                }
-                            }
-
-                        Button {
-                            let tok = Keychain.get(KeychainAccount.brainServerToken) ?? ""
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(tok, forType: .string)
-                            tokenCopied = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { tokenCopied = false }
-                        } label: {
-                            Image(systemName: tokenCopied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled((Keychain.get(KeychainAccount.brainServerToken) ?? "").isEmpty)
-
-                        Button("Regenerate") { tokenRegenConfirm = true }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.orange)
-                    }
-                }
-
-                Text("Set in Android Jarvis settings as the Brain token. Leave empty to disable authentication (not recommended on a shared network).")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Button("Generate random token") {
-                    let newToken = UUID().uuidString + "-" + UUID().uuidString
-                    Keychain.set(newToken, for: KeychainAccount.brainServerToken)
-                    tokenDraft = newToken
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-            } header: { Text("Authentication") }
-
             // ── Camera Server ─────────────────────────────────────────────
             Section {
                 MacCameraSettingsView(controller: controller)
@@ -152,17 +101,5 @@ struct MacBrainSettingsView: View {
             } header: { Text("Distributed Diagnostics") }
         }
         .formStyle(.grouped)
-        .confirmationDialog("Regenerate token?",
-                           isPresented: $tokenRegenConfirm,
-                           titleVisibility: .visible) {
-            Button("Regenerate", role: .destructive) {
-                let newToken = UUID().uuidString + "-" + UUID().uuidString
-                Keychain.set(newToken, for: KeychainAccount.brainServerToken)
-                tokenDraft = newToken
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The old token will stop working immediately. Update Android Jarvis settings with the new token.")
-        }
     }
 }

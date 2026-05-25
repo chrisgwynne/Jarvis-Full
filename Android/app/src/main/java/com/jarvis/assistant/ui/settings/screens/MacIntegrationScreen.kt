@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jarvis.assistant.JarvisApp
-import com.jarvis.assistant.remote.gateway.BrainGatewayQrScanScreen
 import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
 import com.jarvis.assistant.remote.gateway.GatewayWsStatus
 import com.jarvis.assistant.remote.macbridge.MacBridgeClient
@@ -70,7 +69,8 @@ internal fun MacIntegrationScreen(
     val testStatus  by vm.gatewayTestStatus.collectAsStateWithLifecycle()
     val pairStatus  by vm.gatewayPairStatus.collectAsStateWithLifecycle()
     var deviceName  by remember { mutableStateOf(gatewayCfg.deviceName) }
-    var showQr      by remember { mutableStateOf(false) }
+    var manualUrl   by remember { mutableStateOf("") }
+    var manualCode  by remember { mutableStateOf("") }
 
     // ── Mac Bridge state (Mobile Sync) ────────────────────────────────────────
     val bridgeRepo   = JarvisApp.macBridgeSettings
@@ -85,18 +85,6 @@ internal fun MacIntegrationScreen(
     // ── Camera state ──────────────────────────────────────────────────────────
     var cameraEnabled by remember { mutableStateOf(store.macCameraEnabled) }
 
-    // ── QR scan flow ──────────────────────────────────────────────────────────
-    if (showQr) {
-        BrainGatewayQrScanScreen(
-            onResult = { url, code ->
-                showQr = false
-                vm.completeGatewayPairing(url, code, deviceName)
-            },
-            onCancel = { showQr = false },
-        )
-        return
-    }
-
     SettingsScaffold(title = "Mac Integration", onBack = onBack, onClose = onClose) {
 
         // ── 1. Status card ────────────────────────────────────────────────────
@@ -105,7 +93,7 @@ internal fun MacIntegrationScreen(
             wsStatus == GatewayWsStatus.Unauthorized ->
                 MacStatusInfo(
                     "Pair again required",
-                    "Your session expired. Scan the QR code from Mac Jarvis to reconnect.",
+                    "Your session expired. Re-pair via Settings → Mac Brain Gateway.",
                     SettingsTheme.Destructive, SettingsTheme.InfoBg,
                 )
             wsStatus == GatewayWsStatus.Connected ->
@@ -135,7 +123,7 @@ internal fun MacIntegrationScreen(
             else ->
                 MacStatusInfo(
                     "Not connected",
-                    "Open Mac Jarvis and tap 'Pair Android device', then scan the QR code here.",
+                    "Open Mac Brain Gateway settings to pair with Mac Jarvis.",
                     SettingsTheme.TextMuted, SettingsTheme.InfoBg,
                 )
         }
@@ -162,7 +150,7 @@ internal fun MacIntegrationScreen(
         if (!isPaired || wsStatus == GatewayWsStatus.Unauthorized) {
             SettingsGroup(
                 title  = "Pair with Mac Jarvis",
-                footer = "Open Mac Jarvis and go to Bridge → Show QR Code, then scan it here.",
+                footer = "On Mac: open Settings → Developer → Brain API → Generate Pairing Code. Enter the Gateway URL and the 6-digit code below.",
             ) {
                 SettingsTextFieldRow(
                     title         = "This device's name",
@@ -171,11 +159,29 @@ internal fun MacIntegrationScreen(
                     placeholder   = android.os.Build.MODEL,
                 )
                 SettingsRowDivider()
+                SettingsTextFieldRow(
+                    title         = "Gateway URL",
+                    value         = manualUrl,
+                    onValueChange = { manualUrl = it },
+                    placeholder   = "http://100.x.x.x:8765",
+                )
+                SettingsRowDivider()
+                SettingsTextFieldRow(
+                    title         = "Pairing code",
+                    value         = manualCode,
+                    onValueChange = { manualCode = it.take(6) },
+                    placeholder   = "6-digit code from Mac",
+                )
+                SettingsRowDivider()
                 SettingsActionRow(
-                    title       = "Scan QR Code",
-                    description = "Opens the camera to scan the QR code shown in Mac Jarvis",
-                    actionLabel = if (pairStatus == "Pairing…") "Pairing…" else "Scan",
-                    onAction    = { if (pairStatus != "Pairing…") showQr = true },
+                    title       = "Pair",
+                    description = "Enter the Gateway URL and 6-digit code above, then tap Pair.",
+                    actionLabel = if (pairStatus == "Pairing…") "Pairing…" else "Pair",
+                    onAction    = {
+                        if (pairStatus != "Pairing…" && manualUrl.isNotBlank() && manualCode.length == 6) {
+                            vm.completeGatewayPairing(manualUrl.trim(), manualCode.trim(), deviceName)
+                        }
+                    },
                 )
             }
             Spacer(Modifier.height(24.dp))
@@ -203,7 +209,7 @@ internal fun MacIntegrationScreen(
             SettingsRowDivider()
             SettingsActionRow(
                 title       = "Unpair",
-                description = "Removes the connection. Scan QR code to reconnect.",
+                description = "Removes the connection. Use Mac Brain Gateway to reconnect.",
                 actionLabel = "Unpair",
                 destructive = true,
                 confirm     = true,
@@ -324,6 +330,45 @@ internal fun MacIntegrationScreen(
             )
         }
         Spacer(Modifier.height(8.dp))
+
+        // ── 5b. Cross-device continuity ───────────────────────────────────────
+        var notifForwarding by remember { mutableStateOf(store.crossDeviceNotifForwarding) }
+        var watchdogEnabled  by remember { mutableStateOf(store.crossDeviceWatchdog) }
+        Spacer(Modifier.height(8.dp))
+        SettingsGroup(
+            title  = "Cross-device",
+            footer = "Controls how this phone coordinates with Mac Jarvis for handoff and continuity.",
+        ) {
+            SettingsToggleRow(
+                title           = "Forward notifications to Mac",
+                description     = "Send app notifications to Mac Jarvis for cross-device awareness",
+                checked         = notifForwarding,
+                onCheckedChange = { on ->
+                    notifForwarding = on
+                    store.crossDeviceNotifForwarding = on
+                },
+            )
+            SettingsRowDivider()
+            SettingsToggleRow(
+                title           = "Comm watchdog alerts",
+                description     = "Alert when the Mac connection drops unexpectedly",
+                checked         = watchdogEnabled,
+                onCheckedChange = { on ->
+                    watchdogEnabled = on
+                    store.crossDeviceWatchdog = on
+                },
+            )
+            SettingsRowDivider()
+            SettingsValueRow(
+                title = "Daemon connection",
+                value = when (wsStatus) {
+                    GatewayWsStatus.Connected    -> "Connected"
+                    GatewayWsStatus.Reconnecting -> "Reconnecting…"
+                    GatewayWsStatus.Connecting   -> "Connecting…"
+                    else                         -> "Not connected"
+                },
+            )
+        }
 
         // ── 6. Camera & Remote View ───────────────────────────────────────────
         SettingsGroup(

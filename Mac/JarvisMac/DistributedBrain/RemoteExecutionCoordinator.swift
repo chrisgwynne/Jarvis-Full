@@ -19,7 +19,8 @@ final class RemoteExecutionCoordinator {
 
     private var pending: [String: PendingExecution] = [:]  // requestId → pending
 
-    // Wired by MacBridgeProtocolV2 to actually send the request over SSE.
+    // Wired by JarvisBrainDaemon routing to actually send the request over WebSocket.
+    // (MacBridgeProtocolV2 SSE is deprecated — daemon routing handles this.)
     var onSendRequest: ((ExecutionRequest, String) -> Void)?   // request, targetDeviceId
     // Called when Windows reports back a result.
     var onResultReceived: ((ExecutionResult) -> Void)?

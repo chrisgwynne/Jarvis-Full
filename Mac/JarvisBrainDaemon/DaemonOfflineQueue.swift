@@ -50,6 +50,7 @@ final class DaemonOfflineQueue {
     // MARK: - Diagnostics
 
     private(set) var droppedCount: Int = 0
+    private(set) var drainedCount: Int = 0
     private(set) var replayUnsafeDroppedCount: Int = 0
     private(set) var expiredEvictedCount: Int = 0
 
@@ -59,17 +60,27 @@ final class DaemonOfflineQueue {
     /// Everything NOT in this set is silently dropped when Mac is offline.
     private static let replaySafeTypes: Set<String> = [
         "transcript.final",
-        "execution.result",     // canonical canonical result type
+        "execution.result",     // canonical result type
         "tool.result",          // legacy alias — kept for backward compat
         "command.result",       // legacy alias — kept for backward compat
         "error.report",
         "android.event",        // phone events (calls, SMS, battery) — informational
+        "remote.action.result", // Mac result that Android missed; safe to re-deliver on reconnect
+        "file.transfer.created", // file notification Mac missed while offline
+        "comm.event.received",  // missed communication event — Mac may have been offline
+        "comm.action.result",   // Android comm action result — safe to surface to Mac on reconnect
+        "notification.forward", // notification from Android — Mac may have been offline
+        "handoff.request",      // cross-device handoff — context survives reconnect
+        "handoff.result",       // handoff acknowledgement
+        "context.update",       // cross-device context — 24h TTL, safe to replay
     ]
 
     /// Types that are explicitly UNSAFE to replay and should NEVER be queued,
     /// even if the caller tries to enqueue them.  Listed for documentation clarity.
     static let replayUnsafeTypes: Set<String> = [
         "execution.request",    // would re-execute Android capability (destructive!)
+        "remote.action.request", // replaying could re-execute a Mac action (open app, create note) after user has moved on
+        "file.transfer.result", // stale ack
         "orchestrate.speak",
         "orchestrate.silent",
         "reply.final",
@@ -78,6 +89,9 @@ final class DaemonOfflineQueue {
         "transcript.partial",
         "proactive.notify",
         "heartbeat", "heartbeat.android", "ping", "pong",
+        "clipboard.update",    // stale clipboard is confusing
+        "comm.action.execute", // would re-execute comms action
+        "comm.action.request", // stale request
     ]
 
     // MARK: - Enqueue
@@ -117,7 +131,8 @@ final class DaemonOfflineQueue {
             evictExpired()
             let result = queue.map { $0.envelope }
             queue = []
-            queueLogger.info("offline queue drained \(result.count) messages")
+            drainedCount += result.count
+            queueLogger.info("offline queue drained \(result.count) messages (total drained=\(self.drainedCount))")
             return result
         }
     }
@@ -134,7 +149,7 @@ final class DaemonOfflineQueue {
     /// Returns a human-readable snapshot for the diagnostics inspector.
     var diagnosticsSummary: String {
         lock.withLock {
-            "depth=\(queue.count) dropped=\(droppedCount) replayUnsafeDropped=\(replayUnsafeDroppedCount) expiredEvicted=\(expiredEvictedCount)"
+            "depth=\(queue.count) dropped=\(droppedCount) drained=\(drainedCount) replayUnsafeDropped=\(replayUnsafeDroppedCount) expiredEvicted=\(expiredEvictedCount)"
         }
     }
 

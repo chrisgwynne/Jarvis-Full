@@ -195,10 +195,10 @@ final class ProjectKnowledgeGraph {
             ),
             FeatureNode(
                 name: "LLM Integration",
-                aliases: ["language model", "xai", "grok", "minimax", "gemini", "lm studio", "llm"],
+                aliases: ["language model", "xai", "grok", "minimax", "gemini", "llama.cpp", "llama cpp", "local llm", "llm"],
                 files: ["JarvisMac/LLM/XAIProvider.swift", "JarvisMac/Core/LLMFallbackHandler.swift"],
                 status: .implemented,
-                summary: "Multi-provider LLM chain: xAI → MiniMax → Gemini → LM Studio fallback.",
+                summary: "Multi-provider LLM chain: xAI → MiniMax → Gemini → llama.cpp fallback.",
                 dependencies: ["Intent Routing"]
             ),
             FeatureNode(

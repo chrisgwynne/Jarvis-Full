@@ -2281,6 +2281,20 @@ class JarvisRuntime(
                         .TranscriptNormalizer.normalizeForMatching(transcript)
                     Log.d(TAG, "[TRANSCRIPT_NORMALIZED] \"$transcriptNormalisedLog\"")
 
+                    // ── Brain Gateway relay ──────────────────────────────────
+                    // When connected to the Mac brain daemon, forward the transcript
+                    // there and skip local routing entirely. The Mac will reply via
+                    // reply.final → onReplyFinal → speakAndRecord().
+                    if (brainGatewayClient.status.value ==
+                            com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                        && transcript.isNotBlank()
+                    ) {
+                        brainGatewayClient.sendTranscript(transcript)
+                        machine.transition(JarvisState.Listening)
+                        syncState(JarvisState.Listening)
+                        continue
+                    }
+
                     // ── Confirmation-first intercept ─────────────────────────
                     // A pending "are you sure?" from the previous turn gets
                     // first refusal on this utterance, BEFORE AttentionGate or

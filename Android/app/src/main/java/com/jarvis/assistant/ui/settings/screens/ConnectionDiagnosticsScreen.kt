@@ -223,8 +223,8 @@ internal fun ConnectionDiagnosticsScreen(
             SettingsInfoCard(
                 title = "Bridge failures (${bridgeDiag.reconnectCount}x)",
                 body  = "The bridge has failed to connect ${bridgeDiag.reconnectCount} times. " +
-                        "Check that the auth token matches the one in Mac Jarvis Settings → Network. " +
-                        "Unpair and re-scan if out of sync.",
+                        "Unpair and re-pair via Settings → Mac Brain Gateway if the " +
+                        "connection remains broken.",
             )
             Spacer(Modifier.height(8.dp))
         }

@@ -108,18 +108,6 @@
                                  VerticalScrollBarVisibility="Auto" Text=""
                                  AcceptsReturn="True" IsTabStop="False"/>
 
-                        <!-- ── Legacy settings (hidden when gateway is configured) ── -->
-                        <Expander x:Name="LegacyBridgeExpander" Header="Legacy bridge settings (v1)"
-                                  Margin="0,4,0,0" Foreground="#9DA4B0" FontSize="11">
-                            <StackPanel Margin="0,4,0,0">
-                                <CheckBox x:Name="SidecarEnabledCheck"
-                                          Content="Enable legacy Mac bridge (used when Gateway URL is empty)"/>
-                                <TextBlock Text="Brain WebSocket URL"/>
-                                <TextBox x:Name="BridgeUrlBox" Margin="0,2,0,2"/>
-                                <TextBlock Text="Bearer token"/>
-                                <PasswordBox x:Name="BridgeTokenBox" Margin="0,2,0,6"/>
-                            </StackPanel>
-                        </Expander>
                     </StackPanel>
                 </GroupBox>
 

@@ -19,16 +19,25 @@ object TextNormalizer {
     /** Normalise [raw] for downstream phonemisation. */
     fun normalize(raw: String): String {
         if (raw.isBlank()) return ""
-        
+
         // MAC PARITY: Markdown stripping (via com.jarvis.assistant.runtime.ResponseFormatter equivalent)
         var s = stripMarkdown(raw).trim()
+
+        // MAC PARITY: Tech brand pronunciation fixes (before contractions so casing is preserved)
+        s = expandTechBrands(s)
 
         // 1. Expand contractions BEFORE we touch punctuation
         s = expandContractions(s)
 
         // 2. Replace symbol shorthand.
         s = expandSymbols(s)
-        
+
+        // MAC PARITY: URL expansion — github.com → "github dot com"
+        s = expandUrls(s)
+
+        // MAC PARITY: Version numbers — v1.2.3 → "version 1 point 2 point 3"
+        s = expandVersionNumbers(s)
+
         // MAC PARITY: ALL CAPS expansion (spell it out)
         s = expandAllCaps(s)
 
@@ -45,6 +54,83 @@ object TextNormalizer {
         s = s.replace(Regex("\\s+"), " ").trim()
 
         return s
+    }
+
+    // ── Tech brand pronunciation ─────────────────────────────────────────────
+
+    private val TECH_BRANDS: List<Pair<Regex, String>> = listOf(
+        // Order matters: longer / more-specific patterns first
+        Regex("""\bChatGPT\b""")    to "Chat G P T",
+        Regex("""\bGPT-4o\b""")     to "G P T four oh",
+        Regex("""\bGPT-4\b""")      to "G P T four",
+        Regex("""\bGPT-3\b""")      to "G P T three",
+        Regex("""\bONNX\b""")       to "O N N X",
+        Regex("""\bGGUF\b""")       to "G G U F",
+        Regex("""\bLLMs\b""")       to "L L M s",
+        Regex("""\bLLM\b""")        to "L L M",
+        Regex("""\bAPIs\b""")       to "A P I s",
+        Regex("""\bAPI\b""")        to "A P I",
+        Regex("""\bAI\b""")         to "A I",
+        Regex("""\bUI\b""")         to "U I",
+        Regex("""\bUX\b""")         to "U X",
+        Regex("""\bSDK\b""")        to "S D K",
+        Regex("""\bJSON\b""")       to "jason",
+        Regex("""\bYAML\b""")       to "yam el",
+        Regex("""\bSQL\b""")        to "sequel",
+        Regex("""\bHTML\b""")       to "H T M L",
+        Regex("""\bCSS\b""")        to "C S S",
+        Regex("""\bGPU\b""")        to "G P U",
+        Regex("""\bCPU\b""")        to "C P U",
+        Regex("""\bRAM\b""")        to "ram",
+        Regex("""\bSSD\b""")        to "S S D",
+        Regex("""\biOS\b""")        to "i O S",
+        Regex("""\bmacOS\b""")      to "mac O S",
+        Regex("""\bSwiftUI\b""")    to "Swift U I",
+        Regex("""\bGitHub\b""")     to "Git Hub",
+        Regex("""\bGitLab\b""")     to "Git Lab",
+        Regex("""\bWhatsApp\b""")   to "Whats App",
+        Regex("""\bMiniMax\b""")    to "Mini Max",
+        Regex("""\bOllama\b""")     to "Oh lama",
+    )
+
+    private fun expandTechBrands(text: String): String {
+        var s = text
+        for ((rx, replacement) in TECH_BRANDS) {
+            s = rx.replace(s, replacement)
+        }
+        return s
+    }
+
+    // ── URL expansion ────────────────────────────────────────────────────────
+
+    private val URL_FULL_RX = Regex("""https?://[^\s,;'")\]>]+""")
+    private val URL_BARE_RX = Regex("""\b([a-zA-Z0-9][-a-zA-Z0-9]*)\.(com|io|net|org|co|dev|ai|app|me|tv)\b""")
+
+    private fun expandUrls(text: String): String {
+        var s = text
+        // Full URLs: https://github.com/user/repo → "github dot com"
+        s = URL_FULL_RX.replace(s) { match ->
+            val url = match.value
+            val hostMatch = Regex("""https?://(?:www\.)?([^/\s]+)""").find(url)
+            val host = hostMatch?.groupValues?.get(1) ?: return@replace url
+            host.replace(".", " dot ").trim()
+        }
+        // Bare domains: github.com → "github dot com"
+        s = URL_BARE_RX.replace(s) { match ->
+            match.value.replace(".", " dot ")
+        }
+        return s
+    }
+
+    // ── Version number expansion ─────────────────────────────────────────────
+
+    private val VERSION_RX = Regex("""\bv(\d+(?:\.\d+)+)\b""")
+
+    private fun expandVersionNumbers(text: String): String {
+        return VERSION_RX.replace(text) { match ->
+            val nums = match.groupValues[1]
+            "version " + nums.replace(".", " point ")
+        }
     }
 
     private fun stripMarkdown(text: String): String {

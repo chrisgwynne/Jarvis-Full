@@ -9,11 +9,12 @@ namespace Jarvis.Settings;
 /// File-backed settings store. Writes atomically (temp + replace) so a crash mid-save
 /// can't leave a half-written settings.json.
 ///
-/// Sensitive fields (BridgeToken, Gateway.SessionToken) are encrypted at rest with DPAPI
-/// CurrentUser scope. A "dpapi:" prefix marks encrypted values so plaintext tokens from
-/// older versions are migrated transparently on first save.
-/// Phase 11: on first load, if Gateway.BaseUrl is empty but Sidecar.BridgeUrl is set, the
-/// legacy URL and token are promoted into BrainGatewayConfig automatically.
+/// Sensitive fields (Gateway.SessionToken) are encrypted at rest with DPAPI CurrentUser
+/// scope. A "dpapi:" prefix marks encrypted values so plaintext tokens from older versions
+/// are migrated transparently on first save.
+///
+/// Old JSON files that contain the removed BridgeUrl / BridgeToken / SidecarEnabled fields
+/// are silently ignored — the JSON deserializer discards unknown properties.
 /// </summary>
 public sealed class JsonSettingsStore : IJarvisSettingsStore
 {
@@ -63,8 +64,6 @@ public sealed class JsonSettingsStore : IJarvisSettingsStore
                          ?? JarvisSettings.Defaults;
                 // Decrypt any DPAPI-protected fields before handing to callers.
                 if (OperatingSystem.IsWindows()) loaded = DecryptSensitive(loaded);
-                // Phase 11 migration: promote legacy BridgeUrl/BridgeToken into BrainGatewayConfig.
-                loaded = MigrateGatewayConfig(loaded);
             }
             catch (JsonException)
             {
@@ -99,14 +98,6 @@ public sealed class JsonSettingsStore : IJarvisSettingsStore
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static JarvisSettings EncryptSensitive(JarvisSettings s)
     {
-        // Encrypt legacy BridgeToken.
-        var legacyToken = s.Sidecar.BridgeToken;
-        if (!string.IsNullOrEmpty(legacyToken) && !TokenCrypto.IsProtected(legacyToken))
-        {
-            try { s = s with { Sidecar = s.Sidecar with { BridgeToken = TokenCrypto.Protect(legacyToken) } }; }
-            catch { /* DPAPI unavailable — keep plaintext */ }
-        }
-        // Encrypt gateway SessionToken.
         var gwToken = s.Gateway.SessionToken;
         if (!string.IsNullOrEmpty(gwToken) && !TokenCrypto.IsProtected(gwToken))
         {
@@ -119,63 +110,12 @@ public sealed class JsonSettingsStore : IJarvisSettingsStore
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static JarvisSettings DecryptSensitive(JarvisSettings s)
     {
-        // Decrypt legacy BridgeToken.
-        if (TokenCrypto.IsProtected(s.Sidecar.BridgeToken))
-        {
-            try { s = s with { Sidecar = s.Sidecar with { BridgeToken = TokenCrypto.Unprotect(s.Sidecar.BridgeToken!) } }; }
-            catch { s = s with { Sidecar = s.Sidecar with { BridgeToken = null } }; }
-        }
-        // Decrypt gateway SessionToken.
         if (TokenCrypto.IsProtected(s.Gateway.SessionToken))
         {
             try { s = s with { Gateway = s.Gateway with { SessionToken = TokenCrypto.Unprotect(s.Gateway.SessionToken!) } }; }
             catch { s = s with { Gateway = s.Gateway with { SessionToken = null, Paired = false } }; }
         }
         return s;
-    }
-
-    /// <summary>
-    /// Phase 11 migration: if Gateway has never been configured but the legacy Sidecar bridge is
-    /// enabled, derive BaseUrl from BridgeUrl and copy BridgeToken as the initial SessionToken.
-    /// Marks <see cref="BrainGatewayConfig.MigratedFromLegacy"/> so this runs only once.
-    /// </summary>
-    private static JarvisSettings MigrateGatewayConfig(JarvisSettings s)
-    {
-        // Only migrate if gateway hasn't been touched yet and legacy bridge has a URL.
-        if (s.Gateway.MigratedFromLegacy) return s;
-        if (!string.IsNullOrWhiteSpace(s.Gateway.BaseUrl)) return s;
-
-        var legacyUrl = s.Sidecar.BridgeUrl;
-        if (string.IsNullOrWhiteSpace(legacyUrl)) return s;
-
-        // Convert ws://host:port/... → http://host:port
-        string? httpBase = null;
-        if (Uri.TryCreate(legacyUrl, UriKind.Absolute, out var u))
-        {
-            var httpScheme = u.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
-            var port = u.IsDefaultPort ? string.Empty : $":{u.Port}";
-            httpBase = $"{httpScheme}://{u.Host}{port}";
-        }
-
-        if (string.IsNullOrWhiteSpace(httpBase)) return s;
-
-        return s with
-        {
-            Gateway = s.Gateway with
-            {
-                BaseUrl               = httpBase,
-                DeviceId              = string.IsNullOrWhiteSpace(s.Gateway.DeviceId)
-                                            ? Environment.MachineName
-                                            : s.Gateway.DeviceId,
-                DeviceName            = string.IsNullOrWhiteSpace(s.Gateway.DeviceName)
-                                            ? s.Sidecar.DeviceName
-                                            : s.Gateway.DeviceName,
-                // SessionToken from legacy; treated as unpairedtoken — user still needs to pair.
-                SessionToken          = s.Sidecar.BridgeToken,
-                MigratedFromLegacy    = true,
-                MigrationCompletedAt  = DateTimeOffset.UtcNow
-            }
-        };
     }
 
     private static class TokenCrypto

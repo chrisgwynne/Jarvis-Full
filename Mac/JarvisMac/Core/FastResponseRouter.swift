@@ -167,7 +167,7 @@ final class FastResponseRouter {
         case .miniMaxFirst:           llmDesc = "MiniMax with xAI, Gemini, and local fallback"
         case .geminiFirst:            llmDesc = "Gemini with xAI, MiniMax, and local fallback"
         case .geminiOnly:             llmDesc = "Gemini"
-        case .localFirst, .localOnly: llmDesc = "LM Studio (local)"
+        case .localFirst, .localOnly: llmDesc = "llama.cpp (local)"
         case .miniMaxOnly:            llmDesc = "MiniMax"
         case .disabled:               llmDesc = "none — fully offline"
         }

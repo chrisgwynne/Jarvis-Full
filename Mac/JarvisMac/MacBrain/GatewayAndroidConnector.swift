@@ -10,6 +10,7 @@ import Network
 // AndroidBridgeManager calls `gatewayAndroidConnector.broadcast(_:)` to push to
 // Android, and wires `onMessage` to receive inbound Android frames.
 
+@available(*, deprecated, message: "External WebSocket hosting is now owned by JarvisBrainDaemon. This class is inert.")
 @MainActor
 final class GatewayAndroidConnector {
 
@@ -32,6 +33,12 @@ final class GatewayAndroidConnector {
     /// Called for every complete inbound WebSocket text/binary frame from Android.
     /// The respond closure pushes a reply back to that specific client.
     var onMessage: ((Data, @escaping (Data) -> Void) -> Void)?
+
+    /// Called when Android sends a transcript.final frame.
+    /// Parameters: (clientId, routeId, transcriptText)
+    /// The caller should process the transcript via the brain pipeline and push
+    /// a reply.final frame back using sendText(_:to:).
+    var onTranscriptFinal: ((String, String, String) -> Void)?
 
     // MARK: - Accept a new WebSocket connection (called by MacBrainServer after upgrade)
 
@@ -62,6 +69,10 @@ final class GatewayAndroidConnector {
         }
     }
 
+    func sendText(_ json: String, to clientId: String) {
+        send(Data(json.utf8), to: clientId)
+    }
+
     var connectedCount: Int { clients.count }
 
     // MARK: - Receive loop
@@ -82,6 +93,19 @@ final class GatewayAndroidConnector {
                         guard let self else { return }
                         self.diagnostics?.recordAndroidSeen()
                         GatewayAuthStore.shared.recordSeen(deviceId: clientId)
+
+                        // Route transcript.final to the brain pipeline before the
+                        // generic onMessage handler so it doesn't reach wsServer.delegate.
+                        if let json = try? JSONSerialization.jsonObject(with: frameData) as? [String: Any],
+                           json["type"] as? String == "transcript.final",
+                           let transcript = json["transcript"] as? String, !transcript.isEmpty {
+                            let routeId = json["messageId"] as? String
+                                       ?? json["routeId"] as? String
+                                       ?? UUID().uuidString
+                            self.onTranscriptFinal?(clientId, routeId, transcript)
+                            return
+                        }
+
                         self.onMessage?(frameData) { [weak self] reply in
                             self?.send(reply, to: clientId)
                         }

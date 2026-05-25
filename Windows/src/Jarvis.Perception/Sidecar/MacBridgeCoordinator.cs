@@ -12,21 +12,17 @@ using Microsoft.Extensions.Logging;
 namespace Jarvis.Perception.Sidecar;
 
 /// <summary>
-/// Owns the outbound WebSocket to the Mac brain / JarvisBrainDaemon. Supports two modes:
+/// Owns the outbound WebSocket to the Mac brain / JarvisBrainDaemon.
 ///
-///   Gateway mode  (when <see cref="BrainGatewayConfig.BaseUrl"/> is set):
-///     - Connects to /v1/windows/ws derived from BaseUrl.
-///     - Uses session token from BrainGatewayConfig.SessionToken.
-///     - Sends canonical GatewayMessage envelope (translated from SidecarFrame).
-///     - Stops reconnecting on 401 (→ Unauthorized) or token-revoked nack (→ TokenRevoked).
-///     - Sends device.hello + capability.update after connect.
+/// Connection lifecycle:
+///   - If <see cref="BrainGatewayConfig.BaseUrl"/> is empty → stays Disabled.
+///   - If BaseUrl is set but no SessionToken → transitions to PairingRequired (user must pair).
+///   - If BaseUrl and SessionToken are both set → connects to /v1/windows/ws, sends
+///     GatewayMessage envelopes, stops reconnecting on 401 or token-revoked nack.
 ///
-///   Legacy mode (fallback when Gateway.BaseUrl is empty):
-///     - Connects to Sidecar.BridgeUrl (user-configured).
-///     - Uses Sidecar.BridgeToken for auth.
-///     - Sends raw SidecarFrame JSON (protocol v2 behaviour).
-///
-/// Both modes reconnect with exponential backoff and transition to Degraded on sustained failure.
+/// Reconnects with exponential backoff; transitions to Degraded on sustained failure.
+/// The session token is received after a successful pairing-code exchange — users never
+/// see, copy, or paste it.
 /// </summary>
 public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
 {
@@ -64,8 +60,6 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
     private double? _lastHeartbeatRttMs;
     private DateTimeOffset _lastHeartbeatSentAt = DateTimeOffset.MinValue;
 
-    // Gateway mode flag — set per-connection-attempt in RunAsync, read by loops.
-    private bool _useGatewayProtocol;
     private string _effectiveDeviceId = Environment.MachineName;
     // Set true when token is revoked or auth permanently fails — exits the reconnect loop.
     private volatile bool _stopReconnect;
@@ -107,7 +101,7 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
         _settings    = settings;
         _diagnostics = diagnostics;
         _logger      = logger;
-        // Allow gateway config to be injected; default to empty config (legacy mode).
+        // Allow gateway config to be injected; default to empty config (Disabled state).
         _gateway = gateway ?? (() => new BrainGatewayConfig());
     }
 
@@ -161,56 +155,40 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
             var settings = _settings();
             var gateway  = _gateway();
 
-            // ── Determine connection mode ──────────────────────────────────────────
-            string? wsUrl;
-            string? authToken;
-
-            if (!string.IsNullOrWhiteSpace(gateway.BaseUrl))
-            {
-                // Gateway mode: derive /v1/windows/ws from the base URL.
-                wsUrl     = gateway.DeriveWebSocketUrl();
-                authToken = gateway.SessionToken;
-
-                if (string.IsNullOrWhiteSpace(wsUrl))
-                {
-                    SetStatus(BridgeState.Disabled, "invalid gateway BaseUrl");
-                    try { await Task.Delay(2000, cancellationToken).ConfigureAwait(false); } catch { return; }
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(authToken))
-                {
-                    SetStatus(BridgeState.PairingRequired, "no session token — pair via Settings first");
-                    try { await Task.Delay(5000, cancellationToken).ConfigureAwait(false); } catch { return; }
-                    continue;
-                }
-
-                _useGatewayProtocol = true;
-                _effectiveDeviceId  = !string.IsNullOrWhiteSpace(gateway.DeviceId)
-                    ? gateway.DeviceId
-                    : Environment.MachineName;
-            }
-            else if (settings.Enabled && !string.IsNullOrWhiteSpace(settings.BridgeUrl))
-            {
-                // Legacy mode: use the user-configured BridgeUrl.
-                wsUrl               = settings.BridgeUrl;
-                authToken           = settings.BridgeToken;
-                _useGatewayProtocol = false;
-                _effectiveDeviceId  = Environment.MachineName;
-            }
-            else
+            // ── Determine connection parameters ────────────────────────────────────
+            // Only gateway-protocol is supported. Legacy bearer-token mode is removed.
+            if (string.IsNullOrWhiteSpace(gateway.BaseUrl))
             {
                 SetStatus(BridgeState.Disabled, null);
                 try { await Task.Delay(1000, cancellationToken).ConfigureAwait(false); } catch { return; }
                 continue;
             }
 
+            var wsUrl     = gateway.DeriveWebSocketUrl();
+            var authToken = gateway.SessionToken;
+
+            if (string.IsNullOrWhiteSpace(wsUrl))
+            {
+                SetStatus(BridgeState.Disabled, "invalid gateway BaseUrl");
+                try { await Task.Delay(2000, cancellationToken).ConfigureAwait(false); } catch { return; }
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(authToken))
+            {
+                SetStatus(BridgeState.PairingRequired, "no session token — pair via Settings first");
+                try { await Task.Delay(5000, cancellationToken).ConfigureAwait(false); } catch { return; }
+                continue;
+            }
+
+            _effectiveDeviceId = !string.IsNullOrWhiteSpace(gateway.DeviceId)
+                ? gateway.DeviceId
+                : Environment.MachineName;
+
             SetStatus(BridgeState.Connecting, null);
             try
             {
                 using var socket = new ClientWebSocket();
-                if (!_useGatewayProtocol)
-                    socket.Options.SetRequestHeader("X-Jarvis-Sidecar", "v2");
                 if (!string.IsNullOrWhiteSpace(authToken))
                     socket.Options.SetRequestHeader("Authorization", $"Bearer {authToken}");
 
@@ -221,18 +199,8 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
                 lock (_seqGate) _lastInboundSeq = 0;
                 SetStatus(BridgeState.Connected, null);
 
-                // Handshake.
-                if (_useGatewayProtocol)
-                    await SendGatewayHelloAsync(socket, cancellationToken).ConfigureAwait(false);
-                else
-                    await SendInternalAsync(socket, new SidecarFrame
-                    {
-                        Type     = SidecarFrameTypes.Hello,
-                        Protocol = "jarvis-sidecar",
-                        Version  = "1.0.0",
-                        DeviceId = _effectiveDeviceId,
-                        At       = DateTimeOffset.UtcNow
-                    }, cancellationToken).ConfigureAwait(false);
+                // Handshake — always gateway protocol.
+                await SendGatewayHelloAsync(socket, cancellationToken).ConfigureAwait(false);
 
                 using var heartbeat = new CancellationTokenSource();
                 using var loopCts   = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, heartbeat.Token);
@@ -305,16 +273,9 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
             foreach (var frame in _outbound.GetConsumingEnumerable(token))
             {
                 if (socket.State != WebSocketState.Open) return;
-                if (_useGatewayProtocol)
-                {
-                    TrackOutboundDiagnostics(frame);
-                    var msg = GatewayMessageTranslator.ToGateway(frame, _effectiveDeviceId);
-                    await SendGatewayInternalAsync(socket, msg, token).ConfigureAwait(false);
-                }
-                else
-                {
-                    await SendInternalAsync(socket, frame, token).ConfigureAwait(false);
-                }
+                TrackOutboundDiagnostics(frame);
+                var msg = GatewayMessageTranslator.ToGateway(frame, _effectiveDeviceId);
+                await SendGatewayInternalAsync(socket, msg, token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { }
@@ -372,15 +333,8 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
             SidecarFrame? frame = null;
             try
             {
-                if (_useGatewayProtocol)
-                {
-                    var msg = JsonSerializer.Deserialize<GatewayMessage>(json, JsonOpts);
-                    if (msg is not null) frame = GatewayMessageTranslator.FromGateway(msg);
-                }
-                else
-                {
-                    frame = JsonSerializer.Deserialize<SidecarFrame>(json, JsonOpts);
-                }
+                var msg = JsonSerializer.Deserialize<GatewayMessage>(json, JsonOpts);
+                if (msg is not null) frame = GatewayMessageTranslator.FromGateway(msg);
             }
             catch
             {
@@ -399,7 +353,7 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
     private void ProcessInboundFrame(SidecarFrame frame)
     {
         // Check if daemon sent a token-revoked nack.
-        if (_useGatewayProtocol && frame.Type == GatewayMessageTypes.Nack
+        if (frame.Type == GatewayMessageTypes.Nack
             && frame.Reason?.Contains("token_revoked", StringComparison.OrdinalIgnoreCase) == true)
         {
             Interlocked.Increment(ref _tokenRevokedCount);
@@ -448,12 +402,11 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
     }
 
     /// <summary>
-    /// Test-only hook — calls ProcessInboundFrame in gateway mode without a real WebSocket.
+    /// Test-only hook — calls ProcessInboundFrame without a real WebSocket.
     /// Accessible because Jarvis.Perception.Tests is listed in InternalsVisibleTo.
     /// </summary>
     internal void SimulateInboundForTest(SidecarFrame frame)
     {
-        _useGatewayProtocol = true;
         ProcessInboundFrame(frame);
     }
 
@@ -473,21 +426,11 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
                 ProtocolVersion = SidecarProtocol.Version,
                 Seq             = Interlocked.Increment(ref _outboundSeq)
             };
-            if (_useGatewayProtocol)
-                await SendGatewayInternalAsync(socket, GatewayMessageTranslator.ToGateway(heartbeat, _effectiveDeviceId), token).ConfigureAwait(false);
-            else
-                await SendInternalAsync(socket, heartbeat, token).ConfigureAwait(false);
+            await SendGatewayInternalAsync(socket, GatewayMessageTranslator.ToGateway(heartbeat, _effectiveDeviceId), token).ConfigureAwait(false);
         }
     }
 
     // ── Wire helpers ──────────────────────────────────────────────────────────
-
-    private static async Task SendInternalAsync(ClientWebSocket socket, SidecarFrame frame, CancellationToken token)
-    {
-        var json  = JsonSerializer.Serialize(frame, JsonOpts);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, token).ConfigureAwait(false);
-    }
 
     private static async Task SendGatewayInternalAsync(ClientWebSocket socket, GatewayMessage msg, CancellationToken token)
     {

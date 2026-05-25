@@ -29,6 +29,28 @@ final class DaemonAppBridge: ObservableObject {
     /// The payloadData contains the `data` sub-object from the android.event payload,
     /// serialised as JSON and ready for AndroidEventReceiver ingestion.
     var onAndroidEvent: ((String, Data, String) -> Void)?
+    /// Called when Android requests a Mac action via remote.action.request.
+    /// Parameters: (requestId, routeId, sourceDeviceId, action, parameters, userVisibleText, requiresConfirmation)
+    var onRemoteActionRequest: ((String, String, String, String, [String: Any], String, Bool) -> Void)?
+    /// Called when a file.transfer.created event arrives.
+    /// Parameters: (transferId, filename, mimeType, sizeBytes, openOnMac, suggestedAction, userVisibleName)
+    var onFileTransferCreated: ((String, String, String, Int, Bool, String, String) -> Void)?
+
+    // MARK: - Cross-device callbacks
+
+    /// Called when a presence.update arrives from another device.
+    var onPresenceUpdate: (([String: Any]) -> Void)?
+    /// Called when a proactive.comm.prompt arrives (missed call / unread message nudge).
+    var onCommPrompt: (([String: Any]) -> Void)?
+    /// Called when a handoff.request arrives from another device.
+    /// Parameters: (key, serializedValue)
+    var onHandoffReceived: ((String, String) -> Void)?
+    /// Called when a clipboard.update arrives from another device.
+    var onClipboardUpdate: ((String) -> Void)?
+    /// Called when a notification.forward arrives from another device.
+    var onNotificationForward: (([String: Any]) -> Void)?
+    /// Called when a context.update arrives from another device.
+    var onContextUpdate: (([String: Any]) -> Void)?
 
     private var authToken: String? {
         Keychain.get(KeychainAccount.gatewayToken)
@@ -149,9 +171,32 @@ final class DaemonAppBridge: ObservableObject {
         case "nack":
             let reason = payload["reason"] as? String ?? ""
             logger.debug("DaemonAppBridge: nack reason=\(reason, privacy: .public)")
-        case "execution.result":
-            // Result of a Mac-initiated capability request — route as tool.result.
-            onToolResult?(data)
+        case "remote.action.request":
+            let requestId = payload["requestId"] as? String ?? ""
+            let routeId = payload["routeId"] as? String ?? requestId
+            let sourceDeviceId = deviceId
+            let action = payload["action"] as? String ?? ""
+            let parameters = payload["parameters"] as? [String: Any] ?? [:]
+            let userVisibleText = payload["userVisibleText"] as? String ?? ""
+            let requiresConfirmation = payload["requiresConfirmation"] as? Bool ?? false
+            if !requestId.isEmpty && !action.isEmpty {
+                Task { @MainActor in
+                    self.onRemoteActionRequest?(requestId, routeId, sourceDeviceId, action, parameters, userVisibleText, requiresConfirmation)
+                }
+            }
+        case "file.transfer.created":
+            let transferId = payload["transferId"] as? String ?? ""
+            let filename = payload["filename"] as? String ?? ""
+            let mimeType = payload["mimeType"] as? String ?? ""
+            let sizeBytes = payload["sizeBytes"] as? Int ?? 0
+            let openOnMac = payload["openOnMac"] as? Bool ?? false
+            let suggestedAction = payload["suggestedAction"] as? String ?? "save"
+            let userVisibleName = payload["userVisibleName"] as? String ?? filename
+            if !transferId.isEmpty {
+                Task { @MainActor in
+                    self.onFileTransferCreated?(transferId, filename, mimeType, sizeBytes, openOnMac, suggestedAction, userVisibleName)
+                }
+            }
         default:
             logger.debug("DaemonAppBridge: received type=\(type, privacy: .public)")
         }
@@ -187,6 +232,39 @@ final class DaemonAppBridge: ObservableObject {
     }
 
     // MARK: - Sending replies to remote devices
+
+    func sendRemoteActionResult(
+        requestId: String,
+        routeId: String,
+        targetDeviceId: String,
+        success: Bool,
+        spokenSummary: String,
+        errorCode: String? = nil,
+        errorMessage: String? = nil
+    ) {
+        var payload: [String: Any] = [
+            "requestId": requestId,
+            "routeId": routeId,
+            "targetDeviceId": targetDeviceId,
+            "success": success,
+            "spokenSummary": spokenSummary,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ]
+        if let code = errorCode { payload["errorCode"] = code }
+        if let msg = errorMessage { payload["errorMessage"] = msg }
+
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "remote.action.result",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": ["type": "android", "deviceId": targetDeviceId],
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "correlationId": requestId,
+            "payload": payload
+        ]
+        send(envelope)
+    }
 
     func sendReply(text: String, speak: Bool, display: Bool, routeId: String,
                    targetPlatform: String, targetDeviceId: String) {
@@ -235,6 +313,66 @@ final class DaemonAppBridge: ObservableObject {
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "correlationId": routeId,
             "payload": ["reason": reason, "source": "mac.brain"]
+        ]
+        send(envelope)
+    }
+
+    func sendCommActionRequest(
+        requestId: String,
+        eventId: String,
+        contactName: String,
+        channel: String,
+        action: String,
+        targetDeviceId: String
+    ) {
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "comm.action.request",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": ["type": "android", "deviceId": targetDeviceId],
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "correlationId": requestId,
+            "payload": [
+                "requestId": requestId,
+                "eventId": eventId,
+                "contactName": contactName,
+                "channel": channel,
+                "action": action,
+                "requiresConfirmation": true
+            ]
+        ]
+        send(envelope)
+    }
+
+    func sendHandoffRequest(key: String, value: String, targetDeviceId: String? = nil) {
+        let target: [String: Any] = targetDeviceId != nil
+            ? ["type": "android", "deviceId": targetDeviceId!]
+            : ["type": "broadcast"]
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "handoff.request",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": target,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "payload": ["key": key, "value": value, "sourceDevice": "mac"]
+        ]
+        send(envelope)
+    }
+
+    func sendClipboardUpdate(text: String, targetDeviceId: String? = nil) {
+        let target: [String: Any] = targetDeviceId != nil
+            ? ["type": "android", "deviceId": targetDeviceId!]
+            : ["type": "broadcast"]
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString,
+            "type": "clipboard.update",
+            "sourceDeviceId": "mac",
+            "sourcePlatform": "mac",
+            "target": target,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "payload": ["text": text, "sourceDevice": "mac"]
         ]
         send(envelope)
     }

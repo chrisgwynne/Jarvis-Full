@@ -108,8 +108,8 @@ public static class BridgeConnectivityProbe
             if ((int)resp.StatusCode == 401)
             {
                 stages.Add(new ProbeStage("HTTP", false,
-                    "401 — bearer token rejected.",
-                    "Re-paste the token from Mac → Brain API → Authentication. Tokens are case-sensitive."));
+                    "401 — authentication failed.",
+                    "Your session token may have expired. Go to Settings → Mac Brain and pair again to get a fresh token."));
                 return new ProbeResult(stages);
             }
             if (!resp.IsSuccessStatusCode)

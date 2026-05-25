@@ -52,7 +52,7 @@ public static class GatewayPairingClient
         {
             deviceId,
             deviceName,
-            pairingCode,
+            code = pairingCode,
             appVersion,
             capabilities = capabilities.ToArray()
         }, Opts);

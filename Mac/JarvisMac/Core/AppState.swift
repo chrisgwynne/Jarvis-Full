@@ -260,6 +260,11 @@ final class AppState {
     var lastRemoteRouteId: String = ""
     var lastRemoteActivityText: String = ""
 
+    // Daemon state
+    /// True when JarvisBrainDaemon is enabled in prefs but not reachable.
+    /// Surfaced in UI to prompt the user to start the daemon.
+    var daemonUnavailable: Bool = false
+
     // Error state
     var lastError: String? = nil
 

@@ -75,7 +75,7 @@ final class DocumentationContributorTests: XCTestCase {
         prefs.update {
             $0.miniMaxEnabled = false
             $0.geminiEnabled  = false
-            $0.lmStudioEnabled = false
+            $0.llamaCppEnabled = false
         }
         let s = AIProvidersContributor(prefs: prefs).section()
         XCTAssertEqual(s?.status, .notConfigured)
@@ -175,7 +175,7 @@ final class DocumentationContributorTests: XCTestCase {
         p.update {
             $0.miniMaxEnabled = false
             $0.geminiEnabled = false
-            $0.lmStudioEnabled = false
+            $0.llamaCppEnabled = false
             $0.cloudVisionConsent = false
             $0.obsidianVaultPath = nil
             $0.obsidianLLMContextEnabled = false

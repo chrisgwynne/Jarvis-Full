@@ -177,8 +177,8 @@ final class AndroidContributor: DocumentationContributor {
                 .init(phrase: "is my phone online"),
                 .init(phrase: "ring my phone"),
             ],
-            relatedSettings: ["Settings → Network → QR pairing",
-                              "Settings → Integrations → Android"],
+            relatedSettings: ["Settings → Integrations → Android",
+                              "Developer → Brain API → Pairing"],
             requiredIntegrations: ["Jarvis Android app paired"],
             troubleshooting: troubleshooting,
             status: status,
@@ -303,9 +303,9 @@ final class AIProvidersContributor: DocumentationContributor {
             let hasKey = (Keychain.get(KeychainAccount.geminiAPIKey)?.isEmpty == false)
             statusLines.append("Gemini: \(hasKey ? "configured" : "key missing")")
         }
-        if p.lmStudioEnabled {
-            enabledNames.append("LM Studio")
-            statusLines.append("LM Studio: enabled")
+        if p.llamaCppEnabled {
+            enabledNames.append("llama.cpp")
+            statusLines.append("llama.cpp: enabled")
         }
         let status: DocumentationStatus =
             enabledNames.isEmpty ? .notConfigured : .enabled
@@ -336,7 +336,7 @@ final class AIProvidersContributor: DocumentationContributor {
 
             * **MiniMax** — multimodal (text + vision), cloud-hosted.
             * **Gemini** — Google's generative-language API, multimodal.
-            * **LM Studio** — local OpenAI-compatible server for fully-offline operation.
+            * **llama.cpp** — local OpenAI-compatible server for fully-offline operation (port 8080).
 
             \(statusLines.isEmpty ? "" : "**Live status:** " + statusLines.joined(separator: " · "))
 

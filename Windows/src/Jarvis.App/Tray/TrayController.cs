@@ -28,7 +28,6 @@ public sealed class TrayController : IDisposable
     private readonly Action _openInspector;
     private readonly Action _ocrClipboardImage;
     private readonly Action _openAuditLog;
-    private readonly Action _copyBridgeToken;
     private readonly Action _openGuidance;
     private readonly Action _openChat;
     private readonly Action _openLlmSettings;
@@ -49,7 +48,6 @@ public sealed class TrayController : IDisposable
         Action openInspector,
         Action ocrClipboardImage,
         Action openAuditLog,
-        Action copyBridgeToken,
         Action openGuidance,
         Action openChat,
         Action openLlmSettings,
@@ -66,7 +64,6 @@ public sealed class TrayController : IDisposable
         _openInspector = openInspector;
         _ocrClipboardImage = ocrClipboardImage;
         _openAuditLog = openAuditLog;
-        _copyBridgeToken = copyBridgeToken;
         _openGuidance = openGuidance;
         _openChat = openChat;
         _openLlmSettings = openLlmSettings;
@@ -133,7 +130,6 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(new ToolStripMenuItem("OCR clipboard image", null, (_, _) => _ocrClipboardImage()));
         menu.Items.Add(new ToolStripMenuItem("Inspect context…", null, (_, _) => _openInspector()));
         menu.Items.Add(new ToolStripMenuItem("Audit log…", null, (_, _) => _openAuditLog()));
-        menu.Items.Add(new ToolStripMenuItem("Copy bridge token", null, (_, _) => _copyBridgeToken()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => _openSettings()));
         var hud = new ToolStripMenuItem("Performance HUD", null, (_, _) =>

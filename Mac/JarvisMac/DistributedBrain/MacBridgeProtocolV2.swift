@@ -19,6 +19,7 @@ import Network
 ///
 /// Replay mode: frames arriving between replay.begin / replay.end are
 /// ingested into history but NEVER trigger live responses.
+@available(*, deprecated, message: "External WebSocket hosting is now owned by JarvisBrainDaemon.")
 @MainActor
 final class MacBridgeProtocolV2 {
 

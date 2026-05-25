@@ -3,12 +3,13 @@ import SwiftUI
 /// Settings view for the unified Mac Brain Gateway (port 8765).
 /// Replaces MacBrainSettingsView in Developer > Brain API sub-tab.
 /// Also surfaced in Integrations for Android pairing.
+///
+/// NOTE: The gateway master token (gatewayToken in Keychain) is kept for internal
+/// auth validation only. It is never shown, copied, or rotated from this UI.
+/// Windows pairs via 6-digit pairing code → device token (hidden). Android likewise.
 struct MacBrainGatewaySettingsView: View {
     let controller: JarvisController
 
-    @State private var tokenRevealed = false
-    @State private var tokenCopied = false
-    @State private var tokenRegenConfirm = false
     @State private var pairingCountdown: Int = 0
     @State private var pairingTimer: Timer? = nil
     @State private var codeCopied = false
@@ -20,7 +21,7 @@ struct MacBrainGatewaySettingsView: View {
     var body: some View {
         Form {
             // ── Brain Daemon (LaunchAgent) ────────────────────────────────
-            DaemonControlView(manager: DaemonManager.shared)
+            DaemonControlView(manager: DaemonManager.shared, appState: controller.state)
 
             // ── Mac Brain Gateway Enable ───────────────────────────────────
             Section {
@@ -121,47 +122,6 @@ struct MacBrainGatewaySettingsView: View {
                     }
                 }
             } header: { Text("Network") }
-
-            // ── Authentication ────────────────────────────────────────────
-            Section {
-                LabeledContent("Gateway token") {
-                    HStack(spacing: 6) {
-                        if tokenRevealed {
-                            Text(authStore.gatewayToken ?? "—")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
-                        } else {
-                            Text(authStore.gatewayToken.map { _ in "••••••••••••••••" } ?? "Not configured")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(tokenRevealed ? "Hide" : "Reveal") { tokenRevealed.toggle() }
-                            .buttonStyle(.borderless).font(.caption)
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(authStore.gatewayToken ?? "", forType: .string)
-                            tokenCopied = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { tokenCopied = false }
-                        } label: {
-                            Image(systemName: tokenCopied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled((authStore.gatewayToken ?? "").isEmpty)
-                        Button("Rotate") { tokenRegenConfirm = true }
-                            .buttonStyle(.borderless).foregroundStyle(.orange).font(.caption)
-                    }
-                }
-                if authStore.gatewayToken == nil || authStore.gatewayToken!.isEmpty {
-                    Button("Generate gateway token") {
-                        authStore.regenerateGatewayToken()
-                    }
-                    .buttonStyle(.borderless).font(.caption)
-                }
-                Text("Single token authorizes Brain API, Android WebSocket, and Windows sidecar. Device-specific tokens are issued during pairing (below).")
-                    .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Authentication") }
 
             // ── Paired Devices ────────────────────────────────────────────
             Section {
@@ -331,38 +291,12 @@ struct MacBrainGatewaySettingsView: View {
                 }
             } header: { Text("Remote Requests") }
 
-            // ── Legacy Port ───────────────────────────────────────────────
-            Section {
-                Toggle("Keep legacy Android port 17872 active",
-                       isOn: Binding(
-                           get: { controller.prefs.current.legacyAndroidPortEnabled },
-                           set: { v in
-                               controller.prefs.update { $0.legacyAndroidPortEnabled = v }
-                               if controller.prefs.current.brainServerEnabled {
-                                   controller.restartBrainServer()
-                               }
-                           }
-                       ))
-                Label("Deprecated. Android WebSocket has moved to wss://…:\(controller.prefs.current.brainServerPort)/v1/android/ws. Only enable this for old Android installs that haven't updated yet.",
-                      systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            } header: { Text("Legacy Port (Deprecated)") }
+            // Legacy port toggle removed — external WebSocket hosting is owned by JarvisBrainDaemon.
         }
         .formStyle(.grouped)
         .onDisappear {
             pairingTimer?.invalidate()
             pairingTimer = nil
-        }
-        .confirmationDialog("Rotate gateway token?",
-                           isPresented: $tokenRegenConfirm,
-                           titleVisibility: .visible) {
-            Button("Rotate Token", role: .destructive) {
-                authStore.regenerateGatewayToken()
-                diag.tokenRotationCount += 1
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The old token stops working immediately. All clients (Android app, Windows sidecar) must be updated with the new token. Device tokens issued via pairing are not affected.")
         }
     }
 

@@ -43,7 +43,7 @@ CommandPhraseMatcher.match(transcript, against: phraseStore)
 IntentRouter.route(text:) or route(parsed:)
     ↓ Intent? (.unknown if still unresolved)
     ↓ (fallback to LLM if unknown)
-LLMIntentBridge → LLMRouter → MiniMax or LM Studio
+LLMIntentBridge → LLMRouter → MiniMax, Gemini, or llama.cpp
     ↓
 JarvisController.execute(intent: Intent)
     ↓
@@ -323,7 +323,7 @@ All stored in `Preferences` struct, persisted to `~/Library/Application Support/
 | `bargeInEnabled` | Whether wake word during TTS cancels speech |
 | `conversationalFollowUpEnabled` | Whether follow-up resolver is active |
 | `miniMaxEnabled` / `miniMaxBaseURL` | MiniMax LLM config |
-| `lmStudioBaseURL` | LM Studio local URL |
+| `llamaCppEnabled` / `llamaCppBaseURL` / `llamaCppModel` | llama.cpp local LLM config (default port 8080) |
 | `shopifyAccessToken` | Shopify Admin API access token (private app) |
 | `shopifyShopDomain` | Shop domain e.g. `mystore.myshopify.com` |
 | `shopifyLowStockThreshold` | Inventory threshold for low-stock alerts (default: 5) |

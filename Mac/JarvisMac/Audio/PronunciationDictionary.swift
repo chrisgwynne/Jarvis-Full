@@ -82,7 +82,7 @@ final class PronunciationDictionary {
         ("APIs",      "A.P.I.s",        true),
         // ── Brands / Products ────────────────────────────────────────────────────
         ("MiniMax",   "Mini Max",        true),
-        ("LM Studio", "L.M. Studio",     true),
+        ("llama.cpp", "llama dot C P P", true),
         ("ChatGPT",   "Chat G.P.T.",     true),
         ("GPT-4o",    "G.P.T. Four Oh",  true),
         ("GPT-4",     "G.P.T. Four",     true),
