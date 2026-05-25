@@ -7591,6 +7591,13 @@ final class JarvisController {
         refreshTTSState()
     }
 
+    /// Set the active TTS backend by ID and persist the choice.
+    func setTTSBackendById(_ id: String) {
+        ttsRouter.setActiveBackend(id: id)
+        prefs.update { $0.ttsBackendId = id }
+        refreshTTSState()
+    }
+
     /// Update the Apple voice identifier. Pass nil to auto-select best male English voice.
     func setTTSVoice(_ identifier: String?) {
         prefs.update { $0.ttsVoiceIdentifier = identifier }

@@ -7,6 +7,7 @@ import SwiftUI
 struct VoiceLabView: View {
 
     let router: TTSBackendRouter
+    let onSetActive: (String) -> Void
 
     @State private var selectedId: String = "piper_onnx"
     @State private var testPhrase: String = "The quick brown fox jumps over the lazy dog."
@@ -93,7 +94,7 @@ struct VoiceLabView: View {
             Spacer()
             if isSelected && isAvailable && selectedId != router.preferredBackendId {
                 Button("Set Active") {
-                    router.setActiveBackend(id: selectedId)
+                    onSetActive(selectedId)
                 }
                 .buttonStyle(LabButtonStyle(color: .purple))
             }

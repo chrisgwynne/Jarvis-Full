@@ -896,7 +896,9 @@ private struct OverlayPanelView: View {
         case .speechLatency:
             SpeechLatencyView()
         case .voiceLab:
-            VoiceLabView(router: controller.ttsRouter)
+            VoiceLabView(router: controller.ttsRouter) { id in
+                controller.setTTSBackendById(id)
+            }
         case .spatialHUD:
             // Spatial interaction is now ambient and always running.
             // This overlay shows read-only diagnostics for the live coordinator.
