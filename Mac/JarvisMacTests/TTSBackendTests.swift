@@ -11,9 +11,8 @@ final class TTSBackendTests: XCTestCase {
     // MARK: - SystemTTSBackend
 
     func testSystemAlwaysAvailable() {
-        let apple  = AVSpeechTTS()
-        let system = SystemTTSBackend(apple: apple)
-        XCTAssertTrue(system.isAvailable, "System backend is always available on macOS")
+        let system = SystemTTSBackend(apple: AVSpeechTTS())
+        XCTAssertTrue(system.isAvailable)
     }
 
     func testSystemIdAndDisplayName() {
@@ -30,11 +29,9 @@ final class TTSBackendTests: XCTestCase {
     // MARK: - PiperTTSBackend
 
     func testPiperUnavailableWhenPathsEmpty() {
-        let piper   = PiperTTS()
-        let backend = PiperTTSBackend(piper: piper)
-        // Fresh PiperTTS with no paths configured → isAvailable = false
+        let backend = PiperTTSBackend(piper: PiperTTS())
         XCTAssertFalse(backend.isAvailable,
-                       "Piper should be unavailable when executable and model paths are empty")
+                       "Piper should be unavailable when paths are empty")
     }
 
     func testPiperIdAndDisplayName() {
@@ -44,43 +41,96 @@ final class TTSBackendTests: XCTestCase {
     }
 
     func testPiperDoesNotSupportExpressionTags() {
-        let backend = PiperTTSBackend(piper: PiperTTS())
-        XCTAssertFalse(backend.supportsExpressionTags)
+        XCTAssertFalse(PiperTTSBackend(piper: PiperTTS()).supportsExpressionTags)
     }
 
-    // MARK: - SupertonicTTSBackend
+    // MARK: - SupertonicTTSBackend — identity
 
-    func testSupertonicUnavailableWhenNotEnabled() {
-        // In non-SUPERTONIC_ENABLED builds, isAvailable must always be false.
-        let supertonic = SupertonicTTSBackend()
-        // This passes in both build configurations:
-        // - In non-enabled builds, isAvailable is hardcoded false.
-        // - In enabled builds, the model directory is absent in CI.
-        XCTAssertFalse(supertonic.isAvailable || {
-            // Allow true ONLY if build flag is set AND model files actually exist.
-#if SUPERTONIC_ENABLED
-            return FileManager.default.fileExists(atPath:
-                SupertonicTTSBackend.modelDirectory.path)
-#else
-            return false
-#endif
-        }(), "Supertonic should not be available in CI / unconfigured builds")
+    func testSupertonicId() {
+        XCTAssertEqual(SupertonicTTSBackend().id, "supertonic")
     }
 
-    func testSupertonicUnavailableDoesNotCrashOnSpeak() {
-        // speak() on an unavailable backend must be a safe no-op.
-        let supertonic = SupertonicTTSBackend()
-        XCTAssertFalse(supertonic.isAvailable)
-        supertonic.speak("Hello, world.")
-        supertonic.stop()
+    func testSupertonicDisplayNameNotEmpty() {
+        XCTAssertFalse(SupertonicTTSBackend().displayName.isEmpty)
     }
 
-    func testSupertonicDiagnosticsHasUnavailableReason() {
+    /// Supertonic 3 natively handles <laugh>, <breath>, <sigh> — tags must NOT be stripped.
+    func testSupertonicSupportsExpressionTags() {
+        XCTAssertTrue(SupertonicTTSBackend().supportsExpressionTags,
+                      "Supertonic 3 supports expression tags — supportsExpressionTags must be true")
+    }
+
+    // MARK: - SupertonicTTSBackend — availability is runtime-detected (no hardwired false)
+
+    /// isAvailable must reflect real conditions, not a compile-time constant.
+    /// In CI the model directory is absent → unavailable.
+    /// With models present → available. Never hardwired false.
+    func testSupertonicAvailabilityReflectsModelDirectory() {
         let supertonic = SupertonicTTSBackend()
-        if !supertonic.isAvailable {
-            XCTAssertNotNil(supertonic.diagnostics.unavailableReason,
-                            "Unavailable backend must supply an unavailableReason")
-        }
+        let modelDir   = supertonic.modelDirectory
+        let expected   = modelDir.allRequiredFilesPresent
+        XCTAssertEqual(supertonic.isAvailable, expected,
+                       "isAvailable must match allRequiredFilesPresent — no hardwired false")
+    }
+
+    func testSupertonicUnavailableWhenModelDirectoryEmpty() {
+        // Point at a non-existent directory → unavailable.
+        let missing = SupertonicModelDirectory(base: URL(fileURLWithPath: "/tmp/nonexistent_supertonic_\(UUID().uuidString)"))
+        let backend = SupertonicTTSBackend(modelDirectory: missing)
+        XCTAssertFalse(backend.isAvailable,
+                       "Backend must be unavailable when model directory does not exist")
+    }
+
+    func testSupertonicMissingFilesListedInDiagnostics() {
+        let missing = SupertonicModelDirectory(base: URL(fileURLWithPath: "/tmp/nonexistent_\(UUID().uuidString)"))
+        let backend = SupertonicTTSBackend(modelDirectory: missing)
+        XCTAssertFalse(backend.isAvailable)
+        XCTAssertNotNil(backend.diagnostics.unavailableReason,
+                        "Unavailable backend must supply an unavailableReason")
+    }
+
+    func testSupertonicMissingFilesReturnsMeaningfulList() {
+        let dir     = SupertonicModelDirectory(base: URL(fileURLWithPath: "/tmp/nonexistent_\(UUID().uuidString)"))
+        let missing = dir.missingFiles()
+        XCTAssertFalse(missing.isEmpty,
+                       "missingFiles() must list required files when directory doesn't exist")
+        XCTAssertTrue(missing.contains(where: { $0.contains("duration_predictor") }),
+                      "Missing files must include duration_predictor.onnx")
+        XCTAssertTrue(missing.contains(where: { $0.contains("vocoder") }),
+                      "Missing files must include vocoder.onnx")
+    }
+
+    /// speak() on an unavailable backend must be a safe no-op — must not crash.
+    func testSupertonicUnavailableSpeakIsNoOp() {
+        let dir     = SupertonicModelDirectory(base: URL(fileURLWithPath: "/tmp/nonexistent_\(UUID().uuidString)"))
+        let backend = SupertonicTTSBackend(modelDirectory: dir)
+        XCTAssertFalse(backend.isAvailable)
+        backend.speak("Hello")   // must not crash
+        backend.stop()
+        XCTAssertFalse(backend.isSpeaking)
+    }
+
+    // MARK: - SupertonicModelDirectory
+
+    func testModelDirectoryDefaultURL() {
+        let dir = SupertonicModelDirectory.defaultURL
+        XCTAssertTrue(dir.path.contains("JarvisMac/TTS/Supertonic"),
+                      "Default URL must contain expected path components")
+    }
+
+    func testModelDirectoryRequiredONNXFilesCount() {
+        let dir = SupertonicModelDirectory(base: URL(fileURLWithPath: "/tmp/test"))
+        XCTAssertEqual(dir.requiredONNXFiles.count, 4,
+                       "Must require exactly 4 ONNX model files")
+    }
+
+    func testModelDirectoryAllRequiredFilenames() {
+        let dir   = SupertonicModelDirectory(base: URL(fileURLWithPath: "/tmp/test"))
+        let names = dir.requiredONNXFiles.map { $0.lastPathComponent }
+        XCTAssertTrue(names.contains("duration_predictor.onnx"))
+        XCTAssertTrue(names.contains("text_encoder.onnx"))
+        XCTAssertTrue(names.contains("vector_estimator.onnx"))
+        XCTAssertTrue(names.contains("vocoder.onnx"))
     }
 
     // MARK: - TTSTagStripper
@@ -89,20 +139,28 @@ final class TTSBackendTests: XCTestCase {
         let system = SystemTTSBackend(apple: AVSpeechTTS())
         XCTAssertFalse(system.supportsExpressionTags)
         let out = TTSTagStripper.prepare("<happy>Hello</happy>, <break/> world.", for: system)
-        XCTAssertEqual(out, "Hello, world.",
-                       "Tags should be stripped for non-expressive backends")
+        XCTAssertEqual(out, "Hello, world.")
     }
 
     func testTagStrippingCollapsesWhitespace() {
         let stripped = TTSTagStripper.strip("One <tag/> two  <other>   </other> three")
-        XCTAssertFalse(stripped.contains("  "), "Multiple spaces should be collapsed")
+        XCTAssertFalse(stripped.contains("  "))
+    }
+
+    /// Supertonic supports expression tags — they must be preserved, not stripped.
+    func testSupertonicTagsArePreserved() {
+        let backend = SupertonicTTSBackend()
+        let input   = "Hello <laugh/> world <breath/> test."
+        let output  = TTSTagStripper.prepare(input, for: backend)
+        XCTAssertEqual(output, input,
+                       "Expression tags must not be stripped for Supertonic backend")
     }
 
     // MARK: - TTSBackendRouter — fallback chain
 
     func testRouterUsesSystemFallbackWhenPiperUnavailable() {
-        let router = makeRouter(preferredId: "piper_onnx")
         // Piper has no paths → unavailable; system is always available.
+        let router = makeRouter(preferredId: "piper_onnx")
         XCTAssertEqual(router.resolvedBackend.id, "system_apple",
                        "Router must fall back to system when piper is unavailable")
     }
@@ -113,10 +171,8 @@ final class TTSBackendTests: XCTestCase {
     }
 
     func testRouterFallsBackToSystemForUnknownBackendId() {
-        let router = makeRouter(preferredId: "nonexistent_backend")
-        // Unknown → not found → piper (unavailable) → system.
-        XCTAssertEqual(router.resolvedBackend.id, "system_apple",
-                       "Unknown backend ID should ultimately reach system fallback")
+        let router = makeRouter(preferredId: "nonexistent")
+        XCTAssertEqual(router.resolvedBackend.id, "system_apple")
     }
 
     func testRouterSetActiveBackendChangesPreference() {
@@ -130,6 +186,18 @@ final class TTSBackendTests: XCTestCase {
         XCTAssertEqual(router.allBackends.count, 3)
     }
 
+    func testRouterContainsSupertonicBackend() {
+        let router = makeRouter(preferredId: "system_apple")
+        XCTAssertTrue(router.allBackends.contains(where: { $0.id == "supertonic" }))
+    }
+
+    func testRouterSupertonicUnavailableFallsBackToSystem() {
+        // Supertonic model dir absent → router falls back to system (piper also unconfigured).
+        let router = makeRouter(preferredId: "supertonic")
+        XCTAssertNotEqual(router.resolvedBackend.id, "supertonic",
+                          "Router must not use Supertonic when it is unavailable")
+    }
+
     // MARK: - TTSBackendRouter — speak() does not crash
 
     func testRouterSpeakDoesNotCrash() {
@@ -139,24 +207,57 @@ final class TTSBackendTests: XCTestCase {
         router.stop()
     }
 
+    // MARK: - SupertonicTextChunker
+
+    func testChunkerShortTextReturnsSingle() {
+        let chunks = SupertonicTextChunker.chunk("Hello world.", maxSize: 300)
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertEqual(chunks.first, "Hello world.")
+    }
+
+    func testChunkerSplitsLongText() {
+        let long = String(repeating: "Word ", count: 100)  // 500 chars
+        let chunks = SupertonicTextChunker.chunk(long, maxSize: 300)
+        XCTAssertGreaterThan(chunks.count, 1)
+        for chunk in chunks {
+            XCTAssertLessThanOrEqual(chunk.count, 300, "Each chunk must be ≤ 300 chars")
+        }
+    }
+
+    func testChunkerNoEmptyChunks() {
+        let text   = "First sentence. Second sentence. Third sentence."
+        let chunks = SupertonicTextChunker.chunk(text, maxSize: 20)
+        XCTAssertTrue(chunks.allSatisfy { !$0.isEmpty })
+    }
+
+    // MARK: - SupertonicAudioWriter
+
+    func testWAVHasCorrectRIFFHeader() {
+        let samples: [Float] = (0..<100).map { _ in Float.random(in: -1...1) }
+        let wav = SupertonicAudioWriter.toWAV(samples: samples, sampleRate: 44100)
+        XCTAssertGreaterThan(wav.count, 44, "WAV must have header + data")
+        let riff = String(bytes: wav.prefix(4), encoding: .ascii)
+        let wave = String(bytes: wav[8..<12], encoding: .ascii)
+        XCTAssertEqual(riff, "RIFF")
+        XCTAssertEqual(wave, "WAVE")
+    }
+
+    func testWAVSilenceIsAllZeroSamples() {
+        let silence = SupertonicAudioWriter.silenceSamples(sampleRate: 44100, seconds: 0.1)
+        XCTAssertTrue(silence.allSatisfy { $0 == 0.0 })
+    }
+
     // MARK: - TTSBenchmarkStore
 
     func testBenchmarkStoreAddsRecord() {
         let store = TTSBenchmarkStore()
-        let r = TTSBenchmarkRecord(
-            id: UUID(), backendId: "test", backendName: "Test", textLength: 10,
-            preloadMs: 0, firstAudioMs: 100, totalPlaybackMs: 500,
-            synthesisDoneMs: 400, error: nil, timestamp: Date(),
-            memoryMB: nil, cpuPercent: nil)
-        store.add(r)
+        store.add(makeRecord(error: nil))
         XCTAssertEqual(store.all().count, 1)
     }
 
     func testBenchmarkStoreSucceededFlag() {
-        let ok = makeRecord(error: nil)
-        let fail = makeRecord(error: "timeout")
-        XCTAssertTrue(ok.succeeded)
-        XCTAssertFalse(fail.succeeded)
+        XCTAssertTrue(makeRecord(error: nil).succeeded)
+        XCTAssertFalse(makeRecord(error: "timeout").succeeded)
     }
 
     func testBenchmarkStoreClearWorks() {

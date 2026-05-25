@@ -45,6 +45,7 @@ final class TTSBackendRouter: TextToSpeaking, @unchecked Sendable {
     private var proxyTask:      Task<Void, Never>?
     private var proxyBackendId: String?
     private var pendingBenchmark: PendingBenchmark?
+    private var lastSpokenText: String = ""
 
     private var _isSpeaking = false
     var isSpeaking: Bool { _isSpeaking }
@@ -82,12 +83,24 @@ final class TTSBackendRouter: TextToSpeaking, @unchecked Sendable {
 
     // MARK: Bootstrap
 
-    /// Wire the initial proxy task. Call once from JarvisController bootstrap.
-    func start() { rewireProxy() }
+    /// Wire the initial proxy task and Supertonic fallback hook.
+    /// Call once from JarvisController bootstrap.
+    func start() {
+        rewireProxy()
+        supertonicBackend.onSpeakFailed = { [weak self] error, text in
+            guard let self else { return }
+            Log.app.warning("[TTS] Supertonic failed (\(error)) — routing to Piper/System")
+            let fallback: any TTSBackend = self.piperBackend.isAvailable
+                ? self.piperBackend : self.systemBackend
+            self.rewireProxy(to: fallback)
+            fallback.speak(text)
+        }
+    }
 
     // MARK: TextToSpeaking
 
     func speak(_ text: String) {
+        lastSpokenText = text
         let backend = resolvedBackend
         if backend.id != proxyBackendId { rewireProxy() }
         pendingBenchmark = PendingBenchmark(
@@ -125,6 +138,30 @@ final class TTSBackendRouter: TextToSpeaking, @unchecked Sendable {
     var activeDiagnostics: TTSBackendDiagnostics { resolvedBackend.diagnostics }
 
     // MARK: Proxy wiring
+
+    /// Force the proxy to watch a specific backend for one utterance (used during
+    /// Supertonic → Piper fallback without changing preferredBackendId).
+    private func rewireProxy(to target: any TTSBackend) {
+        proxyTask?.cancel()
+        proxyBackendId = target.id
+        let stream     = target.isSpeakingStream
+        let cont       = continuation
+        proxyTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var seenTrue = false
+            for await val in stream {
+                self._isSpeaking = val
+                cont?.yield(val)
+                if val { seenTrue = true }
+                else if seenTrue {
+                    seenTrue = false
+                    // After fallback playback ends, rewire back to the resolved backend.
+                    self.proxyBackendId = nil
+                    self.rewireProxy()
+                }
+            }
+        }
+    }
 
     private func rewireProxy() {
         let target = resolvedBackend

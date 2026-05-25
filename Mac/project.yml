@@ -22,11 +22,16 @@ settings:
       - $(inherited)
       - $(SRCROOT)/Vendor
 
-# Phase-2 optional SwiftPM packages. Uncomment in Xcode (or here) once
-# you've decided which version to pin. The Swift code is gated by
-# `#if canImport(whisper)` / `#if canImport(sherpa_onnx)` so the project
-# still builds without them.
-# packages:
+# SwiftPM packages.
+# - onnxruntime: required for Supertonic neural TTS (in-process ONNX inference).
+#   SupertonicTTSBackend is gated by `#if canImport(onnxruntime)` so the project
+#   still builds without it — Supertonic will report "not compiled in".
+# - whisper: optional Phase-2 offline STT (commented out until pinned).
+packages:
+  onnxruntime-swift-package-manager:
+    url: https://github.com/microsoft/onnxruntime-swift-package-manager.git
+    from: "1.16.0"
+# Uncomment to enable offline wake-word STT:
 #   whisper:
 #     url: https://github.com/ggerganov/whisper.cpp
 #     branch: master
@@ -71,7 +76,9 @@ targets:
         DEVELOPMENT_TEAM: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: YES
-    dependencies: []
+    dependencies:
+      - package: onnxruntime-swift-package-manager
+        product: onnxruntime
     # Phase-2 optional drop-ins. Uncomment as you install them — the Swift
     # code is gated by `#if canImport(...)` so the project builds without
     # them.
@@ -83,14 +90,6 @@ targets:
     #   embed: true
     #
     # # Offline STT (whisper.cpp):
-    # #   In Xcode: File → Add Package Dependencies →
-    # #   https://github.com/ggerganov/whisper.cpp
-    # #   Then add to the `packages:` block at the top of this file:
-    # # packages:
-    # #   whisper:
-    # #     url: https://github.com/ggerganov/whisper.cpp
-    # #     branch: master
-    # #   And add this entry under `dependencies:`:
     # - package: whisper
 
   JarvisBrainDaemon:

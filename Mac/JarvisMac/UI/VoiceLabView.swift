@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - VoiceLabView
 
@@ -16,6 +17,11 @@ struct VoiceLabView: View {
 
     private let refreshTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
+    /// The selected backend, if any.
+    private var selectedBackend: (any TTSBackend)? {
+        router.allBackends.first { $0.id == selectedId }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -23,6 +29,9 @@ struct VoiceLabView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     backendPickerSection
+                    if let sel = selectedBackend, !sel.isAvailable {
+                        diagnosticsSection(for: sel)
+                    }
                     testSection
                     Divider().overlay(Color.white.opacity(0.1))
                     benchmarkSection
@@ -104,6 +113,123 @@ struct VoiceLabView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { selectedId = backend.id }
+    }
+
+    // MARK: Backend diagnostics (shown when selected backend is unavailable)
+
+    private func diagnosticsSection(for backend: any TTSBackend) -> some View {
+        let diag    = backend.diagnostics
+        let isSuper = backend.id == "supertonic"
+
+        return VStack(alignment: .leading, spacing: 8) {
+            // Header
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                sectionLabel("SETUP REQUIRED — \(backend.displayName.uppercased())")
+            }
+
+            // Unavailable reason
+            if let reason = diag.unavailableReason {
+                Text(reason)
+                    .foregroundStyle(.orange.opacity(0.85))
+                    .font(.system(size: 10))
+                    .lineLimit(6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Supertonic-specific setup guidance
+            if isSuper {
+                supertonicSetupGuide
+            }
+
+            // Extra info rows
+            if !diag.extraInfo.isEmpty {
+                ForEach(diag.extraInfo.sorted(by: { $0.key < $1.key }), id: \.key) { k, v in
+                    HStack(spacing: 4) {
+                        Text(k + ":")
+                            .foregroundStyle(.white.opacity(0.4))
+                        Text(v)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 9))
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.07))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.orange.opacity(0.25))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var supertonicSetupGuide: some View {
+        let dir = SupertonicModelDirectory.defaultURL
+        return VStack(alignment: .leading, spacing: 6) {
+            Divider().overlay(Color.orange.opacity(0.2))
+
+            // Step-by-step
+            VStack(alignment: .leading, spacing: 3) {
+                Text("SETUP STEPS")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+                stepRow("1", "Download models from Hugging Face (≈ 404 MB):")
+                Text("git lfs install")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.cyan.opacity(0.7))
+                    .padding(.leading, 14)
+                Text("git clone https://huggingface.co/Supertone/supertonic-3 .")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.cyan.opacity(0.7))
+                    .padding(.leading, 14)
+                    .lineLimit(2)
+                stepRow("2", "Place the onnx/ and voice_styles/ folders in:")
+                Text(dir.path)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.leading, 14)
+                    .lineLimit(2)
+                stepRow("3", "Add onnxruntime-swift-package-manager SPM dep (see project.yml)")
+                stepRow("4", "Run xcodegen generate && rebuild")
+            }
+
+            // Action buttons
+            HStack(spacing: 8) {
+                Button("Open Model Folder") {
+                    openSupertonicFolder()
+                }
+                .buttonStyle(LabButtonStyle(color: .orange))
+
+                Button("Copy Clone Command") {
+                    let cmd = "cd \"\(dir.path)\" && git lfs install && " +
+                              "git clone https://huggingface.co/Supertone/supertonic-3 ."
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(cmd, forType: .string)
+                }
+                .buttonStyle(LabButtonStyle(color: .cyan))
+            }
+        }
+    }
+
+    private func stepRow(_ number: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 4) {
+            Text("[\(number)]")
+                .foregroundStyle(.orange.opacity(0.6))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+            Text(text)
+                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 9))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func openSupertonicFolder() {
+        let url = SupertonicModelDirectory.defaultURL
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: Test phrase
