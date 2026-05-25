@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Jarvis.Core.Awareness;
 using Jarvis.Core.Context;
+using Jarvis.Core.Focus;
+using Jarvis.Core.Presence;
 using Jarvis.Core.Settings;
 using Jarvis.Core.Snapshot;
 using Jarvis.DesktopAwareness;
@@ -225,16 +227,26 @@ public class WindowsContextSnapshotTests
     private static AppUsageEntry MakeEntry(string process, WorkflowCategory wf) =>
         new(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5), process, wf, false);
 
+    private static FocusMetrics DefaultFocus => new(
+        SessionStartedAt: DateTimeOffset.UtcNow,
+        FocusDuration: TimeSpan.Zero,
+        AppSwitchesLast10Min: 0,
+        DistractionCount: 0,
+        ProductivityScore: 0,
+        State: FocusState.Working,
+        PrimaryApp: null,
+        PrimaryWorkflow: WorkflowCategory.Unknown);
+
     [Fact]
     public void WindowsContextSnapshot_HashChangesOnAppTransition()
     {
         var builder = new Jarvis.Perception.Context.WindowsContextSnapshotBuilder();
 
-        var snap1 = builder.Build(SemanticSnapshot.Empty, PrivacySafeTimeline.Empty);
+        var snap1 = builder.Build(SemanticSnapshot.Empty, PrivacySafeTimeline.Empty, DefaultFocus, PresenceMode.Work);
 
         var entries = new[] { MakeEntry("Code", WorkflowCategory.Coding) };
         var timeline = new PrivacySafeTimeline(entries);
-        var snap2 = builder.Build(SemanticSnapshot.Empty, timeline);
+        var snap2 = builder.Build(SemanticSnapshot.Empty, timeline, DefaultFocus, PresenceMode.Work);
 
         snap1.Hash.Should().NotBe(snap2.Hash,
             "adding an app transition to the timeline should change the snapshot hash");
@@ -247,6 +259,16 @@ public class DashboardViewModelTests
 {
     private static AppUsageEntry MakeEntry(string process, WorkflowCategory wf) =>
         new(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5), process, wf, false);
+
+    private static FocusMetrics DefaultFocusForDashboard => new(
+        SessionStartedAt: DateTimeOffset.UtcNow,
+        FocusDuration: TimeSpan.Zero,
+        AppSwitchesLast10Min: 0,
+        DistractionCount: 0,
+        ProductivityScore: 0,
+        State: FocusState.Working,
+        PrimaryApp: null,
+        PrimaryWorkflow: WorkflowCategory.Unknown);
 
     [Fact]
     public void DashboardViewModel_ApplyContextSnapshot_RaisesPropertyChanged()
@@ -261,6 +283,8 @@ public class DashboardViewModelTests
             Semantic: SemanticSnapshot.Empty,
             Timeline: timeline,
             RecentProcessNames: new[] { "Code" },
+            Focus: DefaultFocusForDashboard,
+            PresenceMode: PresenceMode.Work,
             Hash: "abc123");
 
         vm.ApplyContextSnapshot(snap);

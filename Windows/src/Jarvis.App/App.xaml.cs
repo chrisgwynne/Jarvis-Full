@@ -1,14 +1,22 @@
 using System.Diagnostics;
 using System.Windows;
+using Jarvis.App.Dashboard;
 using Jarvis.App.Overlay;
 using Jarvis.App.Tray;
 using Jarvis.Core.Awareness;
 using Jarvis.Core.Diagnostics;
+using Jarvis.Core.Focus;
 using Jarvis.Core.Hotkeys;
+using Jarvis.Core.Memory;
+using Jarvis.Core.Presence;
+using Jarvis.Core.Proactive;
 using Jarvis.Core.Settings;
 using Jarvis.Core.State;
 using Jarvis.DesktopAwareness;
 using Jarvis.Diagnostics;
+using Jarvis.Perception.Dashboard;
+using Jarvis.Perception.Presence;
+using Jarvis.Perception.Proactive;
 using Jarvis.Settings;
 using Jarvis.App.Automation;
 using Jarvis.App.Capture;
@@ -154,6 +162,21 @@ public partial class App : System.Windows.Application
         _macBridge.FrameReceived += OnBridgeFrame;
         await _macBridge.StartAsync();
 
+        var focusTracker = _services.GetRequiredService<IFocusSessionTracker>();
+        await focusTracker.StartAsync();
+
+        var presenceManager = _services.GetRequiredService<IPresenceModeManager>();
+        await presenceManager.StartAsync();
+
+        var nudgeEngine = _services.GetRequiredService<IProactiveNudgeEngine>();
+        await nudgeEngine.StartAsync();
+        nudgeEngine.NudgeReady += (_, nudge) =>
+            diagnostics.Record(DiagnosticLevel.Info, "proactive", nudge.Key,
+                new Dictionary<string, object?> { ["msg"] = nudge.Message });
+
+        var contextEngine = _services.GetRequiredService<Jarvis.Core.Context.IWindowsContextEngine>();
+        await contextEngine.StartAsync();
+
         _contextPublisher = _services.GetRequiredService<ISidecarContextPublisher>();
         await _contextPublisher.StartAsync();
 
@@ -243,7 +266,8 @@ public partial class App : System.Windows.Application
             openChat: ShowChat,
             openLlmSettings: ShowLlmSettings,
             openRedactionPreview: ShowRedactionPreview,
-            exportConversation: ExportConversation);
+            exportConversation: ExportConversation,
+            openDashboard: ShowDashboard);
         _tray.QuitRequested += (_, _) => RequestShutdown("tray quit");
 
         // Real global hotkeys via RegisterHotKey.
@@ -257,6 +281,19 @@ public partial class App : System.Windows.Application
         _hotkeyService.Register("ClickLastTarget", "Ctrl+Shift+Enter", () => _ = ClickLastTargetAsync());
         _hotkeyService.Register("OpenChat", "Ctrl+Shift+Space", ShowChat);
         _hotkeyService.Register("QuitJarvis", "Ctrl+Shift+Q", () => RequestShutdown("hotkey quit"));
+    }
+
+    private DashboardWindow? _dashboardWindow;
+
+    private void ShowDashboard()
+    {
+        if (_services is null) return;
+        if (_dashboardWindow is { IsLoaded: true }) { _dashboardWindow.Activate(); return; }
+        var vm = _services.GetRequiredService<DashboardViewModel>();
+        _dashboardWindow = new DashboardWindow(vm);
+        _dashboardWindow.Closed += (_, _) => _dashboardWindow = null;
+        _dashboardWindow.Show();
+        _dashboardWindow.Activate();
     }
 
     private Jarvis.App.Llm.LlmSettingsWindow? _llmSettingsWindow;
@@ -973,5 +1010,45 @@ public partial class App : System.Windows.Application
             diagnostics: sp.GetService<IDiagnostics>()));
 
         services.AddTransient<OverlayWindow>();
+
+        // Context awareness
+        services.AddSingleton<IAppUsageTracker>(sp => new AppUsageTracker(
+            sp.GetRequiredService<IDesktopAwarenessService>(),
+            sp.GetRequiredService<IWorkflowCategorizer>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
+
+        // Focus + presence + proactive
+        services.AddSingleton<IFocusSessionTracker>(sp => new FocusSessionTracker(
+            sp.GetRequiredService<IAppUsageTracker>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
+        services.AddSingleton<IPresenceModeManager>(sp => new PresenceModeManager(
+            sp.GetRequiredService<IFocusSessionTracker>(),
+            sp.GetRequiredService<IAppUsageTracker>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
+        services.AddSingleton<ISessionMemoryStore, SessionMemoryStore>();
+        services.AddSingleton<IProactiveNudgeEngine>(sp => new ProactiveNudgeEngine(
+            sp.GetRequiredService<IFocusSessionTracker>(),
+            sp.GetRequiredService<IPresenceModeManager>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Proactivity));
+
+        // Context engine
+        services.AddSingleton<Jarvis.Core.Context.IWindowsContextSnapshotBuilder, Jarvis.Perception.Context.WindowsContextSnapshotBuilder>();
+        services.AddSingleton<Jarvis.Core.Context.IWindowsContextEngine>(sp => new Jarvis.Perception.Context.WindowsContextEngine(
+            sp.GetRequiredService<PerceptionService>(),
+            sp.GetRequiredService<IAppUsageTracker>(),
+            sp.GetRequiredService<Jarvis.Core.Context.IWindowsContextSnapshotBuilder>(),
+            sp.GetRequiredService<IFocusSessionTracker>(),
+            sp.GetRequiredService<IPresenceModeManager>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.ContextEngine,
+            sp.GetService<IDiagnostics>()));
+
+        // Dashboard
+        services.AddSingleton<DashboardViewModel>(sp =>
+        {
+            var vm = new DashboardViewModel();
+            var engine = sp.GetRequiredService<Jarvis.Core.Context.IWindowsContextEngine>();
+            engine.ContextChanged += (_, snap) => vm.ApplyContextSnapshot(snap);
+            return vm;
+        });
     }
 }

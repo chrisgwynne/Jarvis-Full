@@ -1,3 +1,5 @@
+using Jarvis.Core.Focus;
+using Jarvis.Core.Presence;
 using Jarvis.Core.Snapshot;
 
 namespace Jarvis.Core.Context;
@@ -12,6 +14,8 @@ public sealed record WindowsContextSnapshot(
     SemanticSnapshot Semantic,
     PrivacySafeTimeline Timeline,
     string[] RecentProcessNames,
+    FocusMetrics Focus,
+    PresenceMode PresenceMode,
     string Hash);
 
 /// <summary>
@@ -20,5 +24,9 @@ public sealed record WindowsContextSnapshot(
 /// </summary>
 public interface IWindowsContextSnapshotBuilder
 {
-    WindowsContextSnapshot Build(SemanticSnapshot semantic, PrivacySafeTimeline timeline);
+    WindowsContextSnapshot Build(
+        SemanticSnapshot semantic,
+        PrivacySafeTimeline timeline,
+        FocusMetrics focus,
+        PresenceMode presenceMode);
 }

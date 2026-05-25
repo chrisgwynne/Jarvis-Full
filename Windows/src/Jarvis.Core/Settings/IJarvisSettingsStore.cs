@@ -26,6 +26,8 @@ public sealed record JarvisSettings
     public BrainGatewayConfig Gateway { get; init; } = new();
     /// <summary>Context engine: app usage timeline, snapshot building, bridge enrichment.</summary>
     public ContextEngineSettings ContextEngine { get; init; } = new();
+    /// <summary>Proactive nudge settings: distraction alerts, focus milestones, suppression rules.</summary>
+    public ProactivitySettings Proactivity { get; init; } = new();
 
     public static JarvisSettings Defaults => new();
 }
@@ -182,6 +184,21 @@ public sealed record AwarenessSettings
     public bool TrackIdle { get; init; } = true;
     /// <summary>Maximum number of app-usage entries retained by AppUsageTracker.</summary>
     public int AppUsageHistoryDepth { get; init; } = 20;
+    /// <summary>When true, enables developer presence mode and verbose diagnostics.</summary>
+    public bool DevMode { get; init; } = false;
+}
+
+public sealed record ProactivitySettings
+{
+    public bool Enabled { get; init; } = true;
+    /// <summary>Minimum minutes between proactive suggestions.</summary>
+    public int MinGapMinutes { get; init; } = 30;
+    /// <summary>When true, suppress suggestions during Focus, Gaming, Presentation, Silent modes.</summary>
+    public bool SuppressDuringFocus { get; init; } = true;
+    public bool SuppressDuringGaming { get; init; } = true;
+    public bool SuppressDuringPresentation { get; init; } = true;
+    public bool DistractionAlerts { get; init; } = true;
+    public bool FocusMilestones { get; init; } = true;
 }
 
 /// <summary>

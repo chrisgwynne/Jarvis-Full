@@ -17,7 +17,8 @@ public enum WorkflowCategory
     Editing,
     TerminalWork,
     Communication,
-    Media
+    Media,
+    Gaming
 }
 
 /// <summary>

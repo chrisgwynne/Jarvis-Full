@@ -121,6 +121,12 @@ public sealed class ContextPayload
     [JsonPropertyName("recentApps")] public string[]? RecentApps { get; set; }
     /// <summary>Compact workflow timeline summary, e.g. "Coding(15m)→Browsing(3m)→Coding".</summary>
     [JsonPropertyName("timelineSummary")] public string? TimelineSummary { get; set; }
+
+    // ─── Focus / presence additions ────────────────────────────────────────────────
+    [JsonPropertyName("focusMinutes")] public double? FocusMinutes { get; set; }
+    [JsonPropertyName("presenceMode")] public string? PresenceMode { get; set; }
+    [JsonPropertyName("productivityScore")] public double? ProductivityScore { get; set; }
+    [JsonPropertyName("appSwitchesLast10Min")] public int? AppSwitchesLast10Min { get; set; }
 }
 
 public static class SidecarFrameTypes
