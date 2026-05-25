@@ -2727,6 +2727,7 @@ final class JarvisController {
         conversationalSessionActive = true
         if conversationalArmed { armConversationalMode() }
         timingEngine.userStoppedSpeaking()  // final transcript = end of user turn
+        SpeechTurnStore.shared.update { $0.transcriptLength = text.count }
         ExecutionTracer.shared.addStep("transcript", detail: String(text.prefix(60)), runtimeID: "conversation")
         conversation.cancelTimeout()  // user spoke — cancel any silence timeout
 
@@ -3055,6 +3056,7 @@ final class JarvisController {
             ) {
                 latency.mark(.fastRoute)
                 latency.measure(from: .sttFinal, to: .fastRoute, recordAs: .fastRoute)
+                SpeechTurnStore.shared.update { $0.route = .fastCommand }
                 state.log("pipeline", .info,
                     "fast_response_hit source=\(fast.source.rawValue) conf=\(String(format: "%.2f", fast.confidence))")
                 speak(fast.text)
@@ -3099,6 +3101,7 @@ final class JarvisController {
                 intentLabel: intentLabel,
                 resolvedBy: routedVia
             ))
+            SpeechTurnStore.shared.update { $0.route = .directCommand }
             await execute(intent)
 
             // Track A — conversational response for the aside after silent execution
@@ -4389,6 +4392,11 @@ final class JarvisController {
         case .showRuntimeDiagnostics:
             overlayManager.open(.runtimeDiagnostics)
             state.sessionLastOverlayKind = .runtimeDiagnostics
+
+        case .showSpeechLatency:
+            openOverlay(.speechLatency)
+            speak(renderer.render(ResponseKey.showSpeechLatency))
+            state.sessionLastOverlayKind = .speechLatency
 
         // Focus awareness (Sprint W)
         case .showFocus:
@@ -6097,6 +6105,7 @@ final class JarvisController {
             responseKey: logKey,
             spokenText: finalText)
 
+        SpeechTurnStore.shared.update { $0.replyLength = finalText.count }
         state.lastSpoken = finalText
         state.sessionLastSpoken = finalText
         state.lastBargeInReason = nil
@@ -6527,6 +6536,7 @@ final class JarvisController {
             timeoutSeconds: 10)
 
         latency.mark(.llmStart)
+        SpeechTurnStore.shared.update { $0.llmUsed = true; $0.route = .llmFallback }
         let response: LLMResponse
         do {
             response = try await llmRouter.complete(req, circuitBreaker: circuitBreaker)

@@ -256,6 +256,7 @@ enum Intent: Equatable {
     case whatFailedOnScreen       // "what failed" / "what's the error"
     case showAmbientContextOverlay   // debug overlay
     case showRuntimeDiagnostics      // RuntimeCoordinator health overlay
+    case showSpeechLatency           // speech-to-speech latency diagnostics
     case showSpatialInteraction      // "spatial mode" — hand tracking overlay
     case hideSpatialInteraction      // "close spatial" — dismiss overlay
     case enableAmbientContext     // "start ambient context" / "enable background awareness"

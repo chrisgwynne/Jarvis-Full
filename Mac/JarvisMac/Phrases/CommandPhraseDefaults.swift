@@ -653,6 +653,14 @@ enum CommandPhraseDefaults {
             ("ambient debug",                   .exact),
         ]),
 
+        def("show_speech_latency", "Show Speech Latency", .screen,
+            "Open the speech-to-speech latency diagnostics overlay.", .low, [
+            ("speech latency",                  .exact),
+            ("show speech latency",             .exact),
+            ("latency diagnostics",             .exact),
+            ("pipeline timing",                 .exact),
+        ]),
+
         def("show_runtime_diagnostics", "Show Runtime Diagnostics", .screen,
             "Open the runtime subsystem health overlay.", .low, [
             ("runtime diagnostics",             .exact),

@@ -228,6 +228,7 @@ final class LLMFallbackHandler {
         }
 
         latency.mark(.llmStart)
+        SpeechTurnStore.shared.update { $0.llmUsed = true; $0.route = .llmFallback }
         let req = LLMRequest(
             systemPrompt: composedSystemPrompt,
             userPrompt:   rawText,

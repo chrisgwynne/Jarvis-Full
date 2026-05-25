@@ -97,6 +97,8 @@ import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolRegistry
 import com.jarvis.assistant.runtime.DrivingModeManager
 import com.jarvis.assistant.util.LatencyTracker
+import com.jarvis.assistant.util.SpeechTurnStore
+import com.jarvis.assistant.util.TurnRoute
 import com.jarvis.assistant.tools.framework.ToolResult
 import com.jarvis.assistant.util.JarvisNotificationHelper
 import com.jarvis.assistant.util.SettingsStore
@@ -2298,6 +2300,7 @@ class JarvisRuntime(
 
                     consecutiveFastFails = 0
                     LatencyTracker.mark("STT_COMPLETE")
+                    SpeechTurnStore.setTranscriptLength(transcript.length)
                     ListeningLifecycleMonitor.transition(ListeningLifecycleMonitor.Phase.Processing)
                     LatencyTracker.mark("TURN_TIMING_STT_FINAL")
                     // [TRANSCRIPT_RAW] / [TRANSCRIPT_NORMALIZED] are the
@@ -3897,6 +3900,8 @@ class JarvisRuntime(
 
                     if (matched != null) {
                         val (tool, input) = matched
+                        SpeechTurnStore.setRoute(TurnRoute.DIRECT_COMMAND)
+                        SpeechTurnStore.setToolUsed(true)
                         // ROUTE_LOCAL_MATCH / ROUTE_LOCAL_EXECUTE — explicit
                         // grep targets for the local-first routing path.
                         Log.d(TAG, "[ROUTE_LOCAL_MATCH] tool=${tool.name} transcript.len=${transcript.length}")
@@ -4024,6 +4029,8 @@ class JarvisRuntime(
                                 continue
                             }
                             is ToolDispatcher.DispatchResult.AugmentedLlm -> {
+                                SpeechTurnStore.setLlmUsed(true)
+                                SpeechTurnStore.setRoute(TurnRoute.LLM_WITH_TOOL)
                                 // BRAIN OWNERSHIP NOTE: a local device tool returned an
                                 // augmented transcript that still requires LLM completion
                                 // (e.g. camera-vision or HAContext). This local LLM call
@@ -4052,6 +4059,8 @@ class JarvisRuntime(
                                 continue
                             }
                             is ToolDispatcher.DispatchResult.LlmFollowUp -> {
+                                SpeechTurnStore.setLlmUsed(true)
+                                SpeechTurnStore.setRoute(TurnRoute.LLM_WITH_TOOL)
                                 if (r.spokenFeedback.isNotBlank()) speakAndRecord(r.spokenFeedback)
                                 // BRAIN OWNERSHIP NOTE: local tool requested an LLM follow-up
                                 // to enrich its result. If the gateway is Connected this is
@@ -4148,6 +4157,8 @@ class JarvisRuntime(
                     Log.d(TAG, "[FALLBACK_LOCAL_LLM_BEGIN] reason=no_local_match")
                     Log.d(TAG, "[MEMORY_RETRIEVE_BEGIN] transcript.len=${transcript.length}")
                     LatencyTracker.mark("LLM_REQUEST_START")
+                    SpeechTurnStore.setLlmUsed(true)
+                    SpeechTurnStore.setRoute(TurnRoute.LLM_FALLBACK)
                     Log.d(TAG, "[LLM_REQUEST_START] online=$isOnline")
                     streamAndSpeak(transcript, isOnline)
                     Log.d(TAG, "[MEMORY_RETRIEVE_DONE] (folded into streamAndSpeak)")
@@ -4892,6 +4903,8 @@ class JarvisRuntime(
         val formatted = if (drivingModeManager.isDriving) {
             base.split(Regex("(?<=[.!?])\\s+")).take(2).joinToString(" ")
         } else base
+
+        SpeechTurnStore.setReplyLength(formatted.length)
 
         // Central reply log — every spoken reply is recorded before TTS fires.
         JarvisReplyLogger.get().append(

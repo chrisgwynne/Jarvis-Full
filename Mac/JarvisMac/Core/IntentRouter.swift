@@ -570,6 +570,9 @@ struct IntentRouter {
         if t.contains("runtime diagnostics") || t.contains("subsystem health") || t.contains("system runtime") {
             return .showRuntimeDiagnostics
         }
+        if t.contains("speech latency") || t.contains("latency diagnostics") || t.contains("pipeline timing") {
+            return .showSpeechLatency
+        }
         if t.contains("ping pong") || t.contains("pingpong") || t.contains("ping-pong")
             || t == "pong" || t.contains("play pong") {
             return .playPingPong

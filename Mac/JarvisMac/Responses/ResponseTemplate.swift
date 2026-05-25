@@ -557,6 +557,9 @@ enum ResponseKey {
     static let windowsTiled         = "spatial.windows_tiled"
     static let windowFocused        = "spatial.window_focused"
 
+    // Speech Latency Diagnostics
+    static let showSpeechLatency = "diag.show_speech_latency"
+
     // Focus Awareness (Sprint W)
     static let showFocus      = "context.show_focus"
     static let explainFocus   = "context.explain_focus"

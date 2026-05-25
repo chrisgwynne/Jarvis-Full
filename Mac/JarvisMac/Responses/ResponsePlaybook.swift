@@ -2021,6 +2021,13 @@ enum ResponsePlaybook {
             "{summary}",
         ],
 
+        // Speech Latency Diagnostics
+        ResponseKey.showSpeechLatency: [
+            "Opening speech latency diagnostics.",
+            "Here's the pipeline timing breakdown.",
+            "Showing latency overlay.",
+        ],
+
         // Focus Awareness (Sprint W)
         ResponseKey.showFocus: [
             "Opening focus diagnostics.",
