@@ -59,8 +59,14 @@ class SpeechCapture(private val context: Context) {
         private const val DEFAULT_VAD_SILENCE_MS     = 350L
 
         // Mic retry delays (ms) used when SpeechRecognizer returns ERROR_AUDIO
-        // because the previous session's mic hasn't released yet.
-        private val MIC_RETRY_DELAYS = longArrayOf(150L, 150L, 200L)
+        // because the previous session's mic hasn't released yet.  Bumped
+        // from 150/150/200 (500 ms total) to cover slower AudioRecord
+        // releases on older / power-saving devices — the wake detector's
+        // teardown runs asynchronously on Dispatchers.Default and can take
+        // 700–1200 ms before the mic is actually free.  When the mic is
+        // available the first attempt succeeds immediately, so this
+        // expanded ceiling only costs latency on a genuine handoff race.
+        private val MIC_RETRY_DELAYS = longArrayOf(200L, 300L, 500L, 700L)
     }
 
     // Active per-profile thresholds — updated by setMicProfile().

@@ -63,8 +63,16 @@ object ListenerDiagnostics {
     @Volatile var lastListenStopReason:  String? = null; private set
     @Volatile var lastListenStopTimeMs:  Long    = 0L;  private set
 
-    @Volatile var lastThinkingStartMs:   Long    = 0L
-    @Volatile var lastListeningStartMs:  Long    = 0L
+    // Per-state entry timestamps used by the listener watchdog to detect
+    // stuck states.  Each is written from [JarvisRuntime.syncState] on the
+    // matching transition; the watchdog reads them on its tick and force-
+    // recovers any state that's been held longer than its threshold.  A
+    // zero value means "never entered" and the watchdog skips it.
+    @Volatile var lastThinkingStartMs:      Long = 0L
+    @Volatile var lastListeningStartMs:     Long = 0L
+    @Volatile var lastSpeakingStartMs:      Long = 0L
+    @Volatile var lastWakeDetectedStartMs:  Long = 0L
+    @Volatile var lastInterruptedStartMs:   Long = 0L
 
     @Volatile var lastAudioFocusEvent:   String? = null
     @Volatile var lastOverlayAttempt:    String? = null
@@ -162,6 +170,11 @@ object ListenerDiagnostics {
         lastOverlayBlockReason = null
         currentListeningState = "UNKNOWN"
         currentRole           = "UNKNOWN"
+        lastThinkingStartMs       = 0L
+        lastListeningStartMs      = 0L
+        lastSpeakingStartMs       = 0L
+        lastWakeDetectedStartMs   = 0L
+        lastInterruptedStartMs    = 0L
         watchdogRestartCount.set(0)
         lastWatchdogRestartMs = 0L
         pendingRemoteRouteId = null
