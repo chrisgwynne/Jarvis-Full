@@ -72,6 +72,9 @@ class BrainGatewaySettingsRepository(private val store: SettingsStore) {
         store.gatewayLastSeenMacAt   = 0L
     }
 
+    /** Returns the stable device UUID, generating one if none has been persisted yet. */
+    fun stableDeviceId(): String = store.gatewayDeviceId.ifBlank { ensureDeviceId() }
+
     private fun ensureDeviceId(): String {
         val id = UUID.randomUUID().toString()
         store.gatewayDeviceId = id

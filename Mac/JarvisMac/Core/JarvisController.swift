@@ -37,6 +37,7 @@ final class JarvisController {
     var tts: TextToSpeaking
     private let appleTTS: AVSpeechTTS     // always alive as Apple fallback
     let piperTTS: PiperTTS       // always alive; active only when selected
+    let ttsRouter: TTSBackendRouter      // routes speak() to the active backend
     let pronunciationDictionary: PronunciationDictionary
     let speechPreprocessor: SpeechPreprocessor
     private(set) var wakeWord: WakeWordDetecting
@@ -323,6 +324,12 @@ final class JarvisController {
     /// sets this so its confirmation ("Turning on…") is suppressed.
     var suppressNextSpeak = false
 
+    /// Source tag for the next speak() call. Consumed and reset to .system after each speak.
+    /// Callers that know the semantic origin (template / llm / command) should set this before
+    /// calling speak() so the reply log has meaningful source attribution.
+    var _pendingReplySource: ReplySource = .system
+    var _pendingResponseKey: String? = nil
+
     // MARK: - Remote brain routing (Phase 4 daemon bridge)
     /// Closure installed during handleRemoteTranscript to capture the first spoken text.
     /// Cleared immediately after the routing pipeline returns.
@@ -391,8 +398,19 @@ final class JarvisController {
         pTTS.fallbackTTS = aTTS
         self.appleTTS = aTTS
         self.piperTTS  = pTTS
-        // Active engine depends on saved pref
-        self.tts = prefs.current.ttsEngine == .piper ? pTTS : aTTS
+        // Build the modular TTS router; it acts as the single tts endpoint.
+        let piperBackend     = PiperTTSBackend(piper: pTTS)
+        let systemBackend    = SystemTTSBackend(apple: aTTS)
+        let supertonicBackend = SupertonicTTSBackend()
+        let routerBackendId  = prefs.current.ttsBackendId
+        let router = TTSBackendRouter(
+            piper:      piperBackend,
+            system:     systemBackend,
+            supertonic: supertonicBackend,
+            preferredBackendId: routerBackendId
+        )
+        self.ttsRouter = router
+        self.tts = router
         // Speech preprocessing (pronunciation + markdown stripping)
         let pronDict = PronunciationDictionary()
         self.pronunciationDictionary = pronDict
@@ -754,6 +772,7 @@ final class JarvisController {
         // Extracted to `rewireSpeakingObserver()` so it can be called again
         // when the TTS engine is switched at runtime.
         rewireSpeakingObserver()
+        ttsRouter.start()
 
         // 7. Wake word — gated by subsystemWakeWordEnabled
         if prefs.current.subsystemWakeWordEnabled {
@@ -1402,7 +1421,7 @@ final class JarvisController {
         // Phase 4 — wire DaemonAppBridge → Mac brain runtime (daemon-centric architecture)
         // DaemonAppBridge always connects to the daemon (JarvisBrainDaemon on port 8765).
         // When the daemon is not running, DaemonAppBridge retries with exponential backoff.
-        DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform in
+        DaemonAppBridge.shared.onTranscript = { [weak self] transcript, deviceId, platform, correlationId in
             guard let self else { return }
             let ctx = RemoteDeviceContext(
                 deviceId: deviceId,
@@ -1410,7 +1429,7 @@ final class JarvisController {
                 deviceName: nil,
                 capabilities: [],
                 receivedAt: Date(),
-                routeId: UUID().uuidString
+                routeId: correlationId
             )
             Task { @MainActor in
                 let response = await self.handleRemoteTranscript(transcript, context: ctx)
@@ -2721,6 +2740,7 @@ final class JarvisController {
         conversationalSessionActive = true
         if conversationalArmed { armConversationalMode() }
         timingEngine.userStoppedSpeaking()  // final transcript = end of user turn
+        SpeechTurnStore.shared.update { $0.transcriptLength = text.count }
         ExecutionTracer.shared.addStep("transcript", detail: String(text.prefix(60)), runtimeID: "conversation")
         conversation.cancelTimeout()  // user spoke — cancel any silence timeout
 
@@ -3049,6 +3069,7 @@ final class JarvisController {
             ) {
                 latency.mark(.fastRoute)
                 latency.measure(from: .sttFinal, to: .fastRoute, recordAs: .fastRoute)
+                SpeechTurnStore.shared.update { $0.route = .fastCommand }
                 state.log("pipeline", .info,
                     "fast_response_hit source=\(fast.source.rawValue) conf=\(String(format: "%.2f", fast.confidence))")
                 speak(fast.text)
@@ -3093,6 +3114,7 @@ final class JarvisController {
                 intentLabel: intentLabel,
                 resolvedBy: routedVia
             ))
+            SpeechTurnStore.shared.update { $0.route = .directCommand }
             await execute(intent)
 
             // Track A — conversational response for the aside after silent execution
@@ -3209,19 +3231,26 @@ final class JarvisController {
         remoteResponseCapture = nil
         suppressNextSpeak = false
 
-        let responseText = capturedResponse ?? ""
+        let rawResponseText = capturedResponse ?? ""
 
         // 8. Show remote activity in Mac UI if enabled
         if prefs.current.showRemoteActivityInMacUI {
             state.lastRemoteActivityText = "[\(context.platform)] \(String(trimmed.prefix(80)))"
         }
 
-        // 9. Determine outcome
+        // 9a. Empty / whitespace guard — never send a blank reply.
+        //     The remote device's TTS engine must not receive empty text.
+        let responseText = cappedForRemoteTts(rawResponseText)
         if responseText.isEmpty {
+            // If the raw text was also blank the pipeline produced nothing useful.
+            // Log the reason and return an error so the device recovers gracefully.
+            let reason = rawResponseText.isEmpty ? "no_response_generated" : "response_blank_after_cap"
             state.remoteBrainErrorCount += 1
-            return .error("no_response_generated", routeId: context.routeId)
+            return .error(reason, routeId: context.routeId)
         }
 
+        // 9b. Final outcome — responseText is already capped to 3 sentences / 320 chars
+        //     matching Android's ResponseFormatter contract.
         state.remoteTranscriptHandledCount += 1
         state.lastRemoteReplyAt = Date()
         state.remoteReplySentCount += 1
@@ -4376,6 +4405,16 @@ final class JarvisController {
         case .showRuntimeDiagnostics:
             overlayManager.open(.runtimeDiagnostics)
             state.sessionLastOverlayKind = .runtimeDiagnostics
+
+        case .showSpeechLatency:
+            openOverlay(.speechLatency)
+            speak(renderer.render(ResponseKey.showSpeechLatency))
+            state.sessionLastOverlayKind = .speechLatency
+
+        case .showVoiceLab:
+            openOverlay(.voiceLab)
+            speak(renderer.render(ResponseKey.showVoiceLab))
+            state.sessionLastOverlayKind = .voiceLab
 
         // Focus awareness (Sprint W)
         case .showFocus:
@@ -6072,6 +6111,19 @@ final class JarvisController {
         lastSpeakCalledAt = Date()   // synchronous sentinel — post-loop reads this
         let preprocessed = speechPreprocessor.process(text)
         let finalText = applyAddress(to: preprocessed)
+
+        // Central reply log — every spoken reply is recorded here before TTS fires.
+        let logSource = _pendingReplySource
+        let logKey = _pendingResponseKey
+        _pendingReplySource = .system
+        _pendingResponseKey = nil
+        JarvisReplyLogger.shared.append(
+            source: logSource,
+            intent: nil,
+            responseKey: logKey,
+            spokenText: finalText)
+
+        SpeechTurnStore.shared.update { $0.replyLength = finalText.count }
         state.lastSpoken = finalText
         state.sessionLastSpoken = finalText
         state.lastBargeInReason = nil
@@ -6502,6 +6554,7 @@ final class JarvisController {
             timeoutSeconds: 10)
 
         latency.mark(.llmStart)
+        SpeechTurnStore.shared.update { $0.llmUsed = true; $0.route = .llmFallback }
         let response: LLMResponse
         do {
             response = try await llmRouter.complete(req, circuitBreaker: circuitBreaker)
@@ -7523,14 +7576,25 @@ final class JarvisController {
         prefs.update { $0.ttsEngine = engine }
         switch engine {
         case .appleSystem:
-            tts = appleTTS
+            let id = "system_apple"
+            ttsRouter.setActiveBackend(id: id)
+            prefs.update { $0.ttsBackendId = id }
         case .piper:
             piperTTS.configure(prefs: prefs.current)
-            tts = piperTTS
+            let id = "piper_onnx"
+            ttsRouter.setActiveBackend(id: id)
+            prefs.update { $0.ttsBackendId = id }
         }
-        // Re-wire observer to the new engine's stream — the old task is
-        // watching a stream that no longer emits updates.
+        // tts is the router (stable stream) — rewiring is a no-op but
+        // kept for safety in case a caller swapped tts directly.
         rewireSpeakingObserver()
+        refreshTTSState()
+    }
+
+    /// Set the active TTS backend by ID and persist the choice.
+    func setTTSBackendById(_ id: String) {
+        ttsRouter.setActiveBackend(id: id)
+        prefs.update { $0.ttsBackendId = id }
         refreshTTSState()
     }
 
@@ -7579,7 +7643,24 @@ final class JarvisController {
     /// Refreshes AppState TTS diagnostics from the currently active engine.
     func refreshTTSState() {
         state.ttsEngine = prefs.current.ttsEngine
-        if let apple = tts as? AVSpeechTTS {
+        // Resolve the active backend through the router when available.
+        let active: any TextToSpeaking
+        if let router = tts as? TTSBackendRouter {
+            active = router.resolvedBackend
+        } else {
+            active = tts
+        }
+        if let sb = active as? SystemTTSBackend {
+            let v = sb.apple.resolvedVoice
+            state.ttsVoiceName       = v?.name ?? "System Default"
+            state.ttsVoiceIdentifier = v?.identifier ?? ""
+            state.ttsVoiceLanguage   = v?.language ?? ""
+        } else if let pb = active as? PiperTTSBackend {
+            let p = pb.piper
+            state.ttsVoiceName       = URL(fileURLWithPath: p.modelPath).lastPathComponent
+            state.ttsVoiceIdentifier = p.modelPath
+            state.ttsVoiceLanguage   = "custom"
+        } else if let apple = active as? AVSpeechTTS {
             if let v = apple.resolvedVoice {
                 state.ttsVoiceName       = v.name
                 state.ttsVoiceIdentifier = v.identifier
@@ -7589,7 +7670,7 @@ final class JarvisController {
                 state.ttsVoiceIdentifier = ""
                 state.ttsVoiceLanguage   = ""
             }
-        } else if let piper = tts as? PiperTTS {
+        } else if let piper = active as? PiperTTS {
             state.ttsVoiceName       = URL(fileURLWithPath: piper.modelPath).lastPathComponent
             state.ttsVoiceIdentifier = piper.modelPath
             state.ttsVoiceLanguage   = "custom"
@@ -7839,6 +7920,50 @@ final class JarvisController {
     }
 
     // MARK: - Text helpers
+
+    /// Apply a spoken-reply cap matching Android's ResponseFormatter rules.
+    ///
+    /// Remote replies are spoken by the Android or Windows TTS engine.  Android's
+    /// `ResponseFormatter` caps at 3 sentences / 320 chars, so this function mirrors
+    /// that contract on the Mac side before the reply is sent over the wire.
+    ///
+    /// Rules applied in order:
+    ///   1. Whitespace-only guard — returns empty string (caller must handle).
+    ///   2. Strip leading/trailing whitespace.
+    ///   3. Cap at `maxSentences` sentences (3 by default).
+    ///   4. Hard-cap at `maxChars` (320 by default), breaking on sentence boundary.
+    func cappedForRemoteTts(_ text: String, maxSentences: Int = 3, maxChars: Int = 320) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        // Split on sentence-ending punctuation followed by whitespace.
+        // This mirrors ResponseFormatter.splitSentences() in Android.
+        var sentences: [String] = []
+        var current = ""
+        for char in trimmed {
+            current.append(char)
+            if (char == "." || char == "!" || char == "?") {
+                let s = current.trimmingCharacters(in: .whitespaces)
+                if !s.isEmpty { sentences.append(s) }
+                current = ""
+            }
+        }
+        // Remaining non-punctuated tail
+        let tail = current.trimmingCharacters(in: .whitespaces)
+        if !tail.isEmpty { sentences.append(tail) }
+
+        let capped = sentences.prefix(maxSentences).joined(separator: " ")
+        guard capped.count > maxChars else { return capped }
+
+        // Hard char cap — prefer sentence boundary inside the limit.
+        let truncated = String(capped.prefix(maxChars))
+        let terminators: [Character] = [".", "!", "?"]
+        if let lastTerm = truncated.lastIndex(where: { terminators.contains($0) }),
+           truncated.distance(from: truncated.startIndex, to: lastTerm) > maxChars / 2 {
+            return String(truncated[...lastTerm]).trimmingCharacters(in: .whitespaces)
+        }
+        return truncated.trimmingCharacters(in: .whitespaces)
+    }
 
     /// Truncate `text` to at most `maxChars` characters, breaking on sentence
     /// boundaries where possible, for spoken summaries.

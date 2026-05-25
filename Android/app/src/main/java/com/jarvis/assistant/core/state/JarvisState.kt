@@ -22,6 +22,11 @@ package com.jarvis.assistant.core.state
  *       ├─► MIC_UNAVAILABLE      (3 fast failures in a row)
  *       └─► INTERRUPTED          (barge-in during listen)
  *
+ *   AWAITING_REMOTE_REPLY
+ *       ├─► SPEAKING             (reply.final received → TTS)
+ *       ├─► IDLE_WAKE            (timeout / nack / bridge disconnect)
+ *       └─► INTERRUPTED          (barge-in while waiting)
+ *
  *   THINKING
  *       ├─► TOOL_RUNNING         (tool matched)
  *       ├─► SPEAKING             (LLM reply ready)
@@ -68,6 +73,13 @@ sealed class JarvisState {
 
     /** SpeechRecognizer open; waiting for the user to speak. */
     object Listening : JarvisState()
+
+    /**
+     * Transcript forwarded to Mac brain; waiting for reply.final.
+     * STT and wake word are blocked until we receive a reply, timeout, nack,
+     * or the bridge disconnects.  Interruption (barge-in) still works.
+     */
+    data class AwaitingRemoteReply(val routeId: String, val startedAt: Long) : JarvisState()
 
     /** Transcript captured; LLM inference in progress. */
     object Thinking : JarvisState()
@@ -167,7 +179,8 @@ sealed class JarvisState {
     /** True if we're in any active pipeline state (not idle/stopped). */
     val isPipelineActive: Boolean
         get() = this is WakeDetected || this is Listening || this is Thinking ||
-                this is ToolRunning || this is Speaking   || this is Interrupted
+                this is ToolRunning || this is Speaking   || this is Interrupted ||
+                this is AwaitingRemoteReply
 
     /**
      * True while the runtime is inside any call-handling state — incoming or outgoing.
@@ -185,7 +198,7 @@ sealed class JarvisState {
     fun toLegacyState(): String = when (this) {
         is Listening, is Interrupted,
         is WaitingCallCommand                            -> "LISTENING"
-        is Thinking, is ToolRunning,
+        is Thinking, is ToolRunning, is AwaitingRemoteReply,
         is IncomingCallAlert, is ExecutingCallAction     -> "PROCESSING"
         is Speaking                                      -> "SPEAKING"
         is OfflineFallback                               -> "PROCESSING"

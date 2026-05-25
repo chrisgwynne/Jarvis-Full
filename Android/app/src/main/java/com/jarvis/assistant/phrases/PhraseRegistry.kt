@@ -740,6 +740,114 @@ object PhraseRegistry {
                 availableVars = emptyList(),
             )
         )
+
+        // ── FAILURES ─────────────────────────────────────────────────────────
+        // Previously hardcoded in FailurePhrases.kt — now editable via the phrase library.
+
+        put(PhraseKey.FAILURE_GENERIC, PhraseEntry(
+            key = PhraseKey.FAILURE_GENERIC, category = PhraseCategory.ERRORS,
+            defaultText = "That didn't work.", description = "All-purpose failure with no specific context.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_SOMETHING_WENT_WRONG, PhraseEntry(
+            key = PhraseKey.FAILURE_SOMETHING_WENT_WRONG, category = PhraseCategory.ERRORS,
+            defaultText = "Something went wrong.", description = "Internal / unexpected error.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_AUDIO_UNAVAILABLE, PhraseEntry(
+            key = PhraseKey.FAILURE_AUDIO_UNAVAILABLE, category = PhraseCategory.ERRORS,
+            defaultText = "Audio isn't available right now.", description = "Audio service is unavailable.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_CAMERA_UNAVAILABLE, PhraseEntry(
+            key = PhraseKey.FAILURE_CAMERA_UNAVAILABLE, category = PhraseCategory.ERRORS,
+            defaultText = "The camera isn't available right now.", description = "Camera service is unavailable.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_NO_FLASH, PhraseEntry(
+            key = PhraseKey.FAILURE_NO_FLASH, category = PhraseCategory.ERRORS,
+            defaultText = "No flash on this phone.", description = "Device has no camera flash.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_MEDIA_CONTROL, PhraseEntry(
+            key = PhraseKey.FAILURE_MEDIA_CONTROL, category = PhraseCategory.ERRORS,
+            defaultText = "I couldn't control the media.", description = "Media playback control failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_FLASHLIGHT, PhraseEntry(
+            key = PhraseKey.FAILURE_FLASHLIGHT, category = PhraseCategory.ERRORS,
+            defaultText = "Flashlight didn't respond.", description = "Flashlight toggle failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_RECORDING, PhraseEntry(
+            key = PhraseKey.FAILURE_RECORDING, category = PhraseCategory.ERRORS,
+            defaultText = "Recording failed to start.", description = "Voice/audio recording failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_TRANSCRIPTION, PhraseEntry(
+            key = PhraseKey.FAILURE_TRANSCRIPTION, category = PhraseCategory.ERRORS,
+            defaultText = "Transcription failed — please try again.", description = "STT transcription failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_IMAGE_ANALYSIS, PhraseEntry(
+            key = PhraseKey.FAILURE_IMAGE_ANALYSIS, category = PhraseCategory.ERRORS,
+            defaultText = "Image was captured but I couldn't analyse it.", description = "Vision analysis failed after capture.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_IMAGE_GENERATION, PhraseEntry(
+            key = PhraseKey.FAILURE_IMAGE_GENERATION, category = PhraseCategory.ERRORS,
+            defaultText = "Image generation failed — please try again.", description = "AI image generation failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_CAMERA_CAPTURE, PhraseEntry(
+            key = PhraseKey.FAILURE_CAMERA_CAPTURE, category = PhraseCategory.ERRORS,
+            defaultText = "The camera couldn't capture a photo.", description = "Camera capture failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_EXPORT, PhraseEntry(
+            key = PhraseKey.FAILURE_EXPORT, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't save the conversation — check storage space.", description = "Conversation export failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_EMAIL_APP, PhraseEntry(
+            key = PhraseKey.FAILURE_EMAIL_APP, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't open the email app.", description = "Email app launch failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_TIMER, PhraseEntry(
+            key = PhraseKey.FAILURE_TIMER, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't set the timer — please try again.", description = "Timer creation failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_TIMER_DURATION, PhraseEntry(
+            key = PhraseKey.FAILURE_TIMER_DURATION, category = PhraseCategory.ERRORS,
+            defaultText = "I couldn't work out that duration — opening the timer app.", description = "Timer duration could not be parsed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_ALARM, PhraseEntry(
+            key = PhraseKey.FAILURE_ALARM, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't set the alarm — please try again.", description = "Alarm creation failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_CALL, PhraseEntry(
+            key = PhraseKey.FAILURE_CALL, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't place the call — please try again.", description = "Phone call failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_SMS, PhraseEntry(
+            key = PhraseKey.FAILURE_SMS, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't send the message — please try again.", description = "SMS send failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_FIND_PHONE_RINGER, PhraseEntry(
+            key = PhraseKey.FAILURE_FIND_PHONE_RINGER, category = PhraseCategory.ERRORS,
+            defaultText = "Couldn't ring the phone.", description = "Find-my-phone ringer failed.",
+            availableVars = emptyList()))
+
+        put(PhraseKey.FAILURE_APP_NOT_INSTALLED, PhraseEntry(
+            key = PhraseKey.FAILURE_APP_NOT_INSTALLED, category = PhraseCategory.ERRORS,
+            defaultText = "{app} isn't installed on this phone.", description = "Attempted to open an app that is not installed. Var: {app}.",
+            availableVars = listOf("app")))
     }
 
     /** All keys that belong to [category], in insertion order. */

@@ -259,7 +259,7 @@ class SpeechCapture(private val context: Context) {
                     // Log every candidate so we can audit why STT picked what it picked.
                     matches.forEachIndexed { i, c ->
                         val cf = confidences?.getOrNull(i)?.let { "%.2f".format(it) } ?: "-"
-                        Log.d(TAG, "[STT_CANDIDATE] #$i conf=$cf \"$c\"")
+                        Log.d(TAG, "[STT_CANDIDATE] #$i conf=$cf len=${c.length}")
                     }
                     val selector = nbestSelector
                     val text = when {
@@ -267,7 +267,7 @@ class SpeechCapture(private val context: Context) {
                         selector != null   -> selector(matches, confidences)
                         else               -> matches.firstOrNull() ?: ""
                     }
-                    Log.d(TAG, "Result: \"$text\" +${SystemClock.elapsedRealtime() - listenStartMs}ms")
+                    Log.d(TAG, "Result: len=${text.length} +${SystemClock.elapsedRealtime() - listenStartMs}ms")
                     cleanup()
                     if (cont.isActive) cont.resume(text)
                 }

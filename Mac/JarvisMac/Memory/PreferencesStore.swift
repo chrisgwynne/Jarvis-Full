@@ -93,6 +93,9 @@ struct Preferences: Codable, Equatable {
     var piperSpeakerId: Int? = nil
     /// Fall back to Apple TTS when Piper fails. Default true.
     var piperFallbackToApple: Bool = true
+    /// Stable ID of the active TTS backend in TTSBackendRouter.
+    /// Valid values: "piper_onnx", "system_apple", "supertonic".
+    var ttsBackendId: String = "piper_onnx"
 
     // ── Web Overlays ─────────────────────────────────────────────────────────
     var webOverlaysEnabled: Bool = false
@@ -603,6 +606,7 @@ struct Preferences: Codable, Equatable {
         piperConfigPath     = try c.decodeIfPresent(String.self,   forKey: .piperConfigPath)
         piperSpeakerId      = try c.decodeIfPresent(Int.self,      forKey: .piperSpeakerId)
         piperFallbackToApple = try c.decodeIfPresent(Bool.self,    forKey: .piperFallbackToApple) ?? true
+        ttsBackendId         = try c.decodeIfPresent(String.self,  forKey: .ttsBackendId)         ?? "piper_onnx"
         // Web overlays
         webOverlaysEnabled        = try c.decodeIfPresent(Bool.self, forKey: .webOverlaysEnabled)        ?? false
         webOverlayAllowRemoteURLs = try c.decodeIfPresent(Bool.self, forKey: .webOverlayAllowRemoteURLs) ?? false

@@ -33,6 +33,7 @@ public sealed class TrayController : IDisposable
     private readonly Action _openLlmSettings;
     private readonly Action _openRedactionPreview;
     private readonly Action _exportConversation;
+    private readonly Action _openDashboard;
     private readonly Icon _icon;
     private nint _iconHandle;
     private bool _visible = true;
@@ -52,7 +53,8 @@ public sealed class TrayController : IDisposable
         Action openChat,
         Action openLlmSettings,
         Action openRedactionPreview,
-        Action exportConversation)
+        Action exportConversation,
+        Action openDashboard)
     {
         _overlay = overlay;
         _settings = settings;
@@ -69,6 +71,7 @@ public sealed class TrayController : IDisposable
         _openLlmSettings = openLlmSettings;
         _openRedactionPreview = openRedactionPreview;
         _exportConversation = exportConversation;
+        _openDashboard = openDashboard;
 
         _icon = BuildPebbleIcon(out _iconHandle);
         _notify = new NotifyIcon
@@ -120,6 +123,7 @@ public sealed class TrayController : IDisposable
         var show = new ToolStripMenuItem("Hide pebble", null, (_, _) => ToggleVisible()) { Name = "show" };
         menu.Items.Add(show);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("Dashboard…", null, (_, _) => _openDashboard()));
         menu.Items.Add(new ToolStripMenuItem("Chat…", null, (_, _) => _openChat()));
         menu.Items.Add(new ToolStripMenuItem("LLM settings…", null, (_, _) => _openLlmSettings()));
         menu.Items.Add(new ToolStripMenuItem("Redaction preview…", null, (_, _) => _openRedactionPreview()));

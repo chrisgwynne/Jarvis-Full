@@ -44,9 +44,16 @@ class JarvisStateMachine {
             ),
             JarvisState.Listening::class to setOf(
                 JarvisState.Thinking::class,
+                JarvisState.AwaitingRemoteReply::class, // transcript forwarded to Mac brain
                 JarvisState.IdleWake::class,
                 JarvisState.MicUnavailable::class,
                 JarvisState.Interrupted::class,
+                JarvisState.Silenced::class
+            ),
+            JarvisState.AwaitingRemoteReply::class to setOf(
+                JarvisState.Speaking::class,            // reply.final received → TTS
+                JarvisState.IdleWake::class,            // timeout / nack / disconnect
+                JarvisState.Interrupted::class,         // barge-in while waiting
                 JarvisState.Silenced::class
             ),
             JarvisState.Thinking::class to setOf(

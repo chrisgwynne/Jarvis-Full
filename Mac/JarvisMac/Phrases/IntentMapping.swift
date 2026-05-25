@@ -146,6 +146,8 @@ enum IntentMapping {
         case "disable_ambient_context":     return .disableAmbientContext
         case "show_ambient_context_overlay": return .showAmbientContextOverlay
         case "show_runtime_diagnostics":     return .showRuntimeDiagnostics
+        case "show_speech_latency":          return .showSpeechLatency
+        case "show_voice_lab":               return .showVoiceLab
         case "show_focus":                   return .showFocus
         case "explain_current_focus":        return .explainCurrentFocus
         case "show_spatial_interaction":     return .showSpatialInteraction

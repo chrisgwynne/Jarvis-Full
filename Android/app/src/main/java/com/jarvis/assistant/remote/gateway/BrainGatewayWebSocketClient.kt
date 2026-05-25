@@ -81,8 +81,18 @@ class BrainGatewayWebSocketClient(
     val status: StateFlow<GatewayWsStatus> get() = _sharedStatus
 
     // ── Reply / orchestrate callbacks (set by JarvisRuntime) ─────────────────
-    /** Fired with the text of a reply.final or chat.reply.final from Mac brain. */
-    var onReplyFinal: ((String) -> Unit)? = null
+    /**
+     * Fired with the text of a reply.final (or chat.reply.final / remote.action.result)
+     * from Mac brain.  Second argument is the correlationId from the frame, or null if
+     * the frame did not include one (legacy Mac).
+     */
+    var onReplyFinal: ((text: String, correlationId: String?) -> Unit)? = null
+
+    /**
+     * Fired when Mac brain signals a nack or error for a pending route.
+     * correlationId matches the messageId from sendTranscript, or null if unknown.
+     */
+    var onNack: ((correlationId: String?) -> Unit)? = null
     /** Fired with partial streaming text (reply.partial / chat.reply.partial). */
     var onReplyPartial: ((String) -> Unit)? = null
     /** Mac requests Android to speak this text via Android TTS. */
@@ -228,6 +238,8 @@ class BrainGatewayWebSocketClient(
             val req = Request.Builder()
                 .url(cfg.wsUrl)
                 .addHeader("Authorization", "Bearer $token")
+                .addHeader("X-Platform", "android")
+                .addHeader("X-Device-Id", settingsRepo.stableDeviceId())
                 .build()
 
             ws = httpClient.newWebSocket(req, object : WebSocketListener() {
@@ -380,8 +392,10 @@ class BrainGatewayWebSocketClient(
             "reply.final", "chat.reply.final" -> {
                 LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
                 val replyText = json.optString("text").ifBlank { return }
-                Log.d(TAG, "reply.final: ${replyText.take(80)}")
-                onReplyFinal?.invoke(replyText)
+                val correlationId = json.optString("correlationId").ifBlank { null }
+                    ?: json.optString("messageId").ifBlank { null }
+                Log.d(TAG, "reply.final: len=${replyText.length} correlationId=$correlationId")
+                onReplyFinal?.invoke(replyText, correlationId)
             }
 
             // Streaming partial — surface to UI for typing indicator.
@@ -434,10 +448,13 @@ class BrainGatewayWebSocketClient(
                 Log.d(TAG, "Session established: type=$frameType")
             }
 
-            // Server-side error frame.
-            "error" -> {
+            // Server-side error or nack — recover from AwaitingRemoteReply if pending.
+            "error", "nack" -> {
                 val msg = json.optString("message", "unknown error")
-                Log.w(TAG, "Gateway error frame: $msg")
+                val correlationId = json.optString("correlationId").ifBlank { null }
+                    ?: json.optString("messageId").ifBlank { null }
+                Log.w(TAG, "Gateway $frameType frame: $msg correlationId=$correlationId")
+                onNack?.invoke(correlationId)
             }
 
             // Mac requests Android to execute a command.
@@ -494,7 +511,7 @@ class BrainGatewayWebSocketClient(
                 }
                 // Surface the spoken summary to JarvisRuntime for TTS
                 if (spokenSummary.isNotBlank()) {
-                    onReplyFinal?.invoke(spokenSummary)
+                    onReplyFinal?.invoke(spokenSummary, requestId.ifBlank { null })
                 }
             }
 
@@ -556,7 +573,7 @@ class BrainGatewayWebSocketClient(
         if (sent) {
             LatencyTracker.mark(LatencyTracker.TRANSCRIPT_SENT_TO_DAEMON)
         }
-        Log.d(TAG, "sendTranscript: ${text.take(80)}")
+        Log.d(TAG, "sendTranscript: len=${text.length}")
     }
 
     // ── Send ──────────────────────────────────────────────────────────────────

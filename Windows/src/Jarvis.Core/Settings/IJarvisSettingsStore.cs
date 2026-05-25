@@ -24,9 +24,37 @@ public sealed record JarvisSettings
     /// When <see cref="BrainGatewayConfig.BaseUrl"/> is non-empty the bridge connects to
     /// /v1/windows/ws; when empty the bridge stays Disabled.</summary>
     public BrainGatewayConfig Gateway { get; init; } = new();
+    /// <summary>Context engine: app usage timeline, snapshot building, bridge enrichment.</summary>
+    public ContextEngineSettings ContextEngine { get; init; } = new();
+    /// <summary>Proactive nudge settings: distraction alerts, focus milestones, suppression rules.</summary>
+    public ProactivitySettings Proactivity { get; init; } = new();
+
+    /// <summary>Desktop tool layer settings — controls which tools are enabled and their safety thresholds.</summary>
+    public ToolsSettings Tools { get; init; } = new();
+
+    /// <summary>Project shortcut aliases for the open_project tool.</summary>
+    public ProjectSettings Projects { get; init; } = new();
 
     public static JarvisSettings Defaults => new();
 }
+
+public sealed record ToolsSettings
+{
+    public bool Enabled { get; init; } = true;
+    public bool RequireConfirmationForDestructive { get; init; } = true;
+    public bool AllowScreenshots { get; init; } = true;
+    public bool AllowClipboardRead { get; init; } = false;   // opt-in
+    public bool AllowAppClose { get; init; } = true;
+    public bool AllowForceClose { get; init; } = false;      // opt-in
+    public bool ToolDiagnostics { get; init; } = false;      // developer
+}
+
+public sealed record ProjectSettings
+{
+    public ProjectAlias[] Aliases { get; init; } = Array.Empty<ProjectAlias>();
+}
+
+public sealed record ProjectAlias(string Alias, string Path, string? App = null);
 
 public sealed record QuotaSettings
 {
@@ -178,6 +206,40 @@ public sealed record AwarenessSettings
     public int IdleThresholdSeconds { get; init; } = 45;
     public bool TrackForegroundApp { get; init; } = true;
     public bool TrackIdle { get; init; } = true;
+    /// <summary>Maximum number of app-usage entries retained by AppUsageTracker.</summary>
+    public int AppUsageHistoryDepth { get; init; } = 20;
+    /// <summary>When true, enables developer presence mode and verbose diagnostics.</summary>
+    public bool DevMode { get; init; } = false;
+}
+
+public sealed record ProactivitySettings
+{
+    public bool Enabled { get; init; } = true;
+    /// <summary>Minimum minutes between proactive suggestions.</summary>
+    public int MinGapMinutes { get; init; } = 30;
+    /// <summary>When true, suppress suggestions during Focus, Gaming, Presentation, Silent modes.</summary>
+    public bool SuppressDuringFocus { get; init; } = true;
+    public bool SuppressDuringGaming { get; init; } = true;
+    public bool SuppressDuringPresentation { get; init; } = true;
+    public bool DistractionAlerts { get; init; } = true;
+    public bool FocusMilestones { get; init; } = true;
+}
+
+/// <summary>
+/// Controls the Windows context engine: app usage timeline, snapshot enrichment,
+/// and the fields that flow into the Mac bridge ContextPayload.
+/// </summary>
+public sealed record ContextEngineSettings
+{
+    /// <summary>Master switch. When false the engine stays idle and emits no events.</summary>
+    public bool Enabled { get; init; } = true;
+    /// <summary>Maximum number of app-usage entries retained in the ring buffer.</summary>
+    public int AppUsageHistoryDepth { get; init; } = 20;
+    /// <summary>How many recent entries to include in the timeline summary pushed to the Mac.</summary>
+    public int TimelineSummaryDepth { get; init; } = 10;
+    /// <summary>When false, only WorkflowCategory and ProcessName go into timeline entries;
+    /// title snippets are never included in any code path.</summary>
+    public bool IncludePrivacySafeTitleSnippets { get; init; } = false;
 }
 
 public sealed record PerformanceSettings

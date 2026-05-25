@@ -66,6 +66,8 @@ object LatencyTracker {
         val now = System.currentTimeMillis()
         startMs.set(now)
         previousMs.set(now)
+        SpeechTurnStore.completeTurn()  // finalize any incomplete previous turn
+        SpeechTurnStore.beginTurn()
         Log.i(TAG, "[PIPELINE_START] t=0ms")
     }
 
@@ -75,6 +77,7 @@ object LatencyTracker {
         val now      = System.currentTimeMillis()
         val total    = now - start
         val stage    = now - previousMs.getAndSet(now)
+        SpeechTurnStore.mark(label)
         Log.i(TAG, "[$label] total=${total}ms stage=${stage}ms")
         if (label == "LLM_FIRST_TOKEN" && total > TARGET_FIRST_TOKEN_MS) {
             Log.w(
@@ -97,6 +100,7 @@ object LatencyTracker {
     }
 
     fun reset() {
+        SpeechTurnStore.completeTurn()
         startMs.set(0L)
         previousMs.set(0L)
     }

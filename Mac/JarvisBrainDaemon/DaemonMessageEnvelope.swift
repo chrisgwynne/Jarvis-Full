@@ -59,6 +59,18 @@ enum DaemonMessageTarget: Codable, Equatable {
     enum CodingKeys: String, CodingKey { case type, deviceId }
 
     init(from decoder: Decoder) throws {
+        // Accept plain string targets ("macApp", "daemon", etc.) sent by Windows/Android
+        // clients that serialize target as a string rather than {"type":"..."}
+        if let str = try? decoder.singleValueContainer().decode(String.self) {
+            switch str {
+            case "macApp":    self = .macApp
+            case "android":   self = .android(deviceId: nil)
+            case "windows":   self = .windows(deviceId: nil)
+            case "broadcast": self = .broadcast
+            default:          self = .daemon
+            }
+            return
+        }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let t = (try? c.decode(String.self, forKey: .type)) ?? "daemon"
         let did = try? c.decode(String.self, forKey: .deviceId)

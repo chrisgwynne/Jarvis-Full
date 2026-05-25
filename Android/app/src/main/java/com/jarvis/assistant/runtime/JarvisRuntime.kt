@@ -97,6 +97,8 @@ import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolRegistry
 import com.jarvis.assistant.runtime.DrivingModeManager
 import com.jarvis.assistant.util.LatencyTracker
+import com.jarvis.assistant.util.SpeechTurnStore
+import com.jarvis.assistant.util.TurnRoute
 import com.jarvis.assistant.tools.framework.ToolResult
 import com.jarvis.assistant.util.JarvisNotificationHelper
 import com.jarvis.assistant.util.SettingsStore
@@ -127,6 +129,8 @@ import com.jarvis.assistant.remote.macbrain.HttpMacBrainClient
 import com.jarvis.assistant.remote.macbrain.MacBrainClient
 import com.jarvis.assistant.speaker.audio.SpeakerAudioCapture
 import com.jarvis.assistant.speaker.audio.SpeakerEmbeddingEngine
+import com.jarvis.assistant.logging.JarvisReplyLogger
+import com.jarvis.assistant.logging.ReplySource
 
 /**
  * JarvisRuntime — the central orchestrator for the voice pipeline.
@@ -163,6 +167,7 @@ class JarvisRuntime(
         private const val TAG                  = "JarvisRuntime"
         private const val FAST_FAIL_THRESHOLD  = 3_000L
         private const val MAX_FAST_FAILS       = 3
+        private const val REMOTE_REPLY_TIMEOUT_MS = 8_000L
         private const val MAX_TOOL_HOPS        = 3   // agentic chain cap per turn
 
         private val REMEMBER_ME_PATTERN = Regex(
@@ -618,6 +623,11 @@ class JarvisRuntime(
     private lateinit var sessionId   : String
     private var sessionOpen = false
 
+    // Reply log source tagging. Set before calling speakAndRecord() so the log entry
+    // has meaningful source attribution; consumed and reset to LLM after each call.
+    @Volatile var _pendingReplySource: ReplySource = ReplySource.LLM
+    @Volatile var _pendingPhraseKey: String? = null
+
     // Interruption / resume state — populated by streamAndSpeak() when the user
     // barges in mid-response.  Consumed and cleared on the next user turn.
     @Volatile private var lastInterrupted : ResumableResponse? = null
@@ -641,8 +651,19 @@ class JarvisRuntime(
     private var sessionSpeaker    = SpeakerSessionContext()
     private var activeCapture     : SpeakerAudioCapture? = null
 
+    // ── Remote reply lifecycle ─────────────────────────────────────────────────
+
+    /** routeId of the transcript we are currently waiting a Mac brain reply for, or null. */
+    @Volatile private var pendingRemoteRouteId: String? = null
+
     init {
-        // Most heavy work now moved to initialize()
+        // Wire brain gateway callbacks immediately so they're ready before start() is called.
+        brainGatewayClient.onReplyFinal = { replyText, correlationId ->
+            handleRemoteReply(replyText, correlationId)
+        }
+        brainGatewayClient.onNack = { correlationId ->
+            handleRemoteNack(correlationId)
+        }
         Log.d(TAG, "JarvisRuntime constructor complete")
     }
 
@@ -1150,11 +1171,15 @@ class JarvisRuntime(
         proactiveCoordinator.start(scope)
         brainEngine.start()           // Behavioural learning system
         val macCfg = macBridgeRepo.snapshot()
-        // In AUTO mode, always start the bridge so the arbitrator can detect Mac presence
-        // even when Android is currently acting as the full assistant.
-        if (macCfg.isConfigured && (macCfg.enabled || androidRole == com.jarvis.assistant.remote.macbridge.AndroidRole.AUTO)) macBridgeClient.start()
-        // Brain Gateway — start if paired (isPaired checks baseUrl + sessionToken)
-        if (JarvisApp.brainGatewaySettings.snapshot().isPaired) brainGatewayClient.start()
+        // Mutual exclusion: Brain Gateway takes precedence when paired.
+        // Only start legacy Mac Bridge when not paired to the gateway.
+        val gatewayPaired = JarvisApp.brainGatewaySettings.snapshot().isPaired
+        if (gatewayPaired) {
+            brainGatewayClient.start()
+        } else if (macCfg.isConfigured &&
+            (macCfg.enabled || androidRole == com.jarvis.assistant.remote.macbridge.AndroidRole.AUTO)) {
+            macBridgeClient.start()
+        }
         com.jarvis.assistant.remote.macbridge.AndroidEventBroadcaster.attach(
             client       = macBridgeClient,
             settingsRepo = macBridgeRepo,
@@ -1663,8 +1688,12 @@ class JarvisRuntime(
             .attachAll()
         recentEventBuffer.attach()
         val macCfg = macBridgeRepo.snapshot()
-        if (macCfg.isConfigured) macBridgeClient.start()
-        if (JarvisApp.brainGatewaySettings.snapshot().isPaired) brainGatewayClient.start()
+        val gatewayPairedBridge = JarvisApp.brainGatewaySettings.snapshot().isPaired
+        if (gatewayPairedBridge) {
+            brainGatewayClient.start()
+        } else if (macCfg.isConfigured) {
+            macBridgeClient.start()
+        }
         com.jarvis.assistant.remote.macbridge.AndroidEventBroadcaster.attach(
             client       = macBridgeClient,
             settingsRepo = macBridgeRepo,
@@ -2271,27 +2300,54 @@ class JarvisRuntime(
 
                     consecutiveFastFails = 0
                     LatencyTracker.mark("STT_COMPLETE")
+                    SpeechTurnStore.setTranscriptLength(transcript.length)
                     ListeningLifecycleMonitor.transition(ListeningLifecycleMonitor.Phase.Processing)
                     LatencyTracker.mark("TURN_TIMING_STT_FINAL")
                     // [TRANSCRIPT_RAW] / [TRANSCRIPT_NORMALIZED] are the
                     // canonical grep targets for routing audits — emit them
                     // exactly once per turn, right after STT_COMPLETE.
-                    Log.d(TAG, "[TRANSCRIPT_RAW] \"$transcript\"")
+                    Log.d(TAG, "[TRANSCRIPT_RAW] len=${transcript.length}")
                     val transcriptNormalisedLog = com.jarvis.assistant.voice.routing
                         .TranscriptNormalizer.normalizeForMatching(transcript)
-                    Log.d(TAG, "[TRANSCRIPT_NORMALIZED] \"$transcriptNormalisedLog\"")
+                    Log.d(TAG, "[TRANSCRIPT_NORMALIZED] len=${transcriptNormalisedLog.length}")
 
                     // ── Brain Gateway relay ──────────────────────────────────
                     // When connected to the Mac brain daemon, forward the transcript
-                    // there and skip local routing entirely. The Mac will reply via
-                    // reply.final → onReplyFinal → speakAndRecord().
+                    // there and block STT until reply.final arrives.
+                    // handleRemoteReply() will call speakAndRecord() then restart wake.
                     if (brainGatewayClient.status.value ==
                             com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
                         && transcript.isNotBlank()
                     ) {
-                        brainGatewayClient.sendTranscript(transcript)
-                        machine.transition(JarvisState.Listening)
-                        syncState(JarvisState.Listening)
+                        val routeId = java.util.UUID.randomUUID().toString()
+                        pendingRemoteRouteId = routeId
+                        com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = routeId
+                        com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs =
+                            System.currentTimeMillis()
+                        brainGatewayClient.sendTranscript(transcript, routeId)
+                        val awaitState = JarvisState.AwaitingRemoteReply(routeId, System.currentTimeMillis())
+                        machine.transition(awaitState)
+                        syncState(awaitState)
+                        // 8-second guard: if Mac brain doesn't reply, recover to wake.
+                        scope.launch {
+                            kotlinx.coroutines.delay(REMOTE_REPLY_TIMEOUT_MS)
+                            if (pendingRemoteRouteId == routeId) {
+                                Log.w(TAG, "[REMOTE_REPLY_TIMEOUT] routeId=$routeId")
+                                com.jarvis.assistant.reliability.ListenerDiagnostics
+                                    .remoteReplyTimeouts.incrementAndGet()
+                                pendingRemoteRouteId = null
+                                com.jarvis.assistant.reliability.ListenerDiagnostics
+                                    .pendingRemoteRouteId = null
+                                if (machine.current is JarvisState.AwaitingRemoteReply) {
+                                    val ok = machine.transition(JarvisState.IdleWake)
+                                    if (!ok) machine.forceTransition(JarvisState.IdleWake)
+                                    syncState(machine.current)
+                                    startWakeWordDetection()
+                                }
+                            }
+                        }
+                        // Loop check at top: AwaitingRemoteReply is not Listening/Interrupted,
+                        // so the while loop will break here. Recovery happens in handleRemoteReply.
                         continue
                     }
 
@@ -2304,7 +2360,7 @@ class JarvisRuntime(
                     when (val v = confirmationGate.consume(transcript)) {
                         is ConfirmationGate.Verdict.Affirmed -> {
                             Log.d(TAG, "[CONFIRMATION_ACCEPTED] tool=${v.pending.toolName} " +
-                                "transcript=\"$transcript\"")
+                                "transcript.len=${transcript.length}")
                             val stashedTool = toolRegistry.findByName(v.pending.toolName)
                             if (stashedTool != null) {
                                 val r = toolDispatcher.dispatch(
@@ -2348,8 +2404,8 @@ class JarvisRuntime(
                     // it, never escalate it.
                     pendingMessageIntent?.let { pending ->
                         val followUpStartMs = System.currentTimeMillis()
-                        Log.d(TAG, "[ROUTE_PENDING_ACTION] channel=${pending.channel} transcript=\"$transcript\"")
-                        Log.d(TAG, "[PENDING_ACTION_CONSUMED] transcript=\"$transcript\" " +
+                        Log.d(TAG, "[ROUTE_PENDING_ACTION] channel=${pending.channel} transcript.len=${transcript.length}")
+                        Log.d(TAG, "[PENDING_ACTION_CONSUMED] transcript.len=${transcript.length} " +
                             "channel=${pending.channel} +0ms")
                         if (pending.isExpired()) {
                             Log.d(TAG, "[FOLLOWUP_EXPIRED] pending dropped")
@@ -2438,7 +2494,7 @@ class JarvisRuntime(
                         }
 
                         Log.d(TAG, "[FOLLOWUP_PENDING_INTENT_FOUND] channel=${pending.channel}")
-                        Log.d(TAG, "[MESSAGE_BODY_CAPTURED] transcript=\"$transcript\" " +
+                        Log.d(TAG, "[MESSAGE_BODY_CAPTURED] transcript.len=${transcript.length} " +
                             "channel=${pending.channel}")
                         Log.d(TAG, "[FOLLOWUP_MERGE_START]")
                         val mergedRaw = com.jarvis.assistant.tools.device.messaging
@@ -2589,7 +2645,7 @@ class JarvisRuntime(
                     if (com.jarvis.assistant.todoist.edit
                             .ConversationalEditParser.looksLikeEdit(transcript)
                     ) {
-                        Log.d(TAG, "[TODOIST_EDIT_DETECTED] transcript=\"${transcript.take(60)}\"")
+                        Log.d(TAG, "[TODOIST_EDIT_DETECTED] transcript.len=${transcript.length}")
                         speechStateSource.recordUserInteraction()
                         DeviceStateStore.update { copy(lastUserUtterance = transcript) }
                         scope.launch(Dispatchers.IO) {
@@ -2722,7 +2778,7 @@ class JarvisRuntime(
                     ) {
                         val parsedQuery = com.jarvis.assistant.todoist.parse
                             .TodoistListQueryParser.parse(transcript)
-                        Log.d(TAG, "[TASK_QUERY_INTENT] transcript=\"${transcript.take(60)}\"")
+                        Log.d(TAG, "[TASK_QUERY_INTENT] transcript.len=${transcript.length}")
                         Log.d(TAG, "[TASK_QUERY_DATE_RESOLVED] scope=${parsedQuery?.scope}")
                         speechStateSource.recordUserInteraction()
                         DeviceStateStore.update { copy(lastUserUtterance = transcript) }
@@ -2773,7 +2829,7 @@ class JarvisRuntime(
                             pendingTodoistTask = null
                         }
                         Log.d(TAG, "[ROUTER_ORDER_CHECK] todoist_fresh_before_llm")
-                        Log.d(TAG, "[TODOIST_INTENT_DETECTED] transcript=\"${transcript.take(60)}\"")
+                        Log.d(TAG, "[TODOIST_INTENT_DETECTED] transcript.len=${transcript.length}")
                         speechStateSource.recordUserInteraction()
                         DeviceStateStore.update { copy(lastUserUtterance = transcript) }
                         scope.launch(Dispatchers.IO) {
@@ -3636,7 +3692,7 @@ class JarvisRuntime(
                         .CommandShape.isImperativeCommand(transcript)
                     if (isImperativeCommand) {
                         Log.d(TAG, "[COMMAND_ROUTE_WON] reason=imperative_shape " +
-                            "transcript=\"${transcript.take(60)}\"")
+                            "transcript.len=${transcript.length}")
                     }
 
                     // ── Response preference detection ────────────────────────
@@ -3844,9 +3900,11 @@ class JarvisRuntime(
 
                     if (matched != null) {
                         val (tool, input) = matched
+                        SpeechTurnStore.setRoute(TurnRoute.DIRECT_COMMAND)
+                        SpeechTurnStore.setToolUsed(true)
                         // ROUTE_LOCAL_MATCH / ROUTE_LOCAL_EXECUTE — explicit
                         // grep targets for the local-first routing path.
-                        Log.d(TAG, "[ROUTE_LOCAL_MATCH] tool=${tool.name} transcript=\"$transcript\"")
+                        Log.d(TAG, "[ROUTE_LOCAL_MATCH] tool=${tool.name} transcript.len=${transcript.length}")
                         localFirstRouter.logLocalExecute(tool.name)
                         syncState(machine.current)
 
@@ -3971,6 +4029,21 @@ class JarvisRuntime(
                                 continue
                             }
                             is ToolDispatcher.DispatchResult.AugmentedLlm -> {
+                                SpeechTurnStore.setLlmUsed(true)
+                                SpeechTurnStore.setRoute(TurnRoute.LLM_WITH_TOOL)
+                                // BRAIN OWNERSHIP NOTE: a local device tool returned an
+                                // augmented transcript that still requires LLM completion
+                                // (e.g. camera-vision or HAContext). This local LLM call
+                                // is device-local by design — the gateway cannot handle
+                                // it mid-tool because the tool context lives here. If the
+                                // Mac brain is Connected we log a degraded-local-llm marker
+                                // so this path remains visible in routing audits.
+                                if (brainGatewayClient.status.value ==
+                                    com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                                ) {
+                                    Log.d(TAG, "[DEGRADED_LOCAL_LLM] reason=augmented_llm " +
+                                        "gateway=connected tool_context=true")
+                                }
                                 val response = callLlm(r.augmentedTranscript, isOnline)
                                 speakAndRecord(response)
                                 machine.transition(JarvisState.Listening)
@@ -3986,7 +4059,18 @@ class JarvisRuntime(
                                 continue
                             }
                             is ToolDispatcher.DispatchResult.LlmFollowUp -> {
+                                SpeechTurnStore.setLlmUsed(true)
+                                SpeechTurnStore.setRoute(TurnRoute.LLM_WITH_TOOL)
                                 if (r.spokenFeedback.isNotBlank()) speakAndRecord(r.spokenFeedback)
+                                // BRAIN OWNERSHIP NOTE: local tool requested an LLM follow-up
+                                // to enrich its result. If the gateway is Connected this is
+                                // intentional local LLM use — the follow-up context is device-local.
+                                if (brainGatewayClient.status.value ==
+                                    com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                                ) {
+                                    Log.d(TAG, "[DEGRADED_LOCAL_LLM] reason=llm_follow_up " +
+                                        "gateway=connected tool_context=true")
+                                }
                                 // fall through to LLM for follow-up
                             }
                         }
@@ -4002,7 +4086,7 @@ class JarvisRuntime(
                         com.jarvis.assistant.tools.device.MessageIntentParser
                             .looksLikeMessagingCommand(transcript)
                     ) {
-                        Log.d(TAG, "[MSG_INCOMPLETE_LOCAL_CLARIFY] transcript=\"$transcript\"")
+                        Log.d(TAG, "[MSG_INCOMPLETE_LOCAL_CLARIFY] transcript.len=${transcript.length}")
                         val isWa = Regex("""\bwhatsapp|whats\s+app|\bwa\b""",
                             RegexOption.IGNORE_CASE).containsMatchIn(transcript)
                         val channel = if (isWa)
@@ -4048,7 +4132,7 @@ class JarvisRuntime(
                     }
 
                     if (matched == null) {
-                        Log.d(TAG, "[ROUTE_NO_LOCAL_MATCH] transcript=\"$transcript\"")
+                        Log.d(TAG, "[ROUTE_NO_LOCAL_MATCH] transcript.len=${transcript.length}")
                         localFirstRouter.logRemoteFallback("no_local_tool_matched")
                     }
                     // ── Phone-capable tripwire ────────────────────────────────
@@ -4064,10 +4148,17 @@ class JarvisRuntime(
                     }
 
                     // ── LLM inference via PromptAssembler + streaming ─────────────
-                    Log.d(TAG, "[ROUTE_FINAL_HANDLER] handler=local_llm transcript=\"$transcript\"")
+                    // BRAIN OWNERSHIP: this path is ONLY reached when the Mac brain gateway
+                    // is NOT Connected (the Connected branch did `continue` above at the
+                    // Brain Gateway relay block). This is the degraded / offline fallback.
+                    // If you see [ROUTE_FINAL_HANDLER] in logs WITH a Connected gateway,
+                    // that is a routing regression — add a test for it.
+                    Log.d(TAG, "[ROUTE_FINAL_HANDLER] handler=local_llm transcript.len=${transcript.length}")
                     Log.d(TAG, "[FALLBACK_LOCAL_LLM_BEGIN] reason=no_local_match")
-                    Log.d(TAG, "[MEMORY_RETRIEVE_BEGIN] transcript=\"${transcript.take(60)}\"")
+                    Log.d(TAG, "[MEMORY_RETRIEVE_BEGIN] transcript.len=${transcript.length}")
                     LatencyTracker.mark("LLM_REQUEST_START")
+                    SpeechTurnStore.setLlmUsed(true)
+                    SpeechTurnStore.setRoute(TurnRoute.LLM_FALLBACK)
                     Log.d(TAG, "[LLM_REQUEST_START] online=$isOnline")
                     streamAndSpeak(transcript, isOnline)
                     Log.d(TAG, "[MEMORY_RETRIEVE_DONE] (folded into streamAndSpeak)")
@@ -4105,6 +4196,55 @@ class JarvisRuntime(
                 releaseResources()
                 backToWakeWord()
             }
+        }
+    }
+
+    // ── Remote reply lifecycle handlers ──────────────────────────────────────
+
+    /**
+     * Called by [BrainGatewayWebSocketClient.onReplyFinal] when Mac brain delivers
+     * a final reply.  Validates the correlationId, then runs TTS and recovers wake.
+     */
+    private fun handleRemoteReply(replyText: String, correlationId: String?) {
+        val pending = pendingRemoteRouteId
+        if (pending == null) {
+            Log.w(TAG, "[REMOTE_REPLY_STALE] correlationId=$correlationId — no pending route, dropping")
+            com.jarvis.assistant.reliability.ListenerDiagnostics.staleReplyDrops.incrementAndGet()
+            return
+        }
+        if (correlationId != null && correlationId != pending) {
+            Log.w(TAG, "[REMOTE_REPLY_MISMATCH] expected=$pending got=$correlationId — dropping")
+            com.jarvis.assistant.reliability.ListenerDiagnostics.mismatchedReplyDrops.incrementAndGet()
+            return
+        }
+        pendingRemoteRouteId = null
+        com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
+        scope.launch {
+            if (machine.current !is JarvisState.AwaitingRemoteReply) return@launch
+            speakAndRecord(replyText)
+            val ok = machine.transition(JarvisState.IdleWake)
+            if (!ok) machine.forceTransition(JarvisState.IdleWake)
+            syncState(machine.current)
+            startWakeWordDetection()
+        }
+    }
+
+    /**
+     * Called by [BrainGatewayWebSocketClient.onNack] on error / nack frames.
+     * Immediately recovers from AwaitingRemoteReply without speaking.
+     */
+    private fun handleRemoteNack(correlationId: String?) {
+        val pending = pendingRemoteRouteId ?: return
+        if (correlationId != null && correlationId != pending) return
+        Log.w(TAG, "[REMOTE_NACK_RECEIVED] routeId=$pending")
+        pendingRemoteRouteId = null
+        com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
+        scope.launch {
+            if (machine.current !is JarvisState.AwaitingRemoteReply) return@launch
+            val ok = machine.transition(JarvisState.IdleWake)
+            if (!ok) machine.forceTransition(JarvisState.IdleWake)
+            syncState(machine.current)
+            startWakeWordDetection()
         }
     }
 
@@ -4746,11 +4886,35 @@ class JarvisRuntime(
     }
 
     private suspend fun speakAndRecord(text: String) {
+        // Empty/whitespace guard: never attempt TTS on an empty reply.
+        // ResponseFormatter.format() can return "" when the entire content was
+        // reasoning chain-of-thought — we must not speak that silence.
+        if (text.isBlank()) {
+            Log.d(TAG, "[SPEAK_SUPPRESSED] reason=blank_input")
+            return
+        }
         val base = ResponseFormatter.format(text)
+        // Post-format blank guard: if stripping markup left nothing, skip TTS.
+        if (base.isBlank()) {
+            Log.d(TAG, "[SPEAK_SUPPRESSED] reason=blank_after_format")
+            return
+        }
         // In driving mode, truncate to first 2 sentences to keep responses brief
         val formatted = if (drivingModeManager.isDriving) {
             base.split(Regex("(?<=[.!?])\\s+")).take(2).joinToString(" ")
         } else base
+
+        SpeechTurnStore.setReplyLength(formatted.length)
+
+        // Central reply log — every spoken reply is recorded before TTS fires.
+        JarvisReplyLogger.get().append(
+            source = _pendingReplySource,
+            spokenText = formatted,
+            phraseKey = _pendingPhraseKey,
+        )
+        _pendingReplySource = ReplySource.LLM   // reset to default for next call
+        _pendingPhraseKey = null
+
         memoryWriter.writeTurn(sessionId, "assistant", formatted)
         brainEngine.collector.onJarvisResponse(formatted)
         DeviceStateStore.update { copy(lastAssistantResponse = formatted) }

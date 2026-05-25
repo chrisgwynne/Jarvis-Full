@@ -1,14 +1,24 @@
 using System.Diagnostics;
 using System.Windows;
+using Jarvis.App.Dashboard;
+using Jarvis.Core.Logging;
+using Jarvis.Settings;
 using Jarvis.App.Overlay;
 using Jarvis.App.Tray;
 using Jarvis.Core.Awareness;
 using Jarvis.Core.Diagnostics;
+using Jarvis.Core.Focus;
 using Jarvis.Core.Hotkeys;
+using Jarvis.Core.Memory;
+using Jarvis.Core.Presence;
+using Jarvis.Core.Proactive;
 using Jarvis.Core.Settings;
 using Jarvis.Core.State;
 using Jarvis.DesktopAwareness;
 using Jarvis.Diagnostics;
+using Jarvis.Perception.Dashboard;
+using Jarvis.Perception.Presence;
+using Jarvis.Perception.Proactive;
 using Jarvis.Settings;
 using Jarvis.App.Automation;
 using Jarvis.App.Capture;
@@ -25,14 +35,18 @@ using Jarvis.Core.Sidecar;
 using Jarvis.Perception.Conversation;
 using Jarvis.Perception.Guidance;
 using Jarvis.Perception.Sidecar;
+using Jarvis.Core.Memory;
+using Jarvis.Core.Tools;
 using Jarvis.Perception.Browser;
 using Jarvis.Perception.Capture;
 using Jarvis.Perception.Classification;
 using Jarvis.Perception.Clipboard;
 using Jarvis.Perception.Ide;
+using Jarvis.Perception.Memory;
 using Jarvis.Perception.Ocr;
 using Jarvis.Perception.Selection;
 using Jarvis.Perception.Snapshot;
+using Jarvis.Perception.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MessageBox = System.Windows.MessageBox;
@@ -58,6 +72,8 @@ public partial class App : System.Windows.Application
     private IMacBridgeCoordinator? _macBridge;
     private ISidecarContextPublisher? _contextPublisher;
     private IRemoteExecutionBridge? _remoteExecutor;
+    private WindowsToolBridge? _toolBridge;
+    private WindowsMemoryBridge? _memoryBridge;
     private IMicrophoneCapture? _mic;
     private IPartialTranscriptCoordinator? _partialCoord;
     private IPlaybackInterruptionCoordinator? _interruptCoord;
@@ -154,11 +170,32 @@ public partial class App : System.Windows.Application
         _macBridge.FrameReceived += OnBridgeFrame;
         await _macBridge.StartAsync();
 
+        var focusTracker = _services.GetRequiredService<IFocusSessionTracker>();
+        await focusTracker.StartAsync();
+
+        var presenceManager = _services.GetRequiredService<IPresenceModeManager>();
+        await presenceManager.StartAsync();
+
+        var nudgeEngine = _services.GetRequiredService<IProactiveNudgeEngine>();
+        await nudgeEngine.StartAsync();
+        nudgeEngine.NudgeReady += (_, nudge) =>
+            diagnostics.Record(DiagnosticLevel.Info, "proactive", nudge.Key,
+                new Dictionary<string, object?> { ["msg"] = nudge.Message });
+
+        var contextEngine = _services.GetRequiredService<Jarvis.Core.Context.IWindowsContextEngine>();
+        await contextEngine.StartAsync();
+
         _contextPublisher = _services.GetRequiredService<ISidecarContextPublisher>();
         await _contextPublisher.StartAsync();
 
         _remoteExecutor = _services.GetRequiredService<IRemoteExecutionBridge>();
         _remoteExecutor.Attach();
+
+        // P8 — tool layer + memory bridges
+        _toolBridge = _services.GetRequiredService<WindowsToolBridge>();
+        _toolBridge.Attach();
+        _memoryBridge = _services.GetRequiredService<WindowsMemoryBridge>();
+        _memoryBridge.Attach();
 
         // P7 — wire the orchestration + fallback coordinators (they self-subscribe to
         // bridge events; resolving them is enough to start them).
@@ -243,7 +280,8 @@ public partial class App : System.Windows.Application
             openChat: ShowChat,
             openLlmSettings: ShowLlmSettings,
             openRedactionPreview: ShowRedactionPreview,
-            exportConversation: ExportConversation);
+            exportConversation: ExportConversation,
+            openDashboard: ShowDashboard);
         _tray.QuitRequested += (_, _) => RequestShutdown("tray quit");
 
         // Real global hotkeys via RegisterHotKey.
@@ -257,6 +295,69 @@ public partial class App : System.Windows.Application
         _hotkeyService.Register("ClickLastTarget", "Ctrl+Shift+Enter", () => _ = ClickLastTargetAsync());
         _hotkeyService.Register("OpenChat", "Ctrl+Shift+Space", ShowChat);
         _hotkeyService.Register("QuitJarvis", "Ctrl+Shift+Q", () => RequestShutdown("hotkey quit"));
+    }
+
+    private DashboardWindow? _dashboardWindow;
+
+    private void ShowDashboard()
+    {
+        if (_services is null) return;
+        if (_dashboardWindow is { IsLoaded: true }) { _dashboardWindow.Activate(); return; }
+        var vm = _services.GetRequiredService<DashboardViewModel>();
+        _dashboardWindow = new DashboardWindow(vm);
+        _dashboardWindow.Closed += (_, _) => _dashboardWindow = null;
+        _dashboardWindow.QuickActionRequested += OnDashboardQuickAction;
+        _dashboardWindow.Show();
+        _dashboardWindow.Activate();
+    }
+
+    private void OnDashboardQuickAction(object? sender, string action)
+    {
+        if (_services is null) return;
+        var registry = _services.GetService<IWindowsToolRegistry>();
+        var presenceManager = _services.GetService<IPresenceModeManager>();
+        var vm = _services.GetService<DashboardViewModel>();
+
+        switch (action)
+        {
+            case "toggle_focus":
+                if (presenceManager is not null)
+                {
+                    if (presenceManager.Current == PresenceMode.Focus && presenceManager.IsUserOverride)
+                        presenceManager.ClearOverride();
+                    else
+                        presenceManager.SetMode(PresenceMode.Focus);
+                }
+                break;
+
+            case "screenshot":
+                _ = Task.Run(async () =>
+                {
+                    var tool = registry?.Find("screenshot_window");
+                    if (tool is null) return;
+                    var req = new WindowsToolRequest("dashboard", "screenshot_window",
+                        new Dictionary<string, string>(), false, "dashboard", DateTimeOffset.UtcNow);
+                    var result = await tool.ExecuteAsync(req).ConfigureAwait(false);
+                    vm?.RecordToolRun("screenshot_window", result.Success, result.Summary, result.PrivacyImpact);
+                });
+                break;
+
+            case "running_apps":
+                _ = Task.Run(async () =>
+                {
+                    var tool = registry?.Find("inspect_processes");
+                    if (tool is null) return;
+                    var req = new WindowsToolRequest("dashboard", "inspect_processes",
+                        new Dictionary<string, string>(), false, "dashboard", DateTimeOffset.UtcNow);
+                    var result = await tool.ExecuteAsync(req).ConfigureAwait(false);
+                    vm?.RecordToolRun("inspect_processes", result.Success, result.Summary, result.PrivacyImpact);
+                    if (result.Detail is not null)
+                        _ = Dispatcher.BeginInvoke(() =>
+                            System.Windows.MessageBox.Show(result.Detail, "Running Apps",
+                                MessageBoxButton.OK, MessageBoxImage.None));
+                });
+                break;
+        }
     }
 
     private Jarvis.App.Llm.LlmSettingsWindow? _llmSettingsWindow;
@@ -544,6 +645,11 @@ public partial class App : System.Windows.Application
                 BridgeDegraded = status.State == BridgeState.Degraded
             });
         });
+
+        // Also update dashboard VM with live bridge status.
+        var vm = _services.GetService<DashboardViewModel>();
+        if (vm is not null)
+            Dispatcher.BeginInvoke(() => vm.BridgeStatus = status.State.ToString());
     }
 
     private void OnBridgeFrame(object? sender, SidecarFrame frame)
@@ -755,6 +861,8 @@ public partial class App : System.Windows.Application
             if (_interruptCoord is IDisposable icd) icd.Dispose();
             if (_mic is not null) { try { await _mic.StopAsync(); } catch { } await _mic.DisposeAsync(); }
             _remoteExecutor?.Dispose();
+            _toolBridge?.Dispose();
+            _memoryBridge?.Dispose();
             if (_contextPublisher is not null) await _contextPublisher.DisposeAsync();
             if (_macBridge is not null)
             {
@@ -917,11 +1025,16 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<ISpeechRecognitionProvider>(),
             () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
             sp.GetService<IDiagnostics>()));
-        services.AddSingleton<ILocalTtsService>(sp => new Jarvis.App.Sidecar.WinRtTtsService(
-            sp.GetRequiredService<ITtsLeaseCoordinator>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
-            sp.GetService<IDiagnostics>(),
-            sp.GetService<AudioDiagnostics>()));
+        services.AddSingleton<IReplyLogger, JsonlReplyLogger>();
+        services.AddSingleton<ILocalTtsService>(sp =>
+        {
+            var inner = new Jarvis.App.Sidecar.WinRtTtsService(
+                sp.GetRequiredService<ITtsLeaseCoordinator>(),
+                () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
+                sp.GetService<IDiagnostics>(),
+                sp.GetService<AudioDiagnostics>());
+            return new LoggingTtsService(inner, sp.GetRequiredService<IReplyLogger>());
+        });
         services.AddSingleton<IPartialTranscriptCoordinator>(sp => new PartialTranscriptCoordinator(
             sp.GetRequiredService<IMacBridgeCoordinator>(),
             sp.GetRequiredService<IEchoSuppressionCoordinator>(),
@@ -941,7 +1054,9 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<IConversationContextBuilder>(),
             sp.GetRequiredService<IContextBudgeter>(),
             sp.GetRequiredService<IMacBridgeCoordinator>(),
-            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar));
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
+            contextEngine: sp.GetService<Jarvis.Core.Context.IWindowsContextEngine>(),
+            awarenessSettings: () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
         services.AddSingleton<IRemoteExecutionBridge>(sp => new RemoteExecutionBridge(
             sp.GetRequiredService<IMacBridgeCoordinator>(),
             sp.GetRequiredService<IAutomationExecutor>(),
@@ -973,5 +1088,87 @@ public partial class App : System.Windows.Application
             diagnostics: sp.GetService<IDiagnostics>()));
 
         services.AddTransient<OverlayWindow>();
+
+        // Context awareness
+        services.AddSingleton<IAppUsageTracker>(sp => new AppUsageTracker(
+            sp.GetRequiredService<IDesktopAwarenessService>(),
+            sp.GetRequiredService<IWorkflowCategorizer>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness));
+
+        // Focus + presence + proactive
+        services.AddSingleton<IFocusSessionTracker>(sp => new FocusSessionTracker(
+            sp.GetRequiredService<IAppUsageTracker>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness,
+            sp.GetService<IDiagnostics>()));
+        services.AddSingleton<IPresenceModeManager>(sp => new PresenceModeManager(
+            sp.GetRequiredService<IFocusSessionTracker>(),
+            sp.GetRequiredService<IAppUsageTracker>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Awareness,
+            sp.GetService<IDiagnostics>()));
+        services.AddSingleton<ISessionMemoryStore>(sp => new SessionMemoryStore(
+            sp.GetService<IDiagnostics>()));
+        services.AddSingleton<IProactiveNudgeEngine>(sp => new ProactiveNudgeEngine(
+            sp.GetRequiredService<IFocusSessionTracker>(),
+            sp.GetRequiredService<IPresenceModeManager>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Proactivity,
+            sp.GetService<IDiagnostics>()));
+
+        // Context engine
+        services.AddSingleton<Jarvis.Core.Context.IWindowsContextSnapshotBuilder, Jarvis.Perception.Context.WindowsContextSnapshotBuilder>();
+        services.AddSingleton<Jarvis.Core.Context.IWindowsContextEngine>(sp => new Jarvis.Perception.Context.WindowsContextEngine(
+            sp.GetRequiredService<PerceptionService>(),
+            sp.GetRequiredService<IAppUsageTracker>(),
+            sp.GetRequiredService<Jarvis.Core.Context.IWindowsContextSnapshotBuilder>(),
+            sp.GetRequiredService<IFocusSessionTracker>(),
+            sp.GetRequiredService<IPresenceModeManager>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.ContextEngine,
+            sp.GetService<IDiagnostics>()));
+
+        // Dashboard
+        services.AddSingleton<DashboardViewModel>(sp =>
+        {
+            var vm = new DashboardViewModel();
+            var engine = sp.GetRequiredService<Jarvis.Core.Context.IWindowsContextEngine>();
+            engine.ContextChanged += (_, snap) =>
+                System.Windows.Application.Current.Dispatcher.BeginInvoke(() => vm.ApplyContextSnapshot(snap));
+            return vm;
+        });
+
+        // ─── P8: Tool layer ──────────────────────────────────────────────────────────
+
+        // Register individual tools
+        services.AddSingleton<IWindowsTool, OpenAppTool>();
+        services.AddSingleton<IWindowsTool, FocusAppTool>();
+        services.AddSingleton<IWindowsTool>(sp => new CloseAppTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+        services.AddSingleton<IWindowsTool>(sp => new ScreenshotWindowTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+        services.AddSingleton<IWindowsTool>(sp => new ClipboardSummaryTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+        services.AddSingleton<IWindowsTool, VolumeMicTool>();
+        services.AddSingleton<IWindowsTool, ProcessInspectTool>();
+        services.AddSingleton<IWindowsTool>(sp => new OpenProjectTool(
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Projects));
+
+        // Tool registry
+        services.AddSingleton<IWindowsToolRegistry>(sp => new WindowsToolRegistry(
+            sp.GetServices<IWindowsTool>(),
+            () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Tools));
+
+        // Desktop memory query service
+        services.AddSingleton<IDesktopMemoryQueryService>(sp => new DesktopMemoryQueryService(
+            sp.GetRequiredService<ISessionMemoryStore>(),
+            sp.GetRequiredService<IAppUsageTracker>(),
+            sp.GetRequiredService<IFocusSessionTracker>()));
+
+        // Bridges (Attach() called in OnStartup)
+        services.AddSingleton<WindowsToolBridge>(sp => new WindowsToolBridge(
+            sp.GetRequiredService<IMacBridgeCoordinator>(),
+            sp.GetRequiredService<IWindowsToolRegistry>(),
+            sp.GetService<IDiagnostics>()));
+        services.AddSingleton<WindowsMemoryBridge>(sp => new WindowsMemoryBridge(
+            sp.GetRequiredService<IMacBridgeCoordinator>(),
+            sp.GetRequiredService<IDesktopMemoryQueryService>(),
+            sp.GetService<IDiagnostics>()));
     }
 }

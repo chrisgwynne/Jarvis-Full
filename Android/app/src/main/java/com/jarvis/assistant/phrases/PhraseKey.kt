@@ -87,4 +87,27 @@ object PhraseKey {
     // DIAGNOSTICS
     const val DIAG_PERMISSION_REVOKED   = "diagnostics.permission_revoked"
     const val DIAG_SERVICE_RESTARTED    = "diagnostics.service_restarted"
+
+    // FAILURES — these mirror FailurePhrases.kt and are now in the editable registry
+    const val FAILURE_GENERIC                   = "failure.generic"
+    const val FAILURE_SOMETHING_WENT_WRONG      = "failure.something_went_wrong"
+    const val FAILURE_AUDIO_UNAVAILABLE         = "failure.audio_unavailable"
+    const val FAILURE_CAMERA_UNAVAILABLE        = "failure.camera_unavailable"
+    const val FAILURE_NO_FLASH                  = "failure.no_flash"
+    const val FAILURE_MEDIA_CONTROL             = "failure.media_control"
+    const val FAILURE_FLASHLIGHT                = "failure.flashlight"
+    const val FAILURE_RECORDING                 = "failure.recording"
+    const val FAILURE_TRANSCRIPTION             = "failure.transcription"
+    const val FAILURE_IMAGE_ANALYSIS            = "failure.image_analysis"
+    const val FAILURE_IMAGE_GENERATION          = "failure.image_generation"
+    const val FAILURE_CAMERA_CAPTURE            = "failure.camera_capture"
+    const val FAILURE_EXPORT                    = "failure.export"
+    const val FAILURE_EMAIL_APP                 = "failure.email_app"
+    const val FAILURE_TIMER                     = "failure.timer"
+    const val FAILURE_TIMER_DURATION            = "failure.timer_duration"
+    const val FAILURE_ALARM                     = "failure.alarm"
+    const val FAILURE_CALL                      = "failure.call"
+    const val FAILURE_SMS                       = "failure.sms"
+    const val FAILURE_FIND_PHONE_RINGER         = "failure.find_phone_ringer"
+    const val FAILURE_APP_NOT_INSTALLED         = "failure.app_not_installed"
 }

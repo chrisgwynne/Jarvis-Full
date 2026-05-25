@@ -47,7 +47,8 @@ import Foundation
                         ]))
                     }
                 } catch {
-                    self.speak("I couldn't check GitHub right now.")
+                    self.speak(self.renderer.render(ResponseKey.githubError,
+                        ["error": error.localizedDescription]))
                 }
             }
             return true
@@ -72,7 +73,8 @@ import Foundation
                 let prs = try await module.prMgr.openPRs(repo: fullName)
                 let prNum = number ?? prs.first?.number
                 guard let n = prNum else {
-                    self.speak("No open PRs found in \(fullName.components(separatedBy: "/").last ?? fullName).")
+                    self.speak(self.renderer.render(ResponseKey.githubNoPRs,
+                        ["repo": fullName.components(separatedBy: "/").last ?? fullName]))
                     return
                 }
                 let result = try await module.reviewEngine.reviewPR(repo: fullName, number: n)
@@ -85,7 +87,7 @@ import Foundation
             guard getModule() != nil else {
                 speak(renderer.render(ResponseKey.githubNotConfigured)); return true
             }
-            speak("To open a PR, tell me the title, and I'll need the head branch name.")
+            speak(renderer.render(ResponseKey.githubPRCreatePrompt))
             return true
 
         case .githubStalePRs(let repo):
@@ -94,10 +96,15 @@ import Foundation
                 let stale = try await module.prMgr.stalePRs(repo: fullName)
                 let repoShort = fullName.components(separatedBy: "/").last ?? fullName
                 if stale.isEmpty {
-                    self.speak("No stale PRs in \(repoShort).")
+                    self.speak(self.renderer.render(ResponseKey.githubNoStalePRs, ["repo": repoShort]))
                 } else {
                     let titles = stale.prefix(3).map { "\($0.title) (#\($0.number))" }.joined(separator: "; ")
-                    self.speak("\(stale.count) stale PR\(stale.count == 1 ? "" : "s") in \(repoShort): \(titles).")
+                    self.speak(self.renderer.render(ResponseKey.githubStalePRs, [
+                        "count": "\(stale.count)",
+                        "plural": stale.count == 1 ? "" : "s",
+                        "repo": repoShort,
+                        "titles": titles,
+                    ]))
                 }
             }
             return true
@@ -130,12 +137,12 @@ import Foundation
                             self.speak(self.renderer.render(ResponseKey.githubIssueCreated,
                                 ["summary": "'\(t)' filed in \(fullName.components(separatedBy: "/").last ?? fullName)."]))
                         } else {
-                            self.speak("Couldn't create the issue. Check your token permissions.")
+                            self.speak(self.renderer.render(ResponseKey.githubIssueCreateFail))
                         }
                     }
                 }
             } else {
-                speak("What should I title the issue?")
+                speak(renderer.render(ResponseKey.githubIssueTitleAsk))
             }
             return true
 
@@ -145,10 +152,15 @@ import Foundation
                 let commits  = try await module.repoMgr.recentCommits(repo: fullName, limit: 5)
                 let repoShort = fullName.components(separatedBy: "/").last ?? fullName
                 if commits.isEmpty {
-                    self.speak("No recent commits found in \(repoShort).")
+                    self.speak(self.renderer.render(ResponseKey.githubNoCommits, ["repo": repoShort]))
                 } else {
                     let msgs = commits.prefix(3).map(\.title).joined(separator: "; ")
-                    self.speak("\(commits.count) recent commit\(commits.count == 1 ? "" : "s") in \(repoShort): \(msgs).")
+                    self.speak(self.renderer.render(ResponseKey.githubCommits, [
+                        "count": "\(commits.count)",
+                        "plural": commits.count == 1 ? "" : "s",
+                        "repo": repoShort,
+                        "msgs": msgs,
+                    ]))
                 }
             }
             return true
@@ -183,10 +195,11 @@ import Foundation
             executeTask { module in
                 let repos = try await module.repoMgr.myRepos()
                 if repos.isEmpty {
-                    self.speak("No repositories found.")
+                    self.speak(self.renderer.render(ResponseKey.githubNoRepos))
                 } else {
                     let names = repos.prefix(5).map(\.name).joined(separator: ", ")
-                    self.speak("Your top repos: \(names)\(repos.count > 5 ? " and \(repos.count - 5) more." : ".")")
+                    let more  = repos.count > 5 ? " and \(repos.count - 5) more" : ""
+                    self.speak(self.renderer.render(ResponseKey.githubTopRepos, ["names": names, "more": more]))
                 }
             }
             return true
@@ -195,7 +208,7 @@ import Foundation
             executeTask { module in
                 let repos = try await module.repoMgr.activeRepos(limit: 5)
                 let names = repos.map(\.name).joined(separator: ", ")
-                self.speak("Most active repos: \(names).")
+                self.speak(self.renderer.render(ResponseKey.githubMostActive, ["names": names]))
             }
             return true
 
@@ -249,7 +262,8 @@ import Foundation
                 let fullName = try await module.resolveRepo(repo)
                 let prs = try await module.prMgr.openPRs(repo: fullName)
                 guard let pr = prs.first else {
-                    self.speak("No open PRs to review in \(fullName.components(separatedBy: "/").last ?? fullName).")
+                    self.speak(self.renderer.render(ResponseKey.githubNoPRsToReview,
+                        ["repo": fullName.components(separatedBy: "/").last ?? fullName]))
                     return
                 }
                 let result = try await module.reviewEngine.reviewPR(repo: fullName, number: pr.number)

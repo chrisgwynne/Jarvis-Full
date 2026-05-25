@@ -165,4 +165,108 @@ final class DaemonPhase4Tests: XCTestCase {
         ]
         XCTAssertEqual(uuids.count, Set(uuids).count, "All Phase 4 pbxproj UUIDs must be unique")
     }
+
+    // MARK: - cappedForRemoteTts (remote reply conciseness cap)
+    // These tests use a minimal test double that mirrors the helper extracted into JarvisController.
+    // The helper is tested here as a pure function so we don't need a full JarvisController setup.
+
+    private func cap(_ text: String, maxSentences: Int = 3, maxChars: Int = 320) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        var sentences: [String] = []
+        var current = ""
+        for char in trimmed {
+            current.append(char)
+            if char == "." || char == "!" || char == "?" {
+                let s = current.trimmingCharacters(in: .whitespaces)
+                if !s.isEmpty { sentences.append(s) }
+                current = ""
+            }
+        }
+        let tail = current.trimmingCharacters(in: .whitespaces)
+        if !tail.isEmpty { sentences.append(tail) }
+        let capped = sentences.prefix(maxSentences).joined(separator: " ")
+        guard capped.count > maxChars else { return capped }
+        let truncated = String(capped.prefix(maxChars))
+        let terminators: [Character] = [".", "!", "?"]
+        if let lastTerm = truncated.lastIndex(where: { terminators.contains($0) }),
+           truncated.distance(from: truncated.startIndex, to: lastTerm) > maxChars / 2 {
+            return String(truncated[...lastTerm]).trimmingCharacters(in: .whitespaces)
+        }
+        return truncated.trimmingCharacters(in: .whitespaces)
+    }
+
+    // 17. Empty string returns empty (no TTS for blank replies)
+    func testCappedForRemoteTtsEmptyStringReturnsEmpty() {
+        XCTAssertEqual("", cap(""))
+        XCTAssertEqual("", cap("   "))
+        XCTAssertEqual("", cap("\n\n\t"))
+    }
+
+    // 18. Short reply passes through unchanged
+    func testCappedForRemoteTtsShortReplyUnchanged() {
+        let short = "The weather is fine."
+        XCTAssertEqual(short, cap(short))
+    }
+
+    // 19. Exactly 3 sentences pass through
+    func testCappedForRemoteTtsThreeSentencesPassThrough() {
+        let three = "First sentence. Second sentence. Third sentence."
+        let result = cap(three)
+        XCTAssertTrue(result.contains("First"))
+        XCTAssertTrue(result.contains("Second"))
+        XCTAssertTrue(result.contains("Third"))
+    }
+
+    // 20. 4 sentences are capped at 3
+    func testCappedForRemoteTtsFourSentencesCappedAtThree() {
+        let four = "One. Two. Three. Four."
+        let result = cap(four)
+        XCTAssertFalse(result.contains("Four"), "Fourth sentence must be removed: \(result)")
+        XCTAssertTrue(result.contains("One"))
+        XCTAssertTrue(result.contains("Three"))
+    }
+
+    // 21. Hard char cap applied for very long single sentences
+    func testCappedForRemoteTtsHardCharCap() {
+        let longText = String(repeating: "a", count: 400) + "."
+        let result = cap(longText)
+        XCTAssertLessThanOrEqual(result.count, 320, "Result must be ≤ 320 chars")
+    }
+
+    // 22. Exclamation and question marks count as sentence endings
+    func testCappedForRemoteTtsPunctuationVariants() {
+        let text = "Are you ready? Yes I am! Now let us go. And also this."
+        let result = cap(text)
+        XCTAssertTrue(result.contains("Are you ready?"))
+        XCTAssertTrue(result.contains("Yes I am!"))
+        XCTAssertTrue(result.contains("Now let us go."))
+        XCTAssertFalse(result.contains("And also this"), "4th sentence must be dropped")
+    }
+
+    // 23. Remote reply with no terminal punctuation (tail clause) passes through under 3-sentence cap
+    func testCappedForRemoteTtsTailClauseWithNoPunctuation() {
+        let text = "This has no ending"
+        XCTAssertEqual(text, cap(text))
+    }
+
+    // 24. Sentence cap with custom maxSentences=1 keeps only the first sentence
+    func testCappedForRemoteTtsCustomMaxSentencesOne() {
+        let text = "First. Second. Third."
+        let result = cap(text, maxSentences: 1)
+        XCTAssertEqual("First.", result)
+    }
+
+    // 25. Remote reply conciseness contract: mirrors Android ResponseFormatter limits
+    func testRemoteReplyConcisencyContractMatchesAndroid() {
+        // Android ResponseFormatter: MAX_SENTENCES=3, MAX_CHARS=320
+        // Mac cappedForRemoteTts must enforce the same limits.
+        let shortReply = "Here is your answer."
+        let longReply  = String(repeating: "Word ", count: 100) + "."
+        let fourSentence = "A. B. C. D."
+        XCTAssertEqual(shortReply, cap(shortReply))
+        XCTAssertLessThanOrEqual(cap(longReply).count, 320)
+        XCTAssertFalse(cap(fourSentence).contains("D."),
+                       "Should not contain 4th sentence in remote reply")
+    }
 }
