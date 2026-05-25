@@ -33,6 +33,12 @@ class AndroidTtsProvider(private val engine: TtsEngine) : TtsProvider {
 }
 
 /**
+ * Signals that the Piper backend failed for the current utterance so the
+ * coordinator can fall back to the Android engine.
+ */
+private class PiperSpeakFailedException : RuntimeException("piper speak returned false")
+
+/**
  * LocalOnDeviceTtsProvider — [TtsProvider] implementation using Piper ONNX
  * models via [PiperVoiceManager].
  */
@@ -45,8 +51,14 @@ class LocalOnDeviceTtsProvider(
     override fun isReady(): Boolean = manager.isReady()
 
     override suspend fun speak(text: String) {
+        // Throw on failure so [TtsCoordinator] catches it and falls back to
+        // Android TTS.  Returning normally would swallow the failure and the
+        // caller would believe speech happened — e.g. the wake-word ack would
+        // be silently dropped, leaving the user with a chime and no spoken
+        // acknowledgement that Jarvis is listening.
         if (!manager.speak(text)) {
-            Log.w("LocalTtsProvider", "[PIPER_SPEAK_FAILED] falling back to Android TTS handled by selector")
+            Log.w("LocalTtsProvider", "[PIPER_SPEAK_FAILED] signalling fallback")
+            throw PiperSpeakFailedException()
         }
     }
 
