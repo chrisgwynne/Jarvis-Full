@@ -24,6 +24,8 @@ public sealed record JarvisSettings
     /// When <see cref="BrainGatewayConfig.BaseUrl"/> is non-empty the bridge connects to
     /// /v1/windows/ws; when empty the bridge stays Disabled.</summary>
     public BrainGatewayConfig Gateway { get; init; } = new();
+    /// <summary>Context engine: app usage timeline, snapshot building, bridge enrichment.</summary>
+    public ContextEngineSettings ContextEngine { get; init; } = new();
 
     public static JarvisSettings Defaults => new();
 }
@@ -178,6 +180,25 @@ public sealed record AwarenessSettings
     public int IdleThresholdSeconds { get; init; } = 45;
     public bool TrackForegroundApp { get; init; } = true;
     public bool TrackIdle { get; init; } = true;
+    /// <summary>Maximum number of app-usage entries retained by AppUsageTracker.</summary>
+    public int AppUsageHistoryDepth { get; init; } = 20;
+}
+
+/// <summary>
+/// Controls the Windows context engine: app usage timeline, snapshot enrichment,
+/// and the fields that flow into the Mac bridge ContextPayload.
+/// </summary>
+public sealed record ContextEngineSettings
+{
+    /// <summary>Master switch. When false the engine stays idle and emits no events.</summary>
+    public bool Enabled { get; init; } = true;
+    /// <summary>Maximum number of app-usage entries retained in the ring buffer.</summary>
+    public int AppUsageHistoryDepth { get; init; } = 20;
+    /// <summary>How many recent entries to include in the timeline summary pushed to the Mac.</summary>
+    public int TimelineSummaryDepth { get; init; } = 10;
+    /// <summary>When false, only WorkflowCategory and ProcessName go into timeline entries;
+    /// title snippets are never included in any code path.</summary>
+    public bool IncludePrivacySafeTitleSnippets { get; init; } = false;
 }
 
 public sealed record PerformanceSettings

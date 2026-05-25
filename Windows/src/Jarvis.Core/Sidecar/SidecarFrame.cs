@@ -115,6 +115,12 @@ public sealed class ContextPayload
     [JsonPropertyName("idleSeconds")] public double? IdleSeconds { get; set; }
     /// <summary>Recent TTS interruption count (last 30 s).</summary>
     [JsonPropertyName("recentInterruptions")] public int? RecentInterruptions { get; set; }
+
+    // ─── Context engine additions ──────────────────────────────────────────────────
+    /// <summary>Recent distinct foreground process names, newest first. Privacy-safe (no titles).</summary>
+    [JsonPropertyName("recentApps")] public string[]? RecentApps { get; set; }
+    /// <summary>Compact workflow timeline summary, e.g. "Coding(15m)→Browsing(3m)→Coding".</summary>
+    [JsonPropertyName("timelineSummary")] public string? TimelineSummary { get; set; }
 }
 
 public static class SidecarFrameTypes
