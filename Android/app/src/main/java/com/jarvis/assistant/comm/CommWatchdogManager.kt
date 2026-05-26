@@ -2,7 +2,7 @@ package com.jarvis.assistant.comm
 
 import android.content.Context
 import android.util.Log
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
 import org.json.JSONObject
 
 /**
@@ -23,7 +23,7 @@ import org.json.JSONObject
  */
 class CommWatchdogManager(
     private val context: Context,
-    private val getGateway: () -> BrainGatewayWebSocketClient?
+    private val getGateway: () -> MacBrainConnectionManager?
 ) {
     private val TAG = "CommWatchdogManager"
 

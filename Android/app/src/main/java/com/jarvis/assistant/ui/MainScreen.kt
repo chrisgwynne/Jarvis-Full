@@ -31,7 +31,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.jarvis.assistant.ui.ConversationViewModel
 import com.jarvis.assistant.JarvisApp
-import com.jarvis.assistant.remote.macbridge.AndroidRole
+
 import com.jarvis.assistant.service.JarvisService
 import com.jarvis.assistant.ui.orb.OrbViewModel
 import com.jarvis.assistant.ui.orb.OrbVisualState
@@ -54,8 +54,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
-        val role = JarvisApp.macBridgeSettings.snapshot().androidRole
-        if (role == AndroidRole.BRIDGE_ONLY && !JarvisService.isRunning(context)) {
+        if (!JarvisService.isRunning(context)) {
             JarvisService.start(context)
         }
     }

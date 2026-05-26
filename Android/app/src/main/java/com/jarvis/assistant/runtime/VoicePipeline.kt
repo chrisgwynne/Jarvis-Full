@@ -19,8 +19,7 @@ import com.jarvis.assistant.llm.NetworkClient
 import com.jarvis.assistant.memory.MemoryWriter
 import com.jarvis.assistant.prompt.PromptAssembler
 import com.jarvis.assistant.remote.macbrain.BrainContextRequest
-import com.jarvis.assistant.remote.macbrain.BrainRoutingPolicy
-import com.jarvis.assistant.remote.macbrain.BrainSyncRunner
+import com.jarvis.assistant.remote.brain.BrainRoutingPolicy
 import com.jarvis.assistant.remote.macbrain.MacBrainClient
 import com.jarvis.assistant.security.ActionPolicyGate
 import com.jarvis.assistant.speaker.SpeakerSessionContext
@@ -84,7 +83,6 @@ class VoicePipeline(
     /** Called to compute the current presence for the LLM. */
     private val presenceProvider: () -> Presence,
     private val macBrainClient: MacBrainClient? = null,
-    private val brainSyncRunner: BrainSyncRunner? = null,
 ) {
 
     companion object {
@@ -324,16 +322,6 @@ class VoicePipeline(
                             val result = toolRegistry.execute(context, tool, ToolInput(transcript, argsMap))
                             LatencyTracker.mark("TURN_TIMING_LOCAL_TOOL_DONE")
 
-                            // Report outcome — fire-and-forget, never blocks speech path
-                            brainSyncRunner?.enqueueCommandOutcome(
-                                deviceId   = settings.macBrainDeviceId,
-                                transcript = transcript,
-                                toolName   = fcResult.toolName,
-                                success    = result is ToolResult.Success,
-                                error      = if (result is ToolResult.Failure)
-                                    result.spokenFeedback.take(100) else null,
-                            )
-
                             val feedback = when (result) {
                                 is ToolResult.Success -> result.spokenFeedback
                                 is ToolResult.Failure -> result.spokenFeedback
@@ -408,14 +396,6 @@ class VoicePipeline(
                 brainEngine?.collector?.onJarvisResponse(formatted)
                 llmRouter.conversationStore.addMessage("assistant", responseText)
                 DeviceStateStore.update { copy(lastAssistantResponse = formatted) }
-            }
-
-            // Detect memory/preference candidates and queue for Brain sync (fire-and-forget)
-            if (isMemoryCandidate(transcript)) {
-                brainSyncRunner?.enqueueMemoryCandidate(
-                    deviceId   = settings.macBrainDeviceId,
-                    transcript = transcript,
-                )
             }
 
         } catch (e: CancellationException) {

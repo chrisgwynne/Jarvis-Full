@@ -3,8 +3,6 @@ package com.jarvis.assistant.tools.device
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.jarvis.assistant.remote.macbridge.MacBridgeSettingsRepository
-import com.jarvis.assistant.remote.maccamera.HttpMacCameraClient
 import com.jarvis.assistant.tools.framework.Tool
 import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolResult
@@ -21,7 +19,6 @@ import com.jarvis.assistant.util.SettingsStore
 class MacCameraViewerTool(
     private val context: Context,
     private val settings: SettingsStore,
-    private val bridgeSettings: MacBridgeSettingsRepository,
 ) : Tool {
 
     override val name        = "mac_camera_viewer"
@@ -54,17 +51,6 @@ class MacCameraViewerTool(
         if (!settings.macCameraEnabled) {
             Log.w(TAG, "MAC_CAMERA_ERROR: feature disabled in settings")
             return ToolResult.Failure("Mac camera viewer is disabled in Settings.")
-        }
-
-        val client = HttpMacCameraClient(settings, bridgeSettings)
-        val available = client.validateConnection()
-
-        if (!available) {
-            Log.w(TAG, "MAC_CAMERA_ERROR: camera not reachable")
-            return ToolResult.Success(
-                spokenFeedback = "Mac camera isn't available.",
-                silent = false
-            )
         }
 
         Log.i(TAG, "MAC_CAMERA_VIEWER_OPENED")

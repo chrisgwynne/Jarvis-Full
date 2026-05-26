@@ -1,12 +1,12 @@
 package com.jarvis.assistant.comm
 
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
 import org.json.JSONObject
 import java.util.UUID
 
 /**
  * CommEventBroadcaster — sends comm.event.received and comm.event.resolved frames
- * to the daemon via BrainGatewayWebSocketClient.
+ * to the daemon via MacBrainConnectionManager.
  *
  * SECURITY: Raw phone numbers are never logged or transmitted.
  * All phone handles must be pre-masked (e.g. "****1234") before reaching this object.
@@ -16,7 +16,7 @@ object CommEventBroadcaster {
     /**
      * Sends a comm.event.received frame to the daemon.
      *
-     * @param gateway         Active WebSocket client (null-safe — no-op if null or disconnected)
+     * @param gateway         Active connection manager (null-safe — no-op if null or disconnected)
      * @param channel         "phone" | "sms" | "whatsapp" | "whatsapp_business"
      * @param direction       "incoming" | "outgoing"
      * @param state           "missed" | "unread" | "received"
@@ -27,7 +27,7 @@ object CommEventBroadcaster {
      * @return eventId        UUID for correlating with a future sendResolved() call
      */
     fun sendReceived(
-        gateway: BrainGatewayWebSocketClient?,
+        gateway: MacBrainConnectionManager?,
         channel: String,
         direction: String,
         state: String,
@@ -56,12 +56,12 @@ object CommEventBroadcaster {
     /**
      * Sends a comm.event.resolved frame to notify the daemon an event was actioned.
      *
-     * @param gateway   Active WebSocket client
+     * @param gateway   Active connection manager
      * @param eventId   The UUID returned by [sendReceived]
      * @param state     "replied" | "called_back" | "dismissed"
      */
     fun sendResolved(
-        gateway: BrainGatewayWebSocketClient?,
+        gateway: MacBrainConnectionManager?,
         eventId: String,
         state: String
     ) {

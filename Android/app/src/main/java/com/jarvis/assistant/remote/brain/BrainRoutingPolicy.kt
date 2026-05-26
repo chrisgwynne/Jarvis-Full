@@ -1,4 +1,4 @@
-package com.jarvis.assistant.remote.macbrain
+package com.jarvis.assistant.remote.brain
 
 /**
  * BrainRoutingPolicy — decides whether a transcript warrants a Mac Brain context fetch.
@@ -36,9 +36,6 @@ object BrainRoutingPolicy {
     }
 
     // ── A. Instant-command guard ───────────────────────────────────────────────
-    // Mirror of the hot-set in InstantCommandRouter. Any transcript that starts
-    // with one of these prefixes is a pure local action — never touch the Brain.
-
     private val INSTANT_PREFIXES = listOf(
         "flashlight", "torch",
         "turn on flash", "turn off flash", "flash on", "flash off",
@@ -58,96 +55,46 @@ object BrainRoutingPolicy {
         INSTANT_PREFIXES.any { lower.startsWith(it) }
 
     // ── B. Project intent ─────────────────────────────────────────────────────
-    // GitHub, repos, codebases, open issues — all live on Mac Brain.
-
     private val PROJECT_SIGNALS = listOf(
-        "what's broken",
-        "what is broken",
-        "what's the status of",
-        "what is the status of",
-        "what's happening with",
-        "what happened with",
-        "github",
-        "pull request",
-        " pr ",
-        "open prs",
-        "the repo",
-        "the project",
-        "what are we building",
-        "what are we working on",
-        "what's left",
-        "what's outstanding",
-        "outstanding tasks",
-        "known issues",
-        "open issues",
-        "unresolved issue",
-        "what needs to be done",
-        "what's next on",
-        "jarvis project",
-        "codebase",
-        "the branch",
+        "what's broken", "what is broken",
+        "what's the status of", "what is the status of",
+        "what's happening with", "what happened with",
+        "github", "pull request", " pr ",
+        "open prs", "the repo", "the project",
+        "what are we building", "what are we working on",
+        "what's left", "what's outstanding",
+        "outstanding tasks", "known issues", "open issues", "unresolved issue",
+        "what needs to be done", "what's next on",
+        "jarvis project", "codebase", "the branch",
     )
 
     private fun matchesProjectIntent(lower: String): Boolean =
         PROJECT_SIGNALS.any { lower.contains(it) }
 
     // ── C. History intent ─────────────────────────────────────────────────────
-    // References to past conversations, shared decisions, or continuity.
-
     private val HISTORY_SIGNALS = listOf(
-        "last time",
-        "last week",
-        "last month",
-        "last year",
-        "what did we",
-        "what did we decide",
-        "what did we discuss",
-        "what did we agree",
-        "what was it we",
-        "we talked about",
-        "we said",
-        "we decided",
-        "earlier you",
-        "you mentioned",
-        "you said earlier",
-        "previously",
-        "continue where",
-        "pick up where",
-        "we left off",
-        "what were we",
-        "going back to",
-        "remember when",
-        "remember how",
-        "did we talk about",
+        "last time", "last week", "last month", "last year",
+        "what did we", "what did we decide", "what did we discuss", "what did we agree",
+        "what was it we", "we talked about", "we said", "we decided",
+        "earlier you", "you mentioned", "you said earlier", "previously",
+        "continue where", "pick up where", "we left off",
+        "what were we", "going back to",
+        "remember when", "remember how", "did we talk about",
     )
 
     private fun matchesHistoryIntent(lower: String): Boolean =
         HISTORY_SIGNALS.any { lower.contains(it) }
 
     // ── D. Memory intent ──────────────────────────────────────────────────────
-    // Explicit recall requests and personal-fact queries.
-
     private val MEMORY_SIGNALS = listOf(
-        "do you remember",
-        "what did i tell you",
-        "what do you know about me",
-        "what do you know about",
-        "what have you remembered",
-        "what do you remember",
-        "tell me what you know",
-        "what do you know",
-        "remember that",
-        "don't forget",
-        "keep in mind",
-        "i told you",
-        "you know that",
-        "as i mentioned",
-        "have i told you",
-        "what's my name",
-        "what is my name",
-        "my preferences",
-        "my settings",
-        "what did i say",
+        "do you remember", "what did i tell you",
+        "what do you know about me", "what do you know about",
+        "what have you remembered", "what do you remember",
+        "tell me what you know", "what do you know",
+        "remember that", "don't forget", "keep in mind",
+        "i told you", "you know that", "as i mentioned", "have i told you",
+        "what's my name", "what is my name",
+        "my preferences", "my settings", "what did i say",
     )
 
     private fun matchesMemoryIntent(lower: String): Boolean =

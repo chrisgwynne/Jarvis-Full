@@ -16,10 +16,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jarvis.assistant.JarvisApp
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
-import com.jarvis.assistant.remote.gateway.GatewayWsStatus
-import com.jarvis.assistant.remote.macbridge.MacBridgeClient
-import com.jarvis.assistant.remote.macbridge.MacBridgeStatus
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
+import com.jarvis.assistant.remote.brain.MacBrainStatus
 import com.jarvis.assistant.ui.SettingsViewModel
 import com.jarvis.assistant.ui.camera.MacCameraViewerActivity
 import com.jarvis.assistant.ui.settings.SettingsActionRow
@@ -62,20 +60,16 @@ internal fun MacIntegrationScreen(
     val context = LocalContext.current
     val store   = remember { SettingsStore(context) }
 
-    // ── Gateway state ─────────────────────────────────────────────────────────
-    val gatewayRepo = JarvisApp.brainGatewaySettings
-    var gatewayCfg  by remember { mutableStateOf(gatewayRepo.snapshot()) }
-    val wsStatus    by BrainGatewayWebSocketClient.sharedStatus.collectAsState()
-    val testStatus  by vm.gatewayTestStatus.collectAsStateWithLifecycle()
-    val pairStatus  by vm.gatewayPairStatus.collectAsStateWithLifecycle()
-    var deviceName  by remember { mutableStateOf(gatewayCfg.deviceName) }
-    var manualUrl   by remember { mutableStateOf("") }
-    var manualCode  by remember { mutableStateOf("") }
-
-    // ── Mac Bridge state (Mobile Sync) ────────────────────────────────────────
-    val bridgeRepo   = JarvisApp.macBridgeSettings
-    var bridgeCfg    by remember { mutableStateOf(bridgeRepo.snapshot()) }
-    val bridgeStatus by MacBridgeClient.sharedStatus.collectAsState()
+    // ── Mac Brain state ───────────────────────────────────────────────────────
+    val macBrainManager = JarvisApp.macBrainConnectionManager
+    val settingsRepo    = macBrainManager.settingsRepo
+    var brainCfg        by remember { mutableStateOf(settingsRepo.snapshot()) }
+    val wsStatus        by MacBrainConnectionManager.sharedStatus.collectAsState()
+    val testStatus      by vm.gatewayTestStatus.collectAsStateWithLifecycle()
+    val pairStatus      by vm.gatewayPairStatus.collectAsStateWithLifecycle()
+    var deviceName      by remember { mutableStateOf(brainCfg.deviceName) }
+    var manualUrl       by remember { mutableStateOf("") }
+    var manualCode      by remember { mutableStateOf("") }
 
     // ── Brain feature toggles ─────────────────────────────────────────────────
     val allowMemory      by vm.macBrainAllowMemory.collectAsStateWithLifecycle()
@@ -88,27 +82,27 @@ internal fun MacIntegrationScreen(
     SettingsScaffold(title = "Mac Integration", onBack = onBack, onClose = onClose) {
 
         // ── 1. Status card ────────────────────────────────────────────────────
-        val isPaired = gatewayCfg.isPaired
+        val isPaired = brainCfg.isPaired
         val (statusTitle, statusBody, accent, bg) = when {
-            wsStatus == GatewayWsStatus.Unauthorized ->
+            wsStatus == MacBrainStatus.Unauthorized ->
                 MacStatusInfo(
                     "Pair again required",
-                    "Your session expired. Re-pair via Settings → Mac Brain Gateway.",
+                    "Your session expired. Re-pair via Settings → Mac Integration.",
                     SettingsTheme.Destructive, SettingsTheme.InfoBg,
                 )
-            wsStatus == GatewayWsStatus.Connected ->
+            wsStatus == MacBrainStatus.Connected ->
                 MacStatusInfo(
                     "Connected to Mac Jarvis",
                     "Commands, memory and context are active.",
                     SettingsTheme.Success, SettingsTheme.SuccessBg,
                 )
-            wsStatus == GatewayWsStatus.Reconnecting ->
+            wsStatus == MacBrainStatus.Reconnecting ->
                 MacStatusInfo(
                     "Reconnecting…",
                     "Connection lost. Reconnecting automatically — no action needed.",
                     SettingsTheme.Cyan, SettingsTheme.InfoBg,
                 )
-            wsStatus == GatewayWsStatus.Connecting ->
+            wsStatus == MacBrainStatus.Connecting ->
                 MacStatusInfo(
                     "Connecting to Mac Jarvis…",
                     "Opening connection.",
@@ -123,7 +117,7 @@ internal fun MacIntegrationScreen(
             else ->
                 MacStatusInfo(
                     "Not connected",
-                    "Open Mac Brain Gateway settings to pair with Mac Jarvis.",
+                    "Pair with Mac Jarvis below to get started.",
                     SettingsTheme.TextMuted, SettingsTheme.InfoBg,
                 )
         }
@@ -147,7 +141,7 @@ internal fun MacIntegrationScreen(
         Spacer(Modifier.height(8.dp))
 
         // ── Not paired: pairing flow ──────────────────────────────────────────
-        if (!isPaired || wsStatus == GatewayWsStatus.Unauthorized) {
+        if (!isPaired || wsStatus == MacBrainStatus.Unauthorized) {
             SettingsGroup(
                 title  = "Pair with Mac Jarvis",
                 footer = "On Mac: open Settings → Developer → Brain API → Generate Pairing Code. Enter the Gateway URL and the 6-digit code below.",
@@ -209,14 +203,14 @@ internal fun MacIntegrationScreen(
             SettingsRowDivider()
             SettingsActionRow(
                 title       = "Unpair",
-                description = "Removes the connection. Use Mac Brain Gateway to reconnect.",
+                description = "Removes the connection. Use the pairing flow above to reconnect.",
                 actionLabel = "Unpair",
                 destructive = true,
                 confirm     = true,
                 confirmCopy = "Yes, unpair",
                 onAction    = {
                     vm.unpairGateway()
-                    gatewayCfg = gatewayRepo.snapshot()
+                    brainCfg = settingsRepo.snapshot()
                 },
             )
         }
@@ -282,93 +276,22 @@ internal fun MacIntegrationScreen(
         Spacer(Modifier.height(8.dp))
 
         // ── 5. Mobile sync ────────────────────────────────────────────────────
-        val isBridgeConnected = bridgeStatus == MacBridgeStatus.CONNECTED
         SettingsGroup(
             title  = "Mobile Sync",
-            footer = if (!isBridgeConnected && bridgeCfg.isConfigured)
-                "Sync connecting — will resume automatically."
-            else if (!bridgeCfg.isConfigured)
-                "Mobile sync will activate once the Mac connection is established."
-            else null,
+            footer = "Events are sent to Mac Jarvis when connected.",
         ) {
-            SettingsToggleRow(
-                title           = "Calls & messages",
-                description     = "Send call and message events to Mac Jarvis",
-                checked         = bridgeCfg.eventsCalls || bridgeCfg.eventsSms ||
-                                  bridgeCfg.eventsWhatsApp,
-                onCheckedChange = { on ->
-                    val updated = bridgeCfg.copy(
-                        eventsCalls    = on,
-                        eventsSms      = on,
-                        eventsWhatsApp = on,
-                    )
-                    bridgeRepo.save(updated)
-                    bridgeCfg = updated
-                },
-            )
-            SettingsRowDivider()
-            SettingsToggleRow(
-                title           = "Notifications",
-                description     = "Forward app notifications to Mac Jarvis",
-                checked         = bridgeCfg.eventsNotifications,
-                onCheckedChange = { on ->
-                    val updated = bridgeCfg.copy(eventsNotifications = on)
-                    bridgeRepo.save(updated)
-                    bridgeCfg = updated
-                },
-            )
-            SettingsRowDivider()
-            SettingsToggleRow(
-                title           = "Battery & device state",
-                description     = "Let Mac Jarvis know your battery level and charging state",
-                checked         = bridgeCfg.eventsBattery,
-                onCheckedChange = { on ->
-                    val updated = bridgeCfg.copy(eventsBattery = on)
-                    bridgeRepo.save(updated)
-                    bridgeCfg = updated
-                },
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-
-        // ── 5b. Cross-device continuity ───────────────────────────────────────
-        var notifForwarding by remember { mutableStateOf(store.crossDeviceNotifForwarding) }
-        var watchdogEnabled  by remember { mutableStateOf(store.crossDeviceWatchdog) }
-        Spacer(Modifier.height(8.dp))
-        SettingsGroup(
-            title  = "Cross-device",
-            footer = "Controls how this phone coordinates with Mac Jarvis for handoff and continuity.",
-        ) {
-            SettingsToggleRow(
-                title           = "Forward notifications to Mac",
-                description     = "Send app notifications to Mac Jarvis for cross-device awareness",
-                checked         = notifForwarding,
-                onCheckedChange = { on ->
-                    notifForwarding = on
-                    store.crossDeviceNotifForwarding = on
-                },
-            )
-            SettingsRowDivider()
-            SettingsToggleRow(
-                title           = "Comm watchdog alerts",
-                description     = "Alert when the Mac connection drops unexpectedly",
-                checked         = watchdogEnabled,
-                onCheckedChange = { on ->
-                    watchdogEnabled = on
-                    store.crossDeviceWatchdog = on
-                },
-            )
-            SettingsRowDivider()
             SettingsValueRow(
-                title = "Daemon connection",
+                title = "Connection",
                 value = when (wsStatus) {
-                    GatewayWsStatus.Connected    -> "Connected"
-                    GatewayWsStatus.Reconnecting -> "Reconnecting…"
-                    GatewayWsStatus.Connecting   -> "Connecting…"
-                    else                         -> "Not connected"
+                    MacBrainStatus.Connected    -> "Connected"
+                    MacBrainStatus.Reconnecting -> "Reconnecting…"
+                    MacBrainStatus.Connecting   -> "Connecting…"
+                    MacBrainStatus.Unauthorized -> "Auth required"
+                    else                        -> "Not connected"
                 },
             )
         }
+        Spacer(Modifier.height(8.dp))
 
         // ── 6. Camera & Remote View ───────────────────────────────────────────
         SettingsGroup(

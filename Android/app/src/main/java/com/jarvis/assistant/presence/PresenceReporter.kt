@@ -8,14 +8,14 @@ import android.os.BatteryManager
 import android.content.Intent
 import android.content.IntentFilter
 import android.app.KeyguardManager
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
 import org.json.JSONObject
 import java.util.UUID
 import java.time.Instant
 
 object PresenceReporter {
 
-    fun sendUpdate(context: Context, gateway: BrainGatewayWebSocketClient, isAppForeground: Boolean) {
+    fun sendUpdate(context: Context, gateway: MacBrainConnectionManager, isAppForeground: Boolean) {
         val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
@@ -40,10 +40,11 @@ object PresenceReporter {
             put("activityState", if (isScreenLocked) "locked" else "active")
         }
 
+        val deviceId = gateway.settingsRepo.stableDeviceId()
         val envelope = JSONObject().apply {
             put("id", UUID.randomUUID().toString())
             put("type", "presence.update")
-            put("sourceDeviceId", gateway.deviceId ?: "android")
+            put("sourceDeviceId", deviceId)
             put("sourcePlatform", "android")
             put("target", JSONObject().put("type", "daemon"))
             put("timestamp", Instant.now().toString())
