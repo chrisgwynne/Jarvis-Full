@@ -4,7 +4,7 @@ import android.content.Context
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
 import android.util.Log
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
 
 /**
  * PhoneCallMonitor — detects telephony call state changes via TelephonyManager and
@@ -17,7 +17,7 @@ import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
  */
 class PhoneCallMonitor(
     private val context: Context,
-    private val getGateway: () -> BrainGatewayWebSocketClient?
+    private val getGateway: () -> MacBrainConnectionManager?
 ) {
     private val TAG = "PhoneCallMonitor"
     private val telephonyManager = context.getSystemService(TelephonyManager::class.java)

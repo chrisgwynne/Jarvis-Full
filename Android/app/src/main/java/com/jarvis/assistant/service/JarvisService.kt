@@ -20,7 +20,7 @@ import com.jarvis.assistant.reliability.ServiceWatchdog
 import com.jarvis.assistant.runtime.JarvisRuntime
 import com.jarvis.assistant.ui.MainActivity
 import com.jarvis.assistant.util.SettingsStore
-import com.jarvis.assistant.remote.macbridge.EffectiveRole
+
 import com.jarvis.assistant.reporting.github.autoReporting
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -297,21 +297,6 @@ class JarvisService : Service() {
                 runtimeDeferred.complete(r)
                 watchdog.start()
                 JarvisApp.federationManager.start()
-                // Observe auto role arbitration — hot-swap without service restart
-                serviceScope.launch {
-                    JarvisApp.roleArbitrator.state
-                        .map { it.effectiveRole }
-                        .distinctUntilChanged()
-                        .drop(1)
-                        .collect { newRole ->
-                            if (!running.get()) return@collect
-                            Log.i(TAG, "[AUTO_ROLE] effective role → $newRole")
-                            when (newRole) {
-                                EffectiveRole.FULL_ASSISTANT -> r.promoteToFullAssistant()
-                                EffectiveRole.BRIDGE_ONLY    -> r.demoteToBridge()
-                            }
-                        }
-                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize JarvisRuntime", e)
                 // Service-startup failure is a blocker for every feature in
@@ -391,9 +376,9 @@ class JarvisService : Service() {
             ACTION_MAC_BRIDGE_TOGGLE -> {
                 val enabled = intent.getBooleanExtra(EXTRA_ENABLED, false)
                 Log.d(TAG, "[MAC_BRIDGE_TOGGLE] enabled=$enabled")
-                r.setMacBridgeEnabled(enabled)
+                r.setMacBrainEnabled(enabled)
             }
-            ACTION_MAC_BRIDGE_CAPS_CHANGED -> r.notifyMacBridgeCapsChanged()
+            ACTION_MAC_BRIDGE_CAPS_CHANGED -> { /* no-op: caps are no longer dynamic */ }
             else -> {
                 // ACTION_START or null (system restarted us)
                 broadcast(BROADCAST_SERVICE_STARTED)

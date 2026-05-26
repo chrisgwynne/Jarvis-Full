@@ -1,7 +1,6 @@
 package com.jarvis.assistant.tools.smart
 
 import android.util.Log
-import com.jarvis.assistant.remote.macbrain.BrainSyncRunner
 import com.jarvis.assistant.tools.framework.Tool
 import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolResult
@@ -21,7 +20,6 @@ import com.jarvis.assistant.util.SettingsStore
 class SmartHomeTool(
     private val settings: SettingsStore,
     private val haContextStore: com.jarvis.assistant.session.context.RecentHomeAssistantContextStore? = null,
-    private val brainSyncRunner: BrainSyncRunner? = null,
 ) : Tool {
 
     override val name             = "smart_home"
@@ -187,19 +185,6 @@ class SmartHomeTool(
         } catch (e: Exception) {
             Log.w("SmartHomeTool", "HA service call failed: ${e.message}")
             ToolResult.Failure("${match.friendlyName} didn't respond.")
-        }
-
-        // Report entity alias correction when user's phrasing differed from the matched name
-        // (e.g. "kitchen light" → "Kitchen Ceiling Light"). Fires asynchronously — no latency impact.
-        if (entityName.trim().lowercase() != match.friendlyName.trim().lowercase()) {
-            brainSyncRunner?.enqueueHaCorrection(
-                deviceId      = settings.macBrainDeviceId,
-                transcript    = input.transcript,
-                entitySaid    = entityName,
-                entityMatched = match.friendlyName,
-                entityId      = match.entityId,
-                success       = result is ToolResult.Success,
-            )
         }
 
         return result

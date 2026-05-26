@@ -125,8 +125,7 @@ import com.jarvis.assistant.speaker.SpeakerPermissionPolicy
 import com.jarvis.assistant.speaker.SpeakerProfileStore
 import com.jarvis.assistant.speaker.SpeakerRecognitionCoordinator
 import com.jarvis.assistant.speaker.SpeakerSessionContext
-import com.jarvis.assistant.remote.macbrain.HttpMacBrainClient
-import com.jarvis.assistant.remote.macbrain.MacBrainClient
+
 import com.jarvis.assistant.speaker.audio.SpeakerAudioCapture
 import com.jarvis.assistant.speaker.audio.SpeakerEmbeddingEngine
 import com.jarvis.assistant.logging.JarvisReplyLogger
@@ -449,37 +448,8 @@ class JarvisRuntime(
     private lateinit var convProactiveEngine: ConversationalProactiveEngine
 
 
-    // Mac Bridge — bidirectional WebSocket client connecting to Mac Jarvis over Tailscale
-    private val macBridgeRepo = JarvisApp.macBridgeSettings
-    private val macBridgeClient = com.jarvis.assistant.remote.macbridge.MacBridgeClient(
-        context      = context,
-        settingsRepo = macBridgeRepo,
-        executor     = com.jarvis.assistant.remote.macbridge.MacBridgeCommandExecutor(
-            context  = context,
-            contacts = com.jarvis.assistant.tools.ContactLookup(context),
-        ),
-    )
-
-    // Brain Gateway — unified WebSocket channel (replaces Mac Bridge port 17872)
-    private val brainGatewayClient = com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient(
-        context      = context,
-        settingsRepo = JarvisApp.brainGatewaySettings,
-        executor     = com.jarvis.assistant.remote.macbridge.MacBridgeCommandExecutor(
-            context  = context,
-            contacts = com.jarvis.assistant.tools.ContactLookup(context),
-        ),
-    )
-
-    // Mac Brain — HTTP context enrichment for memory/project/history queries.
-    // Gateway client takes priority when paired; legacy client used as fallback.
-    private val brainGatewayHttpClient = com.jarvis.assistant.remote.gateway.BrainGatewayHttpClient(
-        settingsRepo = JarvisApp.brainGatewaySettings,
-        appVersion   = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "" } catch (_: Exception) { "" },
-    )
-    private val macBrainClient: MacBrainClient get() =
-        if (JarvisApp.brainGatewaySettings.snapshot().isPaired) brainGatewayHttpClient
-        else legacyMacBrainClient
-    private val legacyMacBrainClient: MacBrainClient = HttpMacBrainClient(settings)
+    // Single Mac networking connection manager — WebSocket + HTTP + pairing + events.
+    private val macBrain = JarvisApp.macBrainConnectionManager
 
     // Jarvis Brain — behavioural learning system
     private lateinit var brainEngine: com.jarvis.assistant.brain.BrainEngine
@@ -657,11 +627,11 @@ class JarvisRuntime(
     @Volatile private var pendingRemoteRouteId: String? = null
 
     init {
-        // Wire brain gateway callbacks immediately so they're ready before start() is called.
-        brainGatewayClient.onReplyFinal = { replyText, correlationId ->
+        // Wire Mac brain callbacks immediately so they're ready before start() is called.
+        macBrain.onReplyFinal = { replyText, correlationId ->
             handleRemoteReply(replyText, correlationId)
         }
-        brainGatewayClient.onNack = { correlationId ->
+        macBrain.onNack = { correlationId ->
             handleRemoteNack(correlationId)
         }
         Log.d(TAG, "JarvisRuntime constructor complete")
@@ -797,12 +767,12 @@ class JarvisRuntime(
         actionGraphExecutor = com.jarvis.assistant.graph.ActionGraphExecutor(
             registry      = toolRegistry,
             bridgeExecutor = try {
-                com.jarvis.assistant.remote.macbridge.MacBridgeCommandExecutor(
+                com.jarvis.assistant.remote.brain.MacRemoteCommandExecutor(
                     context  = context,
                     contacts = sharedContactLookup,
                 )
             } catch (_: Exception) { null },
-            bridgeConfig  = macBridgeRepo.snapshot(),
+            bridgeConfig  = null,
         )
         // Wire referential tools back to the runtime collaborators now that
         // both sides exist.  Safe to do post-construction because the tools
@@ -1070,7 +1040,7 @@ class JarvisRuntime(
             speakerContextProvider = { sessionSpeaker },
             sessionIdProvider = { sessionId },
             presenceProvider = ::currentPresence,
-            macBrainClient = macBrainClient,
+            macBrainClient = macBrain,
         )
 
         Log.d(TAG, "Intensive initialization complete in ${System.currentTimeMillis() - startTime}ms")
@@ -1079,23 +1049,6 @@ class JarvisRuntime(
     // ── Public API ────────────────────────────────────────────────────────────
 
     fun start() {
-        val androidRole = macBridgeRepo.snapshot().androidRole
-        if (androidRole == com.jarvis.assistant.remote.macbridge.AndroidRole.DISABLED) {
-            Log.i(TAG, "[ANDROID_ROLE] DISABLED — all subsystems off")
-            return
-        }
-        val effectiveBridge = when (androidRole) {
-            com.jarvis.assistant.remote.macbridge.AndroidRole.BRIDGE_ONLY -> true
-            com.jarvis.assistant.remote.macbridge.AndroidRole.AUTO ->
-                JarvisApp.roleArbitrator.state.value.effectiveRole ==
-                    com.jarvis.assistant.remote.macbridge.EffectiveRole.BRIDGE_ONLY
-            else -> false
-        }
-        if (effectiveBridge) {
-            startBridgeMode()
-            return
-        }
-
         // Hold a partial wake-lock for the lifetime of "listening mode".
         // This is what stops the wake-word loop from being paused by Doze
         // maintenance windows or aggressive OEM battery-savers when the
@@ -1170,22 +1123,10 @@ class JarvisRuntime(
 
         proactiveCoordinator.start(scope)
         brainEngine.start()           // Behavioural learning system
-        val macCfg = macBridgeRepo.snapshot()
-        // Mutual exclusion: Brain Gateway takes precedence when paired.
-        // Only start legacy Mac Bridge when not paired to the gateway.
-        val gatewayPaired = JarvisApp.brainGatewaySettings.snapshot().isPaired
-        if (gatewayPaired) {
-            brainGatewayClient.start()
-        } else if (macCfg.isConfigured &&
-            (macCfg.enabled || androidRole == com.jarvis.assistant.remote.macbridge.AndroidRole.AUTO)) {
-            macBridgeClient.start()
+        if (macBrain.settingsRepo.snapshot().isPaired) {
+            macBrain.start()
+            macBrain.attachEventBroadcaster(scope, context)
         }
-        com.jarvis.assistant.remote.macbridge.AndroidEventBroadcaster.attach(
-            client       = macBridgeClient,
-            settingsRepo = macBridgeRepo,
-            scope        = scope,
-            context      = context,
-        )
         com.jarvis.assistant.overlay.JarvisOverlayService.startIfPermitted(context)
         drivingModeManager.start(context)  // Driving mode detection
         // Tier-B ambient context + mode auto-switch.  Aggregator polls every 5 s
@@ -1372,18 +1313,20 @@ class JarvisRuntime(
         Log.d(TAG, "Voice applied: $voiceName")
     }
 
-    fun setMacBridgeEnabled(enabled: Boolean) {
-        Log.d(TAG, "[MAC_BRIDGE_TOGGLE] enabled=$enabled")
+    fun setMacBrainEnabled(enabled: Boolean) {
+        Log.d(TAG, "[MAC_BRAIN_TOGGLE] enabled=$enabled")
         if (enabled) {
-            val cfg = macBridgeRepo.snapshot()
-            if (cfg.isConfigured) macBridgeClient.start()
-            else Log.w(TAG, "[MAC_BRIDGE_TOGGLE] not configured — start ignored")
+            if (macBrain.settingsRepo.snapshot().isPaired) {
+                macBrain.start()
+                macBrain.attachEventBroadcaster(scope, context)
+            } else {
+                Log.w(TAG, "[MAC_BRAIN_TOGGLE] not paired — start ignored")
+            }
         } else {
-            macBridgeClient.stop()
+            macBrain.stop()
+            macBrain.detachEventBroadcaster()
         }
     }
-
-    fun notifyMacBridgeCapsChanged() = macBridgeClient.notifyCapabilitiesChanged()
 
     // ── TtsResponseController delegation ──────────────────────────────
     // Diagnostics + sample-voice TTS extracted to a focused controller
@@ -1539,7 +1482,6 @@ class JarvisRuntime(
         }
         Log.i(TAG, "[AUTO_ROLE] promoting to FULL_ASSISTANT")
         bridgeModeActive = false
-        com.jarvis.assistant.reliability.ListenerDiagnostics.activeMacBridgeConnectionCount.set(0)
         com.jarvis.assistant.reliability.ListenerDiagnostics.currentRole = "FULL_ASSISTANT"
 
         listeningWakeLock.acquire()
@@ -1616,7 +1558,6 @@ class JarvisRuntime(
         Log.w(TAG, "[listen_stop] reason=bridge_mode_demotion")
         com.jarvis.assistant.reliability.ListenerDiagnostics.activeWakeDetectorCount.set(0)
         com.jarvis.assistant.reliability.ListenerDiagnostics.activeSpeechRecognizerCount.set(0)
-        com.jarvis.assistant.reliability.ListenerDiagnostics.activeMacBridgeConnectionCount.set(1)
 
         // Stop voice capture
         pipelineJob?.cancel();      pipelineJob      = null
@@ -1688,19 +1629,10 @@ class JarvisRuntime(
             ))
             .attachAll()
         recentEventBuffer.attach()
-        val macCfg = macBridgeRepo.snapshot()
-        val gatewayPairedBridge = JarvisApp.brainGatewaySettings.snapshot().isPaired
-        if (gatewayPairedBridge) {
-            brainGatewayClient.start()
-        } else if (macCfg.isConfigured) {
-            macBridgeClient.start()
+        if (macBrain.settingsRepo.snapshot().isPaired) {
+            macBrain.start()
+            macBrain.attachEventBroadcaster(scope, context)
         }
-        com.jarvis.assistant.remote.macbridge.AndroidEventBroadcaster.attach(
-            client       = macBridgeClient,
-            settingsRepo = macBridgeRepo,
-            scope        = scope,
-            context      = context,
-        )
         scope.launch(Dispatchers.IO) { JarvisApp.phraseResolver.refreshCache() }
         Log.i(TAG, "[BRIDGE_ONLY] startup complete — Mac commands ready, voice pipeline off")
     }
@@ -1766,9 +1698,8 @@ class JarvisRuntime(
         recentEventBuffer.detach()
         eventAdapters.detachAll()       // Unwire bus adapters before callMonitor.stop()
         callMonitor.stop()              // Phase 6
-        macBridgeClient.stop()          // Mac Bridge (bidirectional)
-        brainGatewayClient.stop()       // Brain Gateway WebSocket
-        com.jarvis.assistant.remote.macbridge.AndroidEventBroadcaster.detach()
+        macBrain.stop()                 // Mac Brain connection manager
+        macBrain.detachEventBroadcaster()
         proactiveCoordinator.stop()
         brainEngine.stop()              // Behavioural learning system
         com.jarvis.assistant.JarvisApp.metaWearables.shutdown()
@@ -2148,9 +2079,9 @@ class JarvisRuntime(
      */
     private fun startGatewayDisconnectRecovery() {
         scope.launch {
-            brainGatewayClient.status.collect { status ->
+            com.jarvis.assistant.remote.brain.MacBrainConnectionManager.sharedStatus.collect { status ->
                 val pending = pendingRemoteRouteId ?: return@collect
-                if (status == com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected) return@collect
+                if (status == com.jarvis.assistant.remote.brain.MacBrainStatus.Connected) return@collect
                 Log.w(TAG, "[GATEWAY_DISCONNECTED_WHILE_WAITING] status=$status routeId=$pending — recovering")
                 pendingRemoteRouteId = null
                 com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = null
@@ -2475,12 +2406,12 @@ class JarvisRuntime(
                         .TranscriptNormalizer.normalizeForMatching(transcript)
                     Log.d(TAG, "[TRANSCRIPT_NORMALIZED] len=${transcriptNormalisedLog.length}")
 
-                    // ── Brain Gateway relay ──────────────────────────────────
+                    // ── Mac Brain relay ──────────────────────────────────────
                     // When connected to the Mac brain daemon, forward the transcript
                     // there and block STT until reply.final arrives.
                     // handleRemoteReply() will call speakAndRecord() then restart wake.
-                    if (brainGatewayClient.status.value ==
-                            com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                    if (com.jarvis.assistant.remote.brain.MacBrainConnectionManager.sharedStatus.value ==
+                            com.jarvis.assistant.remote.brain.MacBrainStatus.Connected
                         && transcript.isNotBlank()
                     ) {
                         val routeId = java.util.UUID.randomUUID().toString()
@@ -2488,7 +2419,7 @@ class JarvisRuntime(
                         com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = routeId
                         com.jarvis.assistant.reliability.ListenerDiagnostics.awaitingRemoteReplySinceMs =
                             System.currentTimeMillis()
-                        brainGatewayClient.sendTranscript(transcript, routeId)
+                        macBrain.sendTranscript(transcript, routeId)
                         val awaitState = JarvisState.AwaitingRemoteReply(routeId, System.currentTimeMillis())
                         machine.transition(awaitState)
                         syncState(awaitState)
@@ -4215,8 +4146,8 @@ class JarvisRuntime(
                                 // it mid-tool because the tool context lives here. If the
                                 // Mac brain is Connected we log a degraded-local-llm marker
                                 // so this path remains visible in routing audits.
-                                if (brainGatewayClient.status.value ==
-                                    com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                                if (com.jarvis.assistant.remote.brain.MacBrainConnectionManager.sharedStatus.value ==
+                                    com.jarvis.assistant.remote.brain.MacBrainStatus.Connected
                                 ) {
                                     Log.d(TAG, "[DEGRADED_LOCAL_LLM] reason=augmented_llm " +
                                         "gateway=connected tool_context=true")
@@ -4242,8 +4173,8 @@ class JarvisRuntime(
                                 // BRAIN OWNERSHIP NOTE: local tool requested an LLM follow-up
                                 // to enrich its result. If the gateway is Connected this is
                                 // intentional local LLM use — the follow-up context is device-local.
-                                if (brainGatewayClient.status.value ==
-                                    com.jarvis.assistant.remote.gateway.GatewayWsStatus.Connected
+                                if (com.jarvis.assistant.remote.brain.MacBrainConnectionManager.sharedStatus.value ==
+                                    com.jarvis.assistant.remote.brain.MacBrainStatus.Connected
                                 ) {
                                     Log.d(TAG, "[DEGRADED_LOCAL_LLM] reason=llm_follow_up " +
                                         "gateway=connected tool_context=true")

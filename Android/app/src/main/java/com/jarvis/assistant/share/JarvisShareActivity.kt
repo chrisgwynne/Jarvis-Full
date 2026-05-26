@@ -8,7 +8,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import com.jarvis.assistant.JarvisApp
-import com.jarvis.assistant.remote.gateway.GatewayWsStatus
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -47,7 +47,7 @@ class JarvisShareActivity : Activity() {
     }
 
     private fun handleShare(uri: Uri, mimeType: String) {
-        if (!JarvisApp.brainGatewaySettings.snapshot().isPaired) {
+        if (!JarvisApp.macBrainConnectionManager.settingsRepo.snapshot().isPaired) {
             Toast.makeText(this, "Mac bridge is not connected.", Toast.LENGTH_LONG).show()
             finish()
             return

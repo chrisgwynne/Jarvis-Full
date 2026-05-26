@@ -583,13 +583,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val _macBrainUrlError              = MutableStateFlow<String?>(null)
     val macBrainUrlError: StateFlow<String?>   = _macBrainUrlError.asStateFlow()
 
-    /** Live diagnostics snapshot from MacBrainStats — updated by HttpMacBrainClient. */
-    val brainDiagnostics = com.jarvis.assistant.remote.macbrain.MacBrainStats.snapshot
+    /** Live diagnostics snapshot — static empty snapshot since MacBrainStats is removed. */
+    val brainDiagnostics: kotlinx.coroutines.flow.StateFlow<com.jarvis.assistant.remote.macbrain.MacBrainDiagnosticsSnapshot> =
+        kotlinx.coroutines.flow.MutableStateFlow(com.jarvis.assistant.remote.macbrain.MacBrainDiagnosticsSnapshot(enabled = true))
 
     fun setMacBrainEnabled(v: Boolean) {
         store.macBrainEnabled = v
         _macBrainEnabled.value = v
-        com.jarvis.assistant.remote.macbrain.MacBrainStats.record { copy(enabled = v) }
         if (!v) _macBrainTestStatus.value = null
     }
 
@@ -613,8 +613,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setMacBrainAllowOutcomes(v: Boolean)     { store.macBrainAllowOutcomeReporting = v;       _macBrainAllowOutcomes.value = v }
     fun setMacBrainAllowHaReporting(v: Boolean)  { store.macBrainAllowHaReporting = v;            _macBrainAllowHaReporting.value = v }
 
-    fun clearBrainCache() { com.jarvis.assistant.remote.macbrain.MacBrainStats.clearCache() }
-    fun resetBrainCircuit() { com.jarvis.assistant.remote.macbrain.MacBrainStats.resetCircuit() }
+    fun clearBrainCache() { /* no-op: cache is internal to MacBrainConnectionManager */ }
+    fun resetBrainCircuit() { /* no-op: circuit is internal to MacBrainConnectionManager */ }
 
     /** Fire a test connection to /brain/health without touching the feature flag. */
     fun testBrainConnection() {
@@ -665,9 +665,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         else "URL must start with http:// (e.g. http://100.x.x.x:7474)"
     }
 
-    // ── Brain Gateway settings ─────────────────────────────────────────────────
+    // ── Mac Brain connection settings ──────────────────────────────────────────
 
-    private val gatewayRepo = com.jarvis.assistant.JarvisApp.brainGatewaySettings
+    private val macBrainManager = com.jarvis.assistant.JarvisApp.macBrainConnectionManager
 
     private val _gatewayTestStatus            = MutableStateFlow<String?>(null)
     val gatewayTestStatus: StateFlow<String?> = _gatewayTestStatus.asStateFlow()
@@ -675,41 +675,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val _gatewayPairStatus            = MutableStateFlow<String?>(null)
     val gatewayPairStatus: StateFlow<String?> = _gatewayPairStatus.asStateFlow()
 
-    /** Test the gateway /health endpoint and update [gatewayTestStatus]. */
+    /** Test the /health endpoint and update [gatewayTestStatus]. */
     fun testGatewayConnection() {
         viewModelScope.launch(Dispatchers.IO) {
-            val cfg = gatewayRepo.snapshot()
-            if (cfg.baseUrl.isBlank()) {
-                _gatewayTestStatus.value = "Not configured — scan QR or enter URL first"
-                return@launch
-            }
             _gatewayTestStatus.value = "Testing…"
-            try {
-                val req = okhttp3.Request.Builder()
-                    .url(cfg.healthUrl)
-                    .build()
-                val t0   = System.currentTimeMillis()
-                val resp = com.jarvis.assistant.llm.NetworkClient.http.newCall(req).execute()
-                val ms   = System.currentTimeMillis() - t0
-                _gatewayTestStatus.value = when (resp.code) {
-                    200      -> "Reachable (${ms}ms)"
-                    401, 403 -> "Auth failed — re-pair required"
-                    else     -> "Unexpected response (HTTP ${resp.code})"
-                }
-                resp.close()
-            } catch (e: java.net.SocketTimeoutException) {
-                _gatewayTestStatus.value = "Timed out"
-            } catch (e: java.net.UnknownHostException) {
-                _gatewayTestStatus.value = "Unreachable — DNS failed"
-            } catch (e: java.net.ConnectException) {
-                _gatewayTestStatus.value = "Connection refused — check URL and port"
-            } catch (e: javax.net.ssl.SSLException) {
-                _gatewayTestStatus.value = "SSL error — check the URL is http://, not https://"
-            } catch (e: java.io.IOException) {
-                _gatewayTestStatus.value = "Network error — couldn't reach the server"
-            } catch (e: Exception) {
-                _gatewayTestStatus.value = "Unexpected error — check the address and try again"
-            }
+            val ok = macBrainManager.health()
+            _gatewayTestStatus.value = if (ok) "Reachable" else "Unreachable — check URL and network"
         }
     }
 
@@ -720,41 +691,30 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun completeGatewayPairing(gatewayUrl: String, pairingCode: String, deviceName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _gatewayPairStatus.value = "Pairing…"
-            val cfg  = gatewayRepo.snapshot()
+            val settingsRepo = macBrainManager.settingsRepo
+            val cfg  = settingsRepo.snapshot()
             val name = deviceName.ifBlank { cfg.deviceName.ifBlank { android.os.Build.MODEL } }
-            val result = com.jarvis.assistant.JarvisApp.brainGatewayPairingClient.pair(
-                baseUrl     = gatewayUrl,
-                pairingCode = pairingCode,
-                deviceId    = cfg.deviceId.ifBlank { java.util.UUID.randomUUID().toString() },
-                deviceName  = name,
-                appVersion  = try {
-                    getApplication<android.app.Application>()
-                        .packageManager
-                        .getPackageInfo(getApplication<android.app.Application>().packageName, 0)
-                        .versionName ?: ""
-                } catch (_: Exception) { "" },
+            val result = macBrainManager.pair(
+                macIpAddress = gatewayUrl,
+                pairingCode  = pairingCode,
             )
             when (result) {
-                is com.jarvis.assistant.remote.gateway.PairResult.Success -> {
-                    gatewayRepo.savePaired(
-                        sessionToken = result.sessionToken,
-                        baseUrl      = gatewayUrl,
-                    )
-                    // Persist device name if provided
-                    val updated = gatewayRepo.snapshot().copy(deviceName = name)
-                    gatewayRepo.save(updated)
-                    _gatewayPairStatus.value = "Paired with ${result.macDeviceName}"
+                is com.jarvis.assistant.remote.brain.PairResult.Success -> {
+                    // Device name update
+                    val updated = settingsRepo.snapshot().copy(deviceName = name)
+                    settingsRepo.save(updated)
+                    _gatewayPairStatus.value = "Paired successfully"
                     _gatewayTestStatus.value = null
                 }
-                is com.jarvis.assistant.remote.gateway.PairResult.Failure -> {
+                is com.jarvis.assistant.remote.brain.PairResult.Failure -> {
                     _gatewayPairStatus.value = when (result.reason) {
-                        com.jarvis.assistant.remote.gateway.PairFailure.InvalidCode ->
+                        com.jarvis.assistant.remote.brain.PairFailure.InvalidCode ->
                             "Wrong pairing code — regenerate it on Mac Jarvis"
-                        com.jarvis.assistant.remote.gateway.PairFailure.AlreadyPaired ->
+                        com.jarvis.assistant.remote.brain.PairFailure.AlreadyPaired ->
                             "Already paired — unpair on Mac first"
-                        com.jarvis.assistant.remote.gateway.PairFailure.MacUnavailable ->
+                        com.jarvis.assistant.remote.brain.PairFailure.MacUnavailable ->
                             "Mac unavailable — check URL and network"
-                        com.jarvis.assistant.remote.gateway.PairFailure.BadResponse ->
+                        com.jarvis.assistant.remote.brain.PairFailure.BadResponse ->
                             "Unexpected response — is this a Jarvis Gateway?"
                     }
                 }
@@ -764,20 +724,15 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Clear the session token and mark as unpaired. */
     fun unpairGateway() {
-        gatewayRepo.clearAll()
+        macBrainManager.settingsRepo.clearAll()
         _gatewayTestStatus.value = null
         _gatewayPairStatus.value = null
     }
 
-    /** Update the device name stored in the gateway config. */
+    /** Update the device name stored in the Mac brain config. */
     fun setGatewayDeviceName(name: String) {
-        val updated = gatewayRepo.snapshot().copy(deviceName = name)
-        gatewayRepo.save(updated)
-    }
-
-    /** Update the transport mode stored in the gateway config. */
-    fun setGatewayTransportMode(mode: com.jarvis.assistant.remote.gateway.TransportMode) {
-        val updated = gatewayRepo.snapshot().copy(transportMode = mode)
-        gatewayRepo.save(updated)
+        val settingsRepo = macBrainManager.settingsRepo
+        val updated = settingsRepo.snapshot().copy(deviceName = name)
+        settingsRepo.save(updated)
     }
 }

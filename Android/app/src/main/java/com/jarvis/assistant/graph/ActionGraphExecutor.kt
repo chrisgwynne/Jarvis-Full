@@ -14,8 +14,7 @@ import com.jarvis.assistant.overlay.model.OverlayAction
 import com.jarvis.assistant.overlay.model.OverlayCard
 import com.jarvis.assistant.overlay.model.OverlayCardType
 import com.jarvis.assistant.overlay.model.OverlayPriority
-import com.jarvis.assistant.remote.macbridge.MacBridgeCommandExecutor
-import com.jarvis.assistant.remote.macbridge.MacBridgeConfig
+import com.jarvis.assistant.remote.brain.MacRemoteCommandExecutor
 import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolRegistry
 import com.jarvis.assistant.tools.framework.ToolResult
@@ -48,13 +47,13 @@ import org.json.JSONObject
  * exposed outside the function.
  *
  * @param registry      The live tool registry; provides [ToolRegistry.findByName].
- * @param bridgeExecutor  Optional Mac Bridge executor for MAC_BRIDGE nodes.
- * @param bridgeConfig  Configuration for the Mac Bridge executor.
+ * @param bridgeExecutor  Optional Mac remote command executor for MAC_BRIDGE nodes.
+ * @param bridgeConfig  Unused legacy parameter — kept for source compatibility.
  */
 class ActionGraphExecutor(
     val registry: ToolRegistry,
-    private val bridgeExecutor: MacBridgeCommandExecutor? = null,
-    private val bridgeConfig: MacBridgeConfig? = null,
+    private val bridgeExecutor: MacRemoteCommandExecutor? = null,
+    private val bridgeConfig: Any? = null,
 ) {
 
     companion object {
@@ -183,12 +182,6 @@ class ActionGraphExecutor(
             spokenFeedback = "Mac Bridge is not available.",
             durationMs = elapsed(t0),
         )
-        val cfg = bridgeConfig ?: return ActionResult(
-            nodeId = node.id,
-            status = if (node.optional) NodeStatus.SKIPPED else NodeStatus.FAILURE,
-            spokenFeedback = "Mac Bridge is not configured.",
-            durationMs = elapsed(t0),
-        )
         val command = node.toolName ?: return ActionResult(
             nodeId = node.id,
             status = NodeStatus.FAILURE,
@@ -196,7 +189,7 @@ class ActionGraphExecutor(
             durationMs = elapsed(t0),
         )
         val payload = JSONObject().also { jo -> node.params.forEach { (k, v) -> jo.put(k, v) } }
-        val result = exec.execute(command, payload, cfg)
+        val result = exec.execute(command, payload)
         return ActionResult(
             nodeId = node.id,
             status = if (result.ok) NodeStatus.SUCCESS

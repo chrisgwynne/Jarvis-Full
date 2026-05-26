@@ -203,39 +203,14 @@ class JarvisApp : Application() {
         lateinit var piperVoiceManager: com.jarvis.assistant.voice.piper.PiperVoiceManager
             private set
 
-        @Volatile
-        lateinit var macBridgeSettings
-            : com.jarvis.assistant.remote.macbridge.MacBridgeSettingsRepository
-            private set
-
         /**
-         * Unified Mac Brain Gateway settings — single connection point for
-         * both the WebSocket command channel and HTTP Brain calls.
-         * Replaces the split macBridge (port 17872) + macBrain (separate URL).
+         * Single authoritative Mac networking connection manager.
+         * Consolidates WebSocket, HTTP, pairing, network observer, and event
+         * broadcaster.  Created in [onCreate]; start/stop owned by JarvisService.
          */
         @Volatile
-        lateinit var brainGatewaySettings
-            : com.jarvis.assistant.remote.gateway.BrainGatewaySettingsRepository
-            private set
-
-        /**
-         * Pairing client — handles the one-shot HTTP handshake that exchanges
-         * a QR pairing code for a long-lived session token.  Stateless; safe
-         * to call from any coroutine scope.
-         */
-        @Volatile
-        lateinit var brainGatewayPairingClient
-            : com.jarvis.assistant.remote.gateway.BrainGatewayPairingClient
-            private set
-
-        /**
-         * Role arbitrator — decides the effective Android role in AUTO mode.
-         * Observes [MacBridgeClient.sharedStatus] and emits [ArbitratorState]
-         * changes that [JarvisService] uses to hot-swap the voice pipeline.
-         */
-        @Volatile
-        lateinit var roleArbitrator
-            : com.jarvis.assistant.remote.macbridge.RoleArbitrator
+        lateinit var macBrainConnectionManager
+            : com.jarvis.assistant.remote.brain.MacBrainConnectionManager
             private set
 
         /**
@@ -329,21 +304,12 @@ class JarvisApp : Application() {
         // user actively triggers it from Settings > Voice Diagnostics.
         // Until then, isReady() returns false and TtsEngine uses the
         // existing Android system TTS path unchanged.
-        macBridgeSettings = com.jarvis.assistant.remote.macbridge.MacBridgeSettingsRepository(
-            com.jarvis.assistant.util.SettingsStore(this)
+        val macBrainStore = com.jarvis.assistant.util.SettingsStore(this)
+        val macBrainSettingsRepo = com.jarvis.assistant.remote.brain.MacBrainSettingsRepository(macBrainStore)
+        macBrainConnectionManager = com.jarvis.assistant.remote.brain.MacBrainConnectionManager(
+            context      = this,
+            settingsRepo = macBrainSettingsRepo,
         )
-        brainGatewaySettings = com.jarvis.assistant.remote.gateway.BrainGatewaySettingsRepository(
-            com.jarvis.assistant.util.SettingsStore(this)
-        )
-        brainGatewayPairingClient = com.jarvis.assistant.remote.gateway.BrainGatewayPairingClient()
-        // One-shot migration: derive gateway URL from legacy Bridge/Brain settings if needed.
-        // Cheap (one SharedPreferences read + optional write) — safe to run on the main thread.
-        com.jarvis.assistant.remote.gateway.GatewayMigration.migrateIfNeeded(
-            com.jarvis.assistant.util.SettingsStore(this)
-        )
-        roleArbitrator = com.jarvis.assistant.remote.macbridge.RoleArbitrator(
-            settingsRepo = macBridgeSettings,
-        ).also { it.start() }
 
         // Wire OverlayPolicy to live settings so the overlay gate always reflects
         // the current user toggles without requiring a service restart.
@@ -355,10 +321,7 @@ class JarvisApp : Application() {
         com.jarvis.assistant.overlay.OverlayPolicy.configure(
             overlaysEnabled  = { overlaySettingsStore.overlaysEnabled },
             haAlertsEnabled  = { proactivitySettings.snapshot().homeAssistantAlertsEnabled },
-            bridgeModeActive = {
-                roleArbitrator.state.value.effectiveRole ==
-                    com.jarvis.assistant.remote.macbridge.EffectiveRole.BRIDGE_ONLY
-            },
+            bridgeModeActive = { false },
         )
 
         piperVoiceManager = com.jarvis.assistant.voice.piper.PiperVoiceManager(this).also {

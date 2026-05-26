@@ -2,17 +2,17 @@ package com.jarvis.assistant.reliability
 
 import com.jarvis.assistant.core.state.JarvisState
 import com.jarvis.assistant.core.store.DeviceStateStore
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
-import com.jarvis.assistant.remote.gateway.GatewayWsStatus
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
+import com.jarvis.assistant.remote.brain.MacBrainStatus
 
 /**
  * CrossDeviceHealthModel — a single aggregated snapshot of the cross-device system health.
  *
  * Reads from:
- *   - [BrainGatewayWebSocketClient.sharedStatus] — WebSocket connection to the Mac brain daemon
- *   - [DeviceStateStore.current]                  — runtime state (JarvisState, TTS, etc.)
- *   - [ListenerDiagnostics]                        — wake / listen active counters, last errors,
- *                                                    pending remote route ID
+ *   - [MacBrainConnectionManager.sharedStatus] — WebSocket connection to the Mac brain daemon
+ *   - [DeviceStateStore.current]               — runtime state (JarvisState, TTS, etc.)
+ *   - [ListenerDiagnostics]                    — wake / listen active counters, last errors,
+ *                                                pending remote route ID
  *
  * No business logic lives here — this is a pure read/aggregate layer so a UI component or
  * diagnostics overlay can call [snapshot] and get a coherent picture without knowing which
@@ -27,24 +27,24 @@ object CrossDeviceHealthModel {
      * Read a point-in-time health snapshot.  O(1), no I/O, no coroutines needed.
      */
     fun snapshot(): Snapshot {
-        val gatewayStatus   = BrainGatewayWebSocketClient.sharedStatus.value
-        val deviceState     = DeviceStateStore.current
-        val diag            = ListenerDiagnostics.snapshot()
+        val gatewayStatus    = MacBrainConnectionManager.sharedStatus.value
+        val deviceState      = DeviceStateStore.current
+        val diag             = ListenerDiagnostics.snapshot()
 
-        val macBrainOnline  = gatewayStatus == GatewayWsStatus.Connected
-        val gatewayConnected = macBrainOnline  // alias for clarity
-        val degradedMode    = !macBrainOnline &&
-                              gatewayStatus != GatewayWsStatus.NotPaired &&
-                              gatewayStatus != GatewayWsStatus.Unauthorized
+        val macBrainOnline   = gatewayStatus == MacBrainStatus.Connected
+        val gatewayConnected = macBrainOnline
+        val degradedMode     = !macBrainOnline &&
+                               gatewayStatus != MacBrainStatus.NotPaired &&
+                               gatewayStatus != MacBrainStatus.Unauthorized
 
-        val wakeReady       = diag.activeWakeDetectorCount > 0
-        val listenReady     = diag.activeSpeechRecognizerCount > 0
-        val ttsReady        = !deviceState.ttsPlaying  // TTS engine is idle = ready
-        val daemonConnected = diag.activeMacBridgeConnectionCount > 0
+        val wakeReady        = diag.activeWakeDetectorCount > 0
+        val listenReady      = diag.activeSpeechRecognizerCount > 0
+        val ttsReady         = !deviceState.ttsPlaying
+        val daemonConnected  = macBrainOnline
 
-        val lastRouteId     = diag.pendingRemoteRouteId
-        val awaitingReplyMs = if (diag.pendingRemoteRouteId != null) diag.awaitingRemoteReplySinceMs else 0L
-        val lastError       = diag.lastListenStopReason
+        val lastRouteId      = diag.pendingRemoteRouteId
+        val awaitingReplyMs  = if (diag.pendingRemoteRouteId != null) diag.awaitingRemoteReplySinceMs else 0L
+        val lastError        = diag.lastListenStopReason
 
         return Snapshot(
             macBrainOnline      = macBrainOnline,
@@ -69,13 +69,13 @@ object CrossDeviceHealthModel {
      * Immutable cross-device health snapshot.
      *
      * @param macBrainOnline      True when the WebSocket to the Mac brain daemon is in
-     *                            the [GatewayWsStatus.Connected] state.
+     *                            the [MacBrainStatus.Connected] state.
      * @param gatewayStatus       Raw status enum for finer-grained UI display.
      * @param gatewayConnected    Alias of [macBrainOnline], named for UI clarity.
      * @param wakeReady           Wake-word detector is running (idle wake phase active).
      * @param listenReady         Command-capture mic is open (Listening state).
      * @param ttsReady            TTS engine is not currently speaking (ready to play).
-     * @param daemonConnected     Mac→Android bridge connection is open.
+     * @param daemonConnected     Mac brain connection is open.
      * @param degradedModeActive  Gateway is configured but currently unreachable;
      *                            local fallback paths will be used for LLM reasoning.
      * @param lastRouteId         Route ID of the currently pending remote reply, or null.
@@ -87,7 +87,7 @@ object CrossDeviceHealthModel {
      */
     data class Snapshot(
         val macBrainOnline:       Boolean,
-        val gatewayStatus:        GatewayWsStatus,
+        val gatewayStatus:        MacBrainStatus,
         val gatewayConnected:     Boolean,
         val wakeReady:            Boolean,
         val listenReady:          Boolean,
@@ -105,8 +105,8 @@ object CrossDeviceHealthModel {
 
         /** True when degraded mode is active (Mac unavailable, using local fallback). */
         val isFullyOffline: Boolean get() =
-            gatewayStatus == GatewayWsStatus.Disconnected ||
-            gatewayStatus == GatewayWsStatus.NotPaired
+            gatewayStatus == MacBrainStatus.Disconnected ||
+            gatewayStatus == MacBrainStatus.NotPaired
 
         /** A compact one-line status for overlay/debug display. */
         fun toOneLiner(): String = buildString {

@@ -227,11 +227,6 @@ fun SettingsScreen(
                 onBack = popToRoot, onClose = onBack
             )
         }
-        composable(SettingsCategory.MacBridgeDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.MacBridgeDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
         composable(SettingsCategory.MacBrainDiagnostics.route) {
             com.jarvis.assistant.ui.settings.screens.MacBrainDiagnosticsScreen(
                 vm = vm, onBack = popToRoot, onClose = onBack
@@ -248,28 +243,23 @@ fun SettingsScreen(
             )
         }
 
-        // ── Legacy raw-config screens (dev-only deep link target) ─────────
+        // ── Legacy raw-config screens (removed — route stubs kept for deep-link compat) ─────────
         composable(SettingsCategory.BrainGateway.route) {
-            com.jarvis.assistant.ui.settings.screens.BrainGatewaySettingsScreen(
-                vm                = vm,
-                onBack            = popToRoot,
-                onClose           = onBack,
-                onOpenDiagnostics = null,
+            // Removed — redirects to Mac Integration
+            com.jarvis.assistant.ui.settings.screens.MacIntegrationScreen(
+                vm = vm, onBack = popToRoot, onClose = onBack
             )
         }
         composable(SettingsCategory.MacBridge.route) {
-            com.jarvis.assistant.ui.settings.screens.MacBridgeSettingsScreen(
-                onBack             = popToRoot,
-                onClose            = onBack,
-                onOpenDiagnostics  = { settingsNav.navigate(SettingsCategory.MacBridgeDiagnostics.route) },
+            // Removed — redirects to Mac Integration
+            com.jarvis.assistant.ui.settings.screens.MacIntegrationScreen(
+                vm = vm, onBack = popToRoot, onClose = onBack
             )
         }
         composable(SettingsCategory.MacBrain.route) {
-            com.jarvis.assistant.ui.settings.screens.MacBrainSettingsScreen(
-                vm                 = vm,
-                onBack             = popToRoot,
-                onClose            = onBack,
-                onOpenDiagnostics  = { settingsNav.navigate(SettingsCategory.MacBrainDiagnostics.route) },
+            // Removed — redirects to Mac Integration
+            com.jarvis.assistant.ui.settings.screens.MacIntegrationScreen(
+                vm = vm, onBack = popToRoot, onClose = onBack
             )
         }
     }

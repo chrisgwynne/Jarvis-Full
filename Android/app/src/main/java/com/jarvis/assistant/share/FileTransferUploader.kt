@@ -31,8 +31,8 @@ class FileTransferUploader(private val context: Context) {
         suggestedAction: String = "save",
         userVisibleName: String = filename
     ): UploadResult = withContext(Dispatchers.IO) {
-        val cfg = JarvisApp.brainGatewaySettings.snapshot()
-        val token = cfg.sessionToken ?: run {
+        val cfg = JarvisApp.macBrainConnectionManager.settingsRepo.snapshot()
+        val token = cfg.deviceToken ?: run {
             return@withContext UploadResult(false, errorMessage = "Not paired with daemon.")
         }
         val baseUrl = cfg.baseUrl.trimEnd('/')

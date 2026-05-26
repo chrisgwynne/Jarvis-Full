@@ -444,8 +444,7 @@ class SettingsStore(context: Context) {
         set(v) = prefs.edit().putLong(KEY_GATEWAY_LAST_SEEN_MAC_AT, v).apply()
 
     var gatewayTransportMode: String
-        get() = prefs.getString(KEY_GATEWAY_TRANSPORT_MODE,
-            com.jarvis.assistant.remote.gateway.TransportMode.Auto.name) ?: ""
+        get() = prefs.getString(KEY_GATEWAY_TRANSPORT_MODE, "Auto") ?: ""
         set(v) = prefs.edit().putString(KEY_GATEWAY_TRANSPORT_MODE, v).apply()
 
     /** Source that populated [gatewayBaseUrl]: "bridge" | "brain" | "none" | "" (not yet run). */
@@ -514,8 +513,7 @@ class SettingsStore(context: Context) {
         set(v) = prefs.edit().putBoolean(KEY_MAC_BRIDGE_SHARE_MSG_PREVIEWS, v).apply()
 
     var macBridgeAndroidRole: String
-        get() = prefs.getString(KEY_MAC_BRIDGE_ANDROID_ROLE,
-            com.jarvis.assistant.remote.macbridge.AndroidRole.FULL_ASSISTANT.name) ?: ""
+        get() = prefs.getString(KEY_MAC_BRIDGE_ANDROID_ROLE, "FULL_ASSISTANT") ?: ""
         set(v) = prefs.edit().putString(KEY_MAC_BRIDGE_ANDROID_ROLE, v).apply()
 
     // ── Cross-device continuity ────────────────────────────────────────────────

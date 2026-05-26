@@ -5,9 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.jarvis.assistant.remote.macbridge.MacBridgeSettingsRepository
-import com.jarvis.assistant.remote.maccamera.HttpMacCameraClient
-import com.jarvis.assistant.remote.maccamera.MacCameraResult
+import com.jarvis.assistant.JarvisApp
 import com.jarvis.assistant.util.SettingsStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,9 +32,7 @@ class MacCameraViewModel(application: Application) : AndroidViewModel(applicatio
         private const val RECONNECT_DELAY_MS = 2_000L
     }
 
-    private val settings      = SettingsStore(application)
-    private val bridgeSettings = MacBridgeSettingsRepository(SettingsStore(application))
-    private val client         = HttpMacCameraClient(settings, bridgeSettings)
+    private val settings = SettingsStore(application)
 
     private val _streamState = MutableStateFlow<StreamState>(StreamState.Connecting)
     val streamState: StateFlow<StreamState> = _streamState.asStateFlow()
@@ -83,19 +79,19 @@ class MacCameraViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun connectLoop() {
         Log.i(TAG, "MAC_CAMERA_OPEN_REQUESTED")
 
-        // Quick health check before connecting
-        _streamState.value = StreamState.Connecting
-        val available = client.validateConnection()
-        if (!available) {
-            Log.w(TAG, "MAC_CAMERA_ERROR: health check failed")
-            lastError = "Mac camera isn't reachable"
+        val cfg = JarvisApp.macBrainConnectionManager.settingsRepo.snapshot()
+        if (!cfg.isPaired) {
+            Log.w(TAG, "MAC_CAMERA_ERROR: not paired")
+            lastError = "Not connected to Mac Jarvis"
             _streamState.value = StreamState.Offline
-            trySnapshotFallback()
             return
         }
 
-        val url   = client.streamUrl()
-        val token = resolvedToken()
+        val baseUrl = cfg.baseUrl.trimEnd('/')
+        val token   = cfg.deviceToken ?: ""
+        val url     = "$baseUrl/v1/camera/stream"
+
+        _streamState.value = StreamState.Connecting
 
         var attempts = 0
         while (attempts < MAX_RECONNECTS) {
@@ -123,8 +119,9 @@ class MacCameraViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             if (!receivedAnyFrame) {
-                // Connection failed without any frame — try snapshot
-                trySnapshotFallback()
+                lastError = "Mac camera isn't reachable"
+                Log.w(TAG, "MAC_CAMERA_STREAM_DISCONNECTED: no frames received")
+                _streamState.value = StreamState.Offline
                 return
             }
 
@@ -138,36 +135,6 @@ class MacCameraViewModel(application: Application) : AndroidViewModel(applicatio
 
         lastError = "Stream unreachable after $MAX_RECONNECTS attempts"
         Log.w(TAG, "MAC_CAMERA_STREAM_DISCONNECTED: max retries reached")
-        trySnapshotFallback()
-    }
-
-    private suspend fun trySnapshotFallback() {
-        _streamState.value = StreamState.Snapshot("Stream unavailable — showing snapshot")
-        when (val snap = client.snapshot()) {
-            is MacCameraResult.SnapshotResult.Success -> {
-                val bm = android.graphics.BitmapFactory.decodeByteArray(snap.jpegBytes, 0, snap.jpegBytes.size)
-                if (bm != null) {
-                    _currentFrame.value = bm
-                    lastFrameAtMs.set(System.currentTimeMillis())
-                    Log.i(TAG, "MAC_CAMERA_FRAME_RECEIVED: snapshot fallback")
-                } else {
-                    lastError = "Could not decode snapshot"
-                    _streamState.value = StreamState.Error(lastError)
-                }
-            }
-            is MacCameraResult.SnapshotResult.Failure -> {
-                lastError = snap.reason
-                Log.w(TAG, "MAC_CAMERA_ERROR: snapshot fallback failed — ${snap.reason}")
-                _streamState.value = StreamState.Offline
-            }
-        }
-    }
-
-    private fun resolvedToken(): String {
-        return if (settings.macCameraUseBridgeCreds) {
-            bridgeSettings.snapshot().authToken
-        } else {
-            settings.macCameraAuthToken
-        }
+        _streamState.value = StreamState.Offline
     }
 }

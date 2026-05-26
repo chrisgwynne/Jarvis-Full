@@ -2,7 +2,7 @@ package com.jarvis.assistant.reliability
 
 import com.jarvis.assistant.core.state.JarvisState
 import com.jarvis.assistant.core.store.DeviceStateStore
-import com.jarvis.assistant.remote.gateway.GatewayWsStatus
+import com.jarvis.assistant.remote.brain.MacBrainStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,8 +22,8 @@ import org.junit.Test
  *   2. Drive the observable inputs ([ListenerDiagnostics], [DeviceStateStore]).
  *   3. Call [CrossDeviceHealthModel.snapshot] and assert on the derived fields.
  *
- * Note: [BrainGatewayWebSocketClient.sharedStatus] is a Kotlin StateFlow with a
- * default of GatewayWsStatus.Disconnected.  We cannot set it from tests without
+ * Note: [MacBrainConnectionManager.sharedStatus] is a Kotlin StateFlow with a
+ * default of MacBrainStatus.Disconnected.  We cannot set it from tests without
  * a running WebSocket client, so tests of the Connected / Degraded paths rely on
  * the default (Disconnected) and the fields we *can* set.  The full Connected path
  * is covered at integration level via RemoteReplyLifecycleTest.
@@ -41,7 +41,7 @@ class CrossDeviceHealthModelTest {
     @Test
     fun `snapshot gatewayStatus reflects default disconnected state`() {
         val snap = CrossDeviceHealthModel.snapshot()
-        assertEquals(GatewayWsStatus.Disconnected, snap.gatewayStatus)
+        assertEquals(MacBrainStatus.Disconnected, snap.gatewayStatus)
         assertFalse("macBrainOnline should be false when Disconnected", snap.macBrainOnline)
         assertFalse("gatewayConnected should be false when Disconnected", snap.gatewayConnected)
     }
@@ -123,16 +123,16 @@ class CrossDeviceHealthModelTest {
     // ── 5. Daemon connection ──────────────────────────────────────────────────
 
     @Test
-    fun `daemonConnected is true when activeMacBridgeConnectionCount is nonzero`() {
-        ListenerDiagnostics.activeMacBridgeConnectionCount.set(1)
+    fun `daemonConnected is false by default when mac brain not connected`() {
+        // MacBrainConnectionManager.sharedStatus defaults to Disconnected in tests
         val snap = CrossDeviceHealthModel.snapshot()
-        assertTrue(snap.daemonConnected)
+        assertFalse(snap.daemonConnected)
     }
 
     @Test
-    fun `daemonConnected is false by default`() {
+    fun `daemonConnected equals macBrainOnline`() {
         val snap = CrossDeviceHealthModel.snapshot()
-        assertFalse(snap.daemonConnected)
+        assertEquals(snap.macBrainOnline, snap.daemonConnected)
     }
 
     // ── 6. Route / timeout tracking ──────────────────────────────────────────

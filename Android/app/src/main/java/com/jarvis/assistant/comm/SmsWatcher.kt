@@ -6,7 +6,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
+import com.jarvis.assistant.remote.brain.MacBrainConnectionManager
 
 /**
  * SmsWatcher — monitors the SMS inbox via ContentObserver for new unread messages
@@ -20,7 +20,7 @@ import com.jarvis.assistant.remote.gateway.BrainGatewayWebSocketClient
  */
 class SmsWatcher(
     private val context: Context,
-    private val getGateway: () -> BrainGatewayWebSocketClient?
+    private val getGateway: () -> MacBrainConnectionManager?
 ) {
     private val TAG = "SmsWatcher"
     private val SMS_INBOX_URI = Uri.parse("content://sms/inbox")

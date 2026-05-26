@@ -77,14 +77,10 @@ internal fun DeveloperDiagnosticsScreen(
 
         DiagSection(
             title    = "Connection",
-            subtitle = "Gateway, Mac Bridge and Mac Brain link state",
+            subtitle = "Mac Brain link state",
             entries  = listOf(
                 SettingsCategory.ConnectionDiagnostics,
-                SettingsCategory.MacBridgeDiagnostics,
                 SettingsCategory.MacBrainDiagnostics,
-                SettingsCategory.BrainGateway,
-                SettingsCategory.MacBridge,
-                SettingsCategory.MacBrain,
             ),
             onOpen   = onOpenCategory,
             initiallyExpanded = true,

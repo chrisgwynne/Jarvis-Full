@@ -446,8 +446,7 @@ class ToolRegistry constructor(
                     }
                     // Mac Camera viewer — "show me the Mac camera" / "open Mac webcam".
                     // Registered before CameraCaptureTool so dedicated Mac camera phrases win.
-                    add(MacCameraViewerTool(context, settings,
-                        com.jarvis.assistant.remote.macbridge.MacBridgeSettingsRepository(settings)))
+                    add(MacCameraViewerTool(context, settings))
                     // Camera + vision tools (before OpenApp to avoid misrouting)
                     add(CameraCaptureTool(context, cameraCapture))
                     // ViewMediaTool + ShareMediaTool — discoverable via

@@ -1,5 +1,6 @@
 package com.jarvis.assistant.remote.macbrain
 
+import com.jarvis.assistant.remote.brain.BrainRoutingPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

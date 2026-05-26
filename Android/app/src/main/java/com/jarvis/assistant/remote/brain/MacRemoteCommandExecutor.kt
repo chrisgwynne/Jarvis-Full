@@ -1,4 +1,4 @@
-package com.jarvis.assistant.remote.macbridge
+package com.jarvis.assistant.remote.brain
 
 import android.Manifest
 import android.app.RemoteInput
@@ -36,17 +36,20 @@ import org.json.JSONObject
 import kotlin.coroutines.resume
 
 /**
- * MacBridgeCommandExecutor — maps every bridge command name to an Android action.
+ * MacRemoteCommandExecutor — maps every bridge command name to an Android action.
  *
  * All methods are suspend functions and safe to call from a coroutine dispatcher.
  * UI-bound actions (intents, ringtone) are dispatched on the main thread via Handler.
+ *
+ * This class has the same command set as [com.jarvis.assistant.remote.macbridge.MacBridgeCommandExecutor]
+ * but does not require a MacBridgeConfig — it always reports the full capability set.
  */
-class MacBridgeCommandExecutor(
+class MacRemoteCommandExecutor(
     private val context: Context,
     private val contacts: ContactLookup,
 ) {
     companion object {
-        private const val TAG = "MacBridgeExec"
+        private const val TAG = "MacRemoteExec"
         private const val RING_DURATION_MS = 10_000L
     }
 
@@ -55,7 +58,6 @@ class MacBridgeCommandExecutor(
     suspend fun execute(
         command: String,
         payload: JSONObject,
-        cfg: MacBridgeConfig,
     ): BridgeResult = when (command) {
         "ping"                -> ping()
         "call_contact"        -> callContact(payload)
@@ -68,7 +70,7 @@ class MacBridgeCommandExecutor(
         "read_notifications"  -> readNotifications()
         "query_notification"  -> queryNotification(payload)
         "capture_camera"      -> captureCamera()
-        "get_capabilities"    -> getCapabilities(cfg)
+        "get_capabilities"    -> getCapabilities()
         "speakerphone_on"     -> setSpeakerphone(true)
         "speakerphone_off"    -> setSpeakerphone(false)
         "whatsapp_voice_call" -> whatsAppCall(payload, isVideo = false)
@@ -186,7 +188,6 @@ class MacBridgeCommandExecutor(
             ?: return@withContext BridgeResult(false, "not_found",
                 "No contact found for '$recipient'")
 
-        // Normalise number: strip leading zeros, ensure + prefix
         val e164 = normalisePhone(contact.number)
         return@withContext try {
             val uri = Uri.parse("https://api.whatsapp.com/send?phone=$e164&text=${Uri.encode(message)}")
@@ -246,7 +247,6 @@ class MacBridgeCommandExecutor(
             ring.play()
             Handler(Looper.getMainLooper()).postDelayed({
                 try { ring.stop() } catch (_: Exception) {}
-                // Also try to strobe flash for visibility
                 try { flashStrobe(RING_DURATION_MS) } catch (_: Exception) {}
             }, 50)
             BridgeResult(true, null, "Ringing for 10 seconds")
@@ -288,12 +288,10 @@ class MacBridgeCommandExecutor(
         val lonStr = "%.4f".format(loc.longitude)
         val dir = if (loc.latitude >= 0) "N" else "S"
         val dirLon = if (loc.longitude >= 0) "E" else "W"
-        val msg = "${Math.abs(loc.latitude.toFloat())}°$dir, ${Math.abs(loc.longitude.toFloat())}°$dirLon"
         return BridgeResult(true, null, "$latStr°$dir, $lonStr°$dirLon")
     }
 
     private suspend fun bestLastLocation(): Location? = withContext(Dispatchers.IO) {
-        // Try FusedLocationProviderClient first (best accuracy)
         val loc = suspendCancellableCoroutine<Location?> { cont ->
             try {
                 val fused = LocationServices.getFusedLocationProviderClient(context)
@@ -306,7 +304,6 @@ class MacBridgeCommandExecutor(
         }
         if (loc != null) return@withContext loc
 
-        // Fallback: LocationManager
         try {
             val lm = context.getSystemService(LocationManager::class.java) ?: return@withContext null
             val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
@@ -330,7 +327,6 @@ class MacBridgeCommandExecutor(
             if (intent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(intent)
             } else {
-                // Fallback: plain geo: URI without Maps constraint
                 val fallback = Intent(Intent.ACTION_VIEW,
                     Uri.parse("geo:0,0?q=${Uri.encode(destination)}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -367,7 +363,7 @@ class MacBridgeCommandExecutor(
             payload = JSONObject().apply {
                 put("notificationCount", count)
                 put("notificationText", text)
-                put("notificationApp", JSONNull.instance)
+                put("notificationApp", JSONObject.NULL)
             },
             message = text,
         )
@@ -386,7 +382,6 @@ class MacBridgeCommandExecutor(
 
         val entries = JarvisNotificationListener.getFromApp(appFilter)
             .ifEmpty {
-                // Fuzzy: find any notification whose package contains the filter
                 JarvisNotificationListener.getRecent().filter {
                     it.packageName.contains(appFilter, ignoreCase = true) ||
                     it.title.contains(appFilter, ignoreCase = true)
@@ -437,16 +432,16 @@ class MacBridgeCommandExecutor(
 
     // ─── get_capabilities ────────────────────────────────────────────────────
 
-    private fun getCapabilities(cfg: MacBridgeConfig): BridgeResult {
-        // Per spec: don't respond directly — the client will fire capabilities_report
-        // The caller (MacBridgeClient) handles this specially — we return a sentinel
-        // result that signals the client to send the event instead.
+    private fun getCapabilities(): BridgeResult {
         return BridgeResult(
             ok      = true,
             status  = "capabilities_sent",
             payload = JSONObject().apply {
-                put("capabilities",
-                    JSONArray(cfg.enabledCapabilities.filter { it in MacBridgeCapability.ALL }))
+                put("capabilities", JSONArray(listOf(
+                    "calls", "sms", "whatsapp", "notifications", "battery",
+                    "contacts", "flashlight", "volume", "camera", "location",
+                    "speakerphone", "ringer", "bluetooth", "wifi"
+                )))
             },
         )
     }
@@ -508,7 +503,6 @@ class MacBridgeCommandExecutor(
                 return@withContext BridgeResult(false, "missing_param", "contact name required")
             }
 
-            // Direct call by contactId (comes back from a needs_clarification response)
             val contactId = payload.optString("contactId").takeIf { it.isNotBlank() }
             val contact: ContactLookup.Contact? = if (contactId != null) {
                 resolveById(contactId)
@@ -631,7 +625,7 @@ class MacBridgeCommandExecutor(
             }
             RemoteInput.addResultsToIntent(entry.replyRemoteInputs.toTypedArray(), intent, bundle)
             entry.replyPendingIntent!!.send(context, 0, intent)
-            Log.d(TAG, "Bridge reply sent to ${entry.displaySender} via ${entry.appName}")
+            Log.d(TAG, "Remote reply sent to ${entry.displaySender} via ${entry.appName}")
             BridgeResult(
                 ok      = true,
                 status  = "sent",
@@ -642,7 +636,7 @@ class MacBridgeCommandExecutor(
                 },
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Bridge reply failed", e)
+            Log.e(TAG, "Remote reply failed", e)
             BridgeResult(false, "error", "Couldn't send the reply.")
         }
     }
@@ -666,6 +660,9 @@ class MacBridgeCommandExecutor(
     }
 }
 
-private object JSONNull {
-    val instance: Any get() = JSONObject.NULL
-}
+data class BridgeResult(
+    val ok: Boolean,
+    val status: String? = null,
+    val message: String? = null,
+    val payload: JSONObject = JSONObject(),
+)
