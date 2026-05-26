@@ -31,8 +31,14 @@ final class TTSBackendRouter: TextToSpeaking, @unchecked Sendable {
     // MARK: Active backend preference
 
     /// Stable ID of the user-chosen backend. Changing this triggers a proxy rewire.
+    /// When switching away from Supertonic, its ONNX sessions are unloaded to
+    /// reclaim the ~1 GB of memory they occupy.
     var preferredBackendId: String {
-        didSet { if preferredBackendId != oldValue { rewireProxy() } }
+        didSet {
+            guard preferredBackendId != oldValue else { return }
+            if oldValue == "supertonic" { supertonicBackend.unload() }
+            rewireProxy()
+        }
     }
 
     // MARK: Stable stream (never replaced across backend switches)

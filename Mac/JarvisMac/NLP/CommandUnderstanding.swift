@@ -324,7 +324,14 @@ enum NaturalCommandParser {
         // Time queries — ask + time word.
         if t.contains("time") && !t.contains("timeline") { return (.time, nil) }
         if t.contains("headlines") { return (.headlines, nil) }
-        if t.contains("news")      { return (.news, nil) }
+        // "news" as a standalone command or together with an explicit action verb.
+        // A bare `t.contains("news")` would fire on conversational context such as
+        // "you shouldn't be listening to the news when it's on" — which must never
+        // route to the news overlay.  Require either an exact match, a news-prefixed
+        // topic phrase, or an action verb being present alongside the word.
+        if t == "news" || t.hasPrefix("news ") || (action != nil && t.contains("news")) {
+            return (.news, nil)
+        }
         if t.contains("camera")    { return (.camera, nil) }
         if t.contains("webcam")    { return (.camera, nil) }
         if t.contains("dashboard") || t.contains("diagnostics") {

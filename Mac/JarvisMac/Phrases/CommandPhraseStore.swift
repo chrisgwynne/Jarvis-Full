@@ -191,6 +191,30 @@ final class CommandPhraseStore {
             if definitions[idx].phrases.count != before { didChange = true }
         }
 
+        // Step 6: prune bare generic camera phrases from HA camera commands.
+        //
+        // "show camera", "show the camera", "open camera", etc. were previously
+        // listed as .startsWith matches in `show_ha_camera` / `home_show_camera`
+        // at .high priority, causing "show me the camera" (normalised → "show camera")
+        // to route to HA instead of the Mac webcam overlay. These bare phrases now
+        // belong exclusively to `show_camera`. Remove them from any persisted HA
+        // camera command stores so existing users get the corrected routing.
+        let haCameraCommandsToClean: Set<String> = ["show_ha_camera", "home_show_camera"]
+        let bareCameraPhrasesToRemove: Set<String> = [
+            "show camera", "open camera", "show the camera", "open the camera",
+            "pull up the camera", "bring up the camera",
+        ]
+        for id in haCameraCommandsToClean {
+            if let idx = definitions.firstIndex(where: { $0.id == id }) {
+                let before = definitions[idx].phrases.count
+                definitions[idx].phrases.removeAll {
+                    bareCameraPhrasesToRemove.contains($0.phrase)
+                    || bareCameraPhrasesToRemove.contains($0.normalizedPhrase)
+                }
+                if definitions[idx].phrases.count != before { didChange = true }
+            }
+        }
+
         guard didChange else { return }
         sort()
         save()

@@ -60,11 +60,23 @@ final class DaemonAuthStore {
 
     init() {
         load()  // SECURITY AUDITED Phase 2: loadFromDisk called in init — pairedDevices populated on start
+        // Cache the gateway token once at init so isAuthorized() never calls
+        // KeychainHelper.get() per-request. The daemon process outlives the
+        // main app; call invalidateGatewayToken() when the main app rotates.
+        _gatewayToken = KeychainHelper.get("gateway_token")
     }
 
-    // MARK: - Gateway token (Keychain)
+    // MARK: - Gateway token (Keychain, cached)
 
-    var gatewayToken: String? { KeychainHelper.get("gateway_token") }
+    /// Cached after init; re-read only when invalidateGatewayToken() is called.
+    private var _gatewayToken: String?
+    var gatewayToken: String? { _gatewayToken }
+
+    /// Re-reads the gateway token from Keychain.
+    /// Call after the main app writes a new token (e.g. on rotation).
+    func invalidateGatewayToken() {
+        _gatewayToken = KeychainHelper.get("gateway_token")
+    }
 
     // MARK: - Pairing
 
@@ -178,7 +190,7 @@ enum KeychainHelper {
     static func get(_ key: String) -> String? {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecAttrService: "com.jarvis.mac",
+            kSecAttrService: "com.jarvis.mac.JarvisMac",
             kSecAttrAccount: key,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne
@@ -196,7 +208,7 @@ enum KeychainHelper {
         // Try update first
         let updateQuery: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecAttrService: "com.jarvis.mac",
+            kSecAttrService: "com.jarvis.mac.JarvisMac",
             kSecAttrAccount: key
         ]
         let attributes: [CFString: Any] = [kSecValueData: data]

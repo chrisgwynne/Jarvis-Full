@@ -110,8 +110,21 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
                                    didOutput sampleBuffer: CMSampleBuffer,
                                    from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // Throttle @Published updates to ≤30fps. Spawning Task { @MainActor } on every
+        // camera frame (30fps) queues 30 main-actor hops per second, which saturates the
+        // main thread and can cause WindowServer checkin failures. Gate here on frameQueue
+        // (serial) so the main-actor hop only fires when a display frame is warranted.
+        let now = CACurrentMediaTime()
+        guard now - CameraPipeline.lastPublishedFrameAt >= (1.0 / 30.0) else { return }
+        CameraPipeline.lastPublishedFrameAt = now
         Task { @MainActor in
             self.latestFrame = pixelBuffer
         }
     }
+
+    /// Last time a frame was published to @MainActor. Accessed exclusively on
+    /// `frameQueue` (a serial queue) so the unsynchronised static access is safe.
+    /// `nonisolated(unsafe)` opts out of Swift's actor-isolation checks for this
+    /// property — the serial queue provides the required exclusivity guarantee.
+    nonisolated(unsafe) private static var lastPublishedFrameAt: CFTimeInterval = 0
 }

@@ -38,7 +38,13 @@ final class BrainDaemonServer {
             serverLog.error("Invalid port \(self.port)")
             return
         }
-        let params = NWParameters.tcp
+        // Use explicit IPv4 so Tailscale traffic (100.x.x.x on utun interfaces) can reach us.
+        // NWParameters.tcp defaults to IPv6 dual-stack, but macOS does NOT forward
+        // IPv4 packets from Tailscale's utun interface to IPv6 dual-stack sockets.
+        let ipOptions = NWProtocolIP.Options()
+        ipOptions.version = .v4
+        let params = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
+        params.defaultProtocolStack.internetProtocol = ipOptions
         params.allowLocalEndpointReuse = true
 
         do {
@@ -75,16 +81,30 @@ final class BrainDaemonServer {
 
     func stop() {
         tickerStopped = true
+        stopProactiveTicker()
         listener?.cancel()
         listener = nil
     }
 
+    // Retained DispatchSourceTimer for the proactive tick. Using a cancellable
+    // source instead of recursive asyncAfter prevents double-ticker on rapid restart.
+    private var proactiveTimer: DispatchSourceTimer?
+
     private func startProactiveTicker() {
-        networkQueue.asyncAfter(deadline: .now() + 60) { [weak self] in
+        proactiveTimer?.cancel()
+        let t = DispatchSource.makeTimerSource(queue: networkQueue)
+        t.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(5))
+        t.setEventHandler { [weak self] in
             guard let self, !self.tickerStopped else { return }
             ProactiveCoordinator.shared.tick(router: DaemonMessageRouter.shared)
-            self.startProactiveTicker()
         }
+        t.resume()
+        proactiveTimer = t
+    }
+
+    private func stopProactiveTicker() {
+        proactiveTimer?.cancel()
+        proactiveTimer = nil
     }
 
     // MARK: - HTTP accumulation
@@ -188,6 +208,18 @@ final class BrainDaemonServer {
         if path == "/health" || path == "/brain/health" {
             let resp = makeHealthJSON()
             send(conn, statusCode: 200, body: resp)
+            return
+        }
+
+        // ── Pair-completion endpoints (no prior auth — the code IS the credential) ──
+        // /v1/{platform}/pair/code requires the gateway token (Mac app generates it).
+        // /v1/{platform}/pair does NOT — the device is proving identity via the code.
+        let pairCompletionPaths: Set<String> = [
+            "/v1/android/pair", "/v1/windows/pair", "/v1/mac/pair"
+        ]
+        if method == "POST" && pairCompletionPaths.contains(path) {
+            // Route directly — completePairing validates the code internally.
+            handlePairCompletion(conn: conn, path: path, body: body)
             return
         }
 
@@ -344,40 +376,12 @@ final class BrainDaemonServer {
             ]
             send(conn, statusCode: 200, body: toJSON(dict))
 
-        case ("POST", "/v1/android/pair"):
-            struct PairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
-            guard let req = try? JSONDecoder().decode(PairReq.self, from: body) else {
-                send(conn, statusCode: 400, body: errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
-                return
-            }
-            guard let rawToken = DaemonAuthStore.shared.completePairing(
-                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName, platform: "android") else {
-                send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
-                return
-            }
-            let dict: [String: Any] = ["deviceToken": rawToken]
-            send(conn, statusCode: 200, body: toJSON(dict))
-
         case ("POST", "/v1/windows/pair/code"):
             let code = DaemonAuthStore.shared.generatePairingCode()
             let dict: [String: Any] = [
                 "code": code.code,
                 "expiresAt": ISO8601DateFormatter().string(from: code.expiresAt)
             ]
-            send(conn, statusCode: 200, body: toJSON(dict))
-
-        case ("POST", "/v1/windows/pair"):
-            struct WinPairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
-            guard let req = try? JSONDecoder().decode(WinPairReq.self, from: body) else {
-                send(conn, statusCode: 400, body: errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
-                return
-            }
-            guard let rawToken = DaemonAuthStore.shared.completePairing(
-                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName, platform: "windows") else {
-                send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
-                return
-            }
-            let dict: [String: Any] = ["sessionToken": rawToken]
             send(conn, statusCode: 200, body: toJSON(dict))
 
         case ("POST", "/v1/mac/pair/code"):
@@ -389,17 +393,9 @@ final class BrainDaemonServer {
             send(conn, statusCode: 200, body: toJSON(dict))
 
         case ("POST", "/v1/mac/pair"):
-            struct MacPairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
-            guard let req = try? JSONDecoder().decode(MacPairReq.self, from: body) else {
-                send(conn, statusCode: 400, body: errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
-                return
-            }
-            guard let rawToken = DaemonAuthStore.shared.completePairing(
-                code: req.code, deviceId: req.deviceId, deviceName: req.deviceName, platform: "mac") else {
-                send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
-                return
-            }
-            let dict: [String: Any] = ["sessionToken": rawToken]
+            // Unreachable — handled pre-auth by handlePairCompletion.
+            // Kept as a dead-code marker so the switch stays exhaustive.
+            let dict: [String: Any] = ["sessionToken": ""]
             send(conn, statusCode: 200, body: toJSON(dict))
 
         // ── File transfer endpoints ──────────────────────────────────────────
@@ -604,6 +600,17 @@ final class BrainDaemonServer {
                 // are handled correctly — one NWConnection receive call may deliver
                 // a partial frame or multiple complete frames.
                 var buf = self.receiveBuffers[clientId] ?? []
+
+                // Safety cap: a malformed client could send an enormous payload length
+                // in the WS frame header, causing unbounded buffer growth until OOM.
+                // Disconnect any client whose buffer exceeds 4 MB.
+                let maxWSBuffer = 4 * 1024 * 1024  // 4 MB
+                if buf.count + data.count > maxWSBuffer {
+                    self.serverLog.error("WS client \(clientId) buffer overflow — disconnecting")
+                    self.disconnectClient(clientId: clientId, platform: platform, conn: conn)
+                    return
+                }
+
                 buf.append(contentsOf: data)
 
                 // Drain all complete frames from the buffer.
@@ -679,6 +686,15 @@ final class BrainDaemonServer {
             payloadLen = 0
             for i in 2..<10 { payloadLen = payloadLen << 8 | Int(bytes[i]) }
             offset = 10
+        }
+        // Reject frames claiming a payload larger than 1 MB. Without this cap a
+        // malformed client can claim payloadLen = 2^63, causing the receive loop to
+        // accumulate data indefinitely until the process is OOM-killed.
+        // Returning nil breaks the drain loop; the per-client buffer cap above will
+        // then disconnect the client on the next receive when it exceeds 4 MB.
+        let maxPayloadBytes = 1 * 1024 * 1024  // 1 MB
+        if payloadLen > maxPayloadBytes {
+            return nil
         }
         var maskKey = [UInt8](repeating: 0, count: 4)
         if masked {
@@ -825,6 +841,28 @@ final class BrainDaemonServer {
     }
 
     // MARK: - File transfer handlers
+
+    private func handlePairCompletion(conn: NWConnection, path: String, body: Data) {
+        struct PairReq: Decodable { let code: String; let deviceId: String; let deviceName: String }
+        guard let req = try? JSONDecoder().decode(PairReq.self, from: body) else {
+            send(conn, statusCode: 400, body: errorJSON("Invalid JSON — expected {code, deviceId, deviceName}"))
+            return
+        }
+        let platform: String
+        switch path {
+        case "/v1/android/pair": platform = "android"
+        case "/v1/windows/pair": platform = "windows"
+        default: platform = "mac"
+        }
+        guard let rawToken = DaemonAuthStore.shared.completePairing(
+            code: req.code, deviceId: req.deviceId, deviceName: req.deviceName, platform: platform) else {
+            send(conn, statusCode: 403, body: errorJSON("Invalid or expired pairing code"))
+            return
+        }
+        let tokenKey = platform == "android" ? "deviceToken" : "sessionToken"
+        let dict: [String: Any] = [tokenKey: rawToken]
+        send(conn, statusCode: 200, body: toJSON(dict))
+    }
 
     private func handleFileUpload(conn: NWConnection, headers: [String: String], body: Data) {
         let contentType = headers["content-type"] ?? ""

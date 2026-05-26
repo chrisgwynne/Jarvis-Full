@@ -30,6 +30,11 @@ enum EntityIntentBinder {
 
         // ── HA device ───────────────────────────────────────────────────────
         if entity.entityType == .haDevice {
+            // Camera entities should open the camera overlay, not turn on.
+            if entity.entityId.lowercased().hasPrefix("camera.") {
+                return (.homeShowCameraOverlay(entity: entity.displayName),
+                        "Opening \(entity.displayName) camera.")
+            }
             switch action {
             case .control, .open:
                 return (.homeTurnOn(entity: entity.entityId), "Turning on \(entity.displayName).")

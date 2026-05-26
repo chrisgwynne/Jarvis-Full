@@ -94,6 +94,32 @@ struct SupertonicConfig {
     }
 }
 
+// MARK: - AnyCodableArray
+
+/// Recursively flattens a JSON array of unknown nesting depth into [Float].
+private struct AnyCodableArray: Decodable {
+    let floats: [Float]
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var result = [Float]()
+        AnyCodableArray.flatten(&container, into: &result)
+        floats = result
+    }
+
+    private static func flatten(_ container: inout UnkeyedDecodingContainer, into out: inout [Float]) {
+        while !container.isAtEnd {
+            if let v = try? container.decode(Float.self) {
+                out.append(v)
+            } else if var nested = try? container.nestedUnkeyedContainer() {
+                flatten(&nested, into: &out)
+            } else {
+                _ = try? container.decode(String.self) // skip unknown
+            }
+        }
+    }
+}
+
 // MARK: - SupertonicVoiceStyle
 
 /// Loaded content of a `voice_styles/*.json` file.
@@ -105,6 +131,24 @@ struct SupertonicVoiceStyle {
     struct Component: Decodable {
         let data:  [Float]
         let shape: [Int]?
+
+        // The on-disk JSON stores `data` as a nested array (e.g. [[[f, f, …]]])
+        // rather than a flat [Float].  Handle both by recursively flattening.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            shape = try container.decodeIfPresent([Int].self, forKey: .shape)
+
+            // Try flat [Float] first, then flatten nested arrays.
+            if let flat = try? container.decode([Float].self, forKey: .data) {
+                data = flat
+            } else {
+                // Recursively unwrap JSON arrays until we reach raw numbers.
+                let raw = try container.decode(AnyCodableArray.self, forKey: .data)
+                data = raw.floats
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey { case data, shape }
     }
 
     let name:      String
@@ -298,7 +342,7 @@ final class SupertonicInferenceEngine {
         ortEnv  = try ORTEnv(loggingLevel: .warning)
 
         let opts = try ORTSessionOptions()
-        try opts.setIntraOpNumThreads(4)
+        try opts.setIntraOpNumThreads(2)
 
         dpSession      = try ORTSession(env: ortEnv, modelPath: directory.durationPredictorURL.path, sessionOptions: opts)
         textEncSession = try ORTSession(env: ortEnv, modelPath: directory.textEncoderURL.path,       sessionOptions: opts)
@@ -313,13 +357,13 @@ final class SupertonicInferenceEngine {
     ///   - text:       Input text (may include Supertonic expression tags).
     ///   - style:      Voice style loaded from a voice_styles/*.json file.
     ///   - speed:      Playback speed multiplier (1.0 = natural, 1.5 = faster).
-    ///   - totalSteps: Denoising loop iterations (5–12; 8 is a good default).
+    ///   - totalSteps: Denoising loop iterations (5–12; 5 balances quality vs. memory).
     ///   - cancelled:  Checked between chunks — set true to abort early.
     func synthesize(
         text: String,
         style: SupertonicVoiceStyle,
         speed: Float = 1.0,
-        totalSteps: Int = 8,
+        totalSteps: Int = 5,
         cancelled: () -> Bool = { false }
     ) throws -> Data {
 
@@ -358,7 +402,7 @@ final class SupertonicInferenceEngine {
 
         // 2 ─ Build shared input tensors
         let textIdsTensor  = try makeInt64Tensor(tokenIds.map(Int64.init), shape: [1, seqLen])
-        let textMaskTensor = try makeFloatTensor([Float](repeating: 1.0, count: seqLen), shape: [1, seqLen])
+        let textMaskTensor = try makeFloatTensor([Float](repeating: 1.0, count: seqLen), shape: [1, 1, seqLen])
         let styleTTLTensor = try makeFloatTensor(style.style_ttl.data, shape: style.ttlShape)
         let styleDPTensor  = try makeFloatTensor(style.style_dp.data,  shape: style.dpShape)
 
@@ -385,34 +429,40 @@ final class SupertonicInferenceEngine {
 
         // 5 ─ Build latent-space tensors
         let latentMask = [Float](repeating: 1.0, count: latentLen)
-        let latentMaskTensor = try makeFloatTensor(latentMask, shape: [1, latentLen])
-        var noisyLatent      = sampleGaussian(count: latentLen * config.latentDim)
+        let latentMaskTensor   = try makeFloatTensor(latentMask, shape: [1, latentLen])
+        let latentLengthTensor = try makeInt64Tensor([Int64(latentLen)], shape: [1])
+        var noisyLatent        = sampleGaussian(count: latentLen * config.latentDim)
 
         let totalStepsTensor = try makeInt64Tensor([Int64(totalSteps)], shape: [1])
 
         // 6 ─ Denoising / flow-matching loop
+        // autoreleasepool per step so ONNX ObjC tensors are freed eagerly each iteration.
         for step in 0..<totalSteps {
-            let noisyLatentTensor  = try makeFloatTensor(noisyLatent, shape: [1, latentLen, config.latentDim])
-            let currentStepTensor  = try makeInt64Tensor([Int64(step)], shape: [1])
+            noisyLatent = try autoreleasepool {
+                let noisyLatentTensor = try makeFloatTensor(noisyLatent, shape: [1, latentLen, config.latentDim])
+                let currentStepTensor = try makeInt64Tensor([Int64(step)], shape: [1])
 
-            let vecOutputs = try vecEstSession.run(
-                withInputs: ["noisy_latent":  noisyLatentTensor,
-                             "text_emb":      textEmbValue,
-                             "style_ttl":     styleTTLTensor,
-                             "latent_mask":   latentMaskTensor,
-                             "text_mask":     textMaskTensor,
-                             "current_step":  currentStepTensor,
-                             "total_step":    totalStepsTensor],
-                outputNames: Set(["denoised_latent"]),
-                runOptions:  nil
-            )
-            noisyLatent = try extractFloats(from: vecOutputs["denoised_latent"]!)
+                let vecOutputs = try vecEstSession.run(
+                    withInputs: ["noisy_latent":  noisyLatentTensor,
+                                 "text_emb":      textEmbValue,
+                                 "style_ttl":     styleTTLTensor,
+                                 "latent_mask":   latentMaskTensor,
+                                 "latent_length": latentLengthTensor,
+                                 "text_mask":     textMaskTensor,
+                                 "current_step":  currentStepTensor,
+                                 "total_step":    totalStepsTensor],
+                    outputNames: Set(["denoised_latent"]),
+                    runOptions:  nil
+                )
+                return try extractFloats(from: vecOutputs["denoised_latent"]!)
+            }
         }
 
         // 7 ─ Vocoder → waveform
         let latentTensor  = try makeFloatTensor(noisyLatent, shape: [1, latentLen, config.latentDim])
         let vocoderOutput = try vocoderSession.run(
-            withInputs:  ["latent": latentTensor],
+            withInputs:  ["latent":        latentTensor,
+                          "latent_length": latentLengthTensor],
             outputNames: Set(["wav_tts"]),
             runOptions:  nil
         )

@@ -138,6 +138,42 @@ final class ConversationRouter {
         "what caused that",
     ]
 
+    /// Phrases where the user is commenting on Jarvis's *behaviour* rather than
+    /// issuing a command.  These must be classified as `.generalChat` so the LLM
+    /// responds conversationally — they must never reach the command pipeline.
+    ///
+    /// Design rule: prefer `hasPrefix` over `contains` so compound commands
+    /// ("you should stop playing music") still reach this table.  The table is
+    /// checked BEFORE `commandPrefixes` so "you should stop …" is treated as
+    /// feedback, not a stop-music command.
+    ///
+    /// Example phrases that MUST route here (never to `.command`):
+    ///   • "you shouldn't be listening to the news when it's on"
+    ///   • "why are you still listening?"
+    ///   • "you keep doing that"
+    ///   • "stop listening when the news is on"  ← looks like a command prefix
+    private static let jarvisBehaviourFeedback: [String] = [
+        "you shouldn't",
+        "you should not",
+        "you're listening",
+        "you are listening",
+        "you keep ",
+        "why are you listening",
+        "why are you still",
+        "why do you keep",
+        "don't listen when",
+        "stop listening when",
+        "you shouldn't be",
+        "you should stop listening",
+        "you don't need to listen",
+        "you don't need to be listening",
+        "why are you doing",
+        "you're not supposed",
+        "you are not supposed",
+        "you're supposed to",
+        "you shouldn't do",
+    ]
+
     /// Phrases that signal the user is reflecting on project progress, asking
     /// for feedback on what they built, or discussing roadmap alignment.
     /// False-positive cost is low — misrouted utterances fall through to
@@ -239,6 +275,24 @@ final class ConversationRouter {
                         )
                     }
                 }
+            }
+        }
+
+        // ── 1.8. Jarvis behaviour feedback ───────────────────────────────
+        // The user is commenting on Jarvis's behaviour rather than issuing a
+        // command.  "you shouldn't be listening to the news when it's on" must
+        // never open the news overlay — it must get a conversational reply.
+        // Checked BEFORE command prefixes so "you should stop playing music"
+        // (which starts with a feedback phrase, not a command verb) is correctly
+        // treated as feedback rather than a stop command.
+        for phrase in Self.jarvisBehaviourFeedback {
+            if t.hasPrefix(phrase) || t.contains(phrase) {
+                return ConversationRouteResult(
+                    route: .generalChat, confidence: 0.88,
+                    commandHint: nil,
+                    rationale: "jarvis_feedback: '\(phrase)'",
+                    fastPath: true
+                )
             }
         }
 
