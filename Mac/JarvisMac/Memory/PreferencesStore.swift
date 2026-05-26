@@ -771,47 +771,44 @@ final class PreferencesStore {
 
     // MARK: - Keychain-backed token accessors
     //
-    // These five tokens used to live in preferences.json plaintext.  They now
-    // live in the macOS Keychain.  The accessors below are the canonical read
-    // path for the rest of the app — they prefer the Keychain value but fall
-    // back to the legacy plaintext field, which exists only during the
-    // migration window (the field is nilled and persisted as soon as the
-    // value is successfully copied into the Keychain).
+    // These tokens live in the macOS Keychain (migrated from preferences.json).
+    // All reads go through KeychainService which caches after the first
+    // SecItemCopyMatching — no repeated OS prompts within a session.
+    // Legacy plaintext fallback is kept only during the migration window.
 
     /// Home Assistant long-lived access token.
     var smartHomeToken: String? {
-        Keychain.get(KeychainAccount.homeAssistantToken) ?? current.smartHomeToken
+        KeychainService.shared.get(KeychainAccount.homeAssistantToken) ?? current.smartHomeToken
     }
 
     /// Todoist REST v2 API token.
     var todoistAPIToken: String? {
-        Keychain.get(KeychainAccount.todoistAPIToken) ?? current.todoistAPIToken
+        KeychainService.shared.get(KeychainAccount.todoistAPIToken) ?? current.todoistAPIToken
     }
 
     /// GitHub Personal Access Token.
     var githubPersonalAccessToken: String? {
-        Keychain.get(KeychainAccount.githubPersonalAccessToken) ?? current.githubPersonalAccessToken
+        KeychainService.shared.get(KeychainAccount.githubPersonalAccessToken) ?? current.githubPersonalAccessToken
     }
 
     /// Shopify Admin REST access token.
     var shopifyAccessToken: String? {
-        Keychain.get(KeychainAccount.shopifyAccessToken) ?? current.shopifyAccessToken
+        KeychainService.shared.get(KeychainAccount.shopifyAccessToken) ?? current.shopifyAccessToken
     }
 
     /// Spotify personal access token (OAuth Playground).
     var spotifyPersonalToken: String? {
-        Keychain.get(KeychainAccount.spotifyPersonalToken) ?? current.spotifyPersonalToken
+        KeychainService.shared.get(KeychainAccount.spotifyPersonalToken) ?? current.spotifyPersonalToken
     }
 
     /// Home Assistant WebSocket authentication token (shown as QR code in Settings).
     var webSocketAuthToken: String? {
-        Keychain.get(KeychainAccount.webSocketAuthToken) ?? current.webSocketAuthToken
+        KeychainService.shared.get(KeychainAccount.webSocketAuthToken) ?? current.webSocketAuthToken
     }
 
-    /// True iff a token is set (anywhere — Keychain or legacy prefs).  Use
-    /// this in Settings UI for the green-dot "configured" indicator.
+    /// True iff a token is set (anywhere — Keychain or legacy prefs).
     func hasSecureToken(account: String) -> Bool {
-        if let v = Keychain.get(account), !v.isEmpty { return true }
+        if let v = KeychainService.shared.get(account), !v.isEmpty { return true }
         return false
     }
 
@@ -820,49 +817,58 @@ final class PreferencesStore {
     /// re-renders to reflect the configured/cleared state.
     func setSecureToken(_ value: String, account: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            Keychain.remove(account)
-        } else {
-            Keychain.set(trimmed, for: account)
-        }
-        // Force an empty mutation so observers (Settings UI green-dot,
-        // diagnostics) recompute.  No prefs field changes.
+        KeychainService.shared.set(trimmed.isEmpty ? nil : trimmed, for: account)
         update { _ in }
     }
 
     // MARK: - Plaintext → Keychain migration
 
+    private static let migrationDoneKey = "com.jarvis.keychain.plaintextMigrationDone.v1"
+
     /// One-shot migration that moves any plaintext integration tokens out of
-    /// `preferences.json` and into the macOS Keychain.  Idempotent: if the
-    /// fields are already nil (i.e. previously migrated) it does nothing.
+    /// `preferences.json` and into the macOS Keychain.
     ///
-    /// **Safety:** each token is migrated only if the Keychain write *and*
-    /// readback both succeed.  If either step fails the plaintext value is
-    /// left untouched and a warning is logged, so the user never loses a
-    /// configured token to a failed Keychain operation.
+    /// Guarded by a UserDefaults flag — once migration has run successfully,
+    /// this function exits immediately without reading ANY Keychain items.
+    /// This eliminates up to 6 startup Keychain reads on every subsequent
+    /// launch that used to trigger OS "use your confidential information" prompts.
     func migratePlaintextTokensToKeychain() {
-        // Local helper closure — moves one stored field into the Keychain.
-        // Returns true if anything was actually changed (caller persists).
+        // Fast-exit: already migrated — touch zero keychain items.
+        guard !UserDefaults.standard.bool(forKey: Self.migrationDoneKey) else { return }
+
+        // Also fast-exit: nothing to migrate (no plaintext tokens in prefs file).
+        let hasPendingPlaintext = [
+            current.smartHomeToken,
+            current.todoistAPIToken,
+            current.githubPersonalAccessToken,
+            current.shopifyAccessToken,
+            current.spotifyPersonalToken,
+            current.webSocketAuthToken,
+        ].contains { $0 != nil && !($0!.isEmpty) }
+
+        guard hasPendingPlaintext else {
+            // All tokens already nil → migration is effectively done.
+            UserDefaults.standard.set(true, forKey: Self.migrationDoneKey)
+            return
+        }
+
         func migrate(field plaintext: String?,
                      to account: String,
                      clear: (inout Preferences) -> Void) -> Bool {
             guard let plaintext, !plaintext.isEmpty else { return false }
-            // If the Keychain already has this token, just clear the plaintext
-            // copy — that's already the post-migration state.
-            if let existing = Keychain.get(account), !existing.isEmpty {
+            // If the Keychain already has this token, just clear the plaintext copy.
+            if let existing = KeychainService.shared.get(account), !existing.isEmpty {
                 Log.app.info("token_migration: \(account, privacy: .public) already in Keychain; clearing plaintext copy")
                 current = applyMutation(current, clear)
                 return true
             }
-            // Try the write.
-            Keychain.set(plaintext, for: account)
-            // Verify by read-back — if the Keychain is locked or restricted
-            // and the write silently failed, this will return nil/different.
-            guard let readBack = Keychain.get(account), readBack == plaintext else {
+            KeychainService.shared.set(plaintext, for: account)
+            // Verify by read-back (cache hit — no extra SecItemCopyMatching).
+            guard let readBack = KeychainService.shared.get(account), readBack == plaintext else {
                 Log.app.warning("token_migration: Keychain write+readback FAILED for \(account, privacy: .public); leaving plaintext token in place")
                 return false
             }
-            Log.app.info("token_migration: \(account, privacy: .public) successfully moved to Keychain; clearing plaintext field")
+            Log.app.info("token_migration: \(account, privacy: .public) moved to Keychain")
             current = applyMutation(current, clear)
             return true
         }
@@ -887,9 +893,9 @@ final class PreferencesStore {
                               to: KeychainAccount.webSocketAuthToken,
                               clear: { $0.webSocketAuthToken = nil }) || anyMigrated
 
+        UserDefaults.standard.set(true, forKey: Self.migrationDoneKey)
+
         if anyMigrated {
-            // Persist cleaned preferences synchronously so a crash mid-launch
-            // doesn't leave the plaintext token in the file.
             persistSync()
         }
     }

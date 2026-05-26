@@ -926,12 +926,17 @@ struct IntentRouter {
         if t.contains("ai news") || t.contains("artificial intelligence news") {
             return .showNewsLabel(label: "ai")
         }
+        // "what's happening" alone is far too broad — it matches questions about
+        // calendar, home devices, the build, etc.  Only trigger news when "happening"
+        // is explicitly followed by a news qualifier.
         if t.contains("show news") || t.contains("open news") || t == "news"
             || t.contains("today's news") || t.contains("todays news")
             || t.contains("what's in the news") || t.contains("whats in the news")
             || t.contains("latest news") || t.contains("news overlay")
             || t.contains("summarise the news") || t.contains("summarize the news")
-            || t.contains("what's happening") || t.contains("headlines") {
+            || t.contains("what's happening in the news")
+            || t.contains("whats happening in the news")
+            || t.contains("headlines") {
             return .showNews
         }
 

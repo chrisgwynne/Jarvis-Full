@@ -28,6 +28,13 @@ import SwiftUI
     /// Active local AVCaptureSession wrappers keyed by feed UUID.
     private var captureSessions: [UUID: LocalCaptureSession] = [:]
 
+    /// Shared CIContext for frame conversion — creating one per frame causes GPU heap churn.
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    /// Timestamp of the last display-frame update. Used to throttle @Observable
+    /// change notifications to ≤30fps so SwiftUI does not re-render every camera frame.
+    private var lastDisplayFrameTime: CFTimeInterval = 0
+
     /// The detection pipeline that receives pixel buffers. Injected externally.
     weak var pipeline: VisionDetectionPipeline?
 
@@ -95,11 +102,17 @@ import SwiftUI
 
     /// Called from `LocalCaptureSession.onFrame` (dispatched to @MainActor).
     func receivedFrame(_ pixelBuffer: CVPixelBuffer, feedID: UUID, timestamp: CMTime) {
-        // 1. Convert to CGImage for display
-        let ci = CIImage(cvPixelBuffer: pixelBuffer)
-        let ctx = CIContext(options: [.useSoftwareRenderer: false])
-        if let cgImage = ctx.createCGImage(ci, from: ci.extent) {
-            latestFrames[feedID] = cgImage
+        // 1. Convert to CGImage for display (reuse shared CIContext — never allocate per frame).
+        // Throttle @Observable updates to ≤30fps so SwiftUI doesn't re-render on every
+        // camera frame (which would cause 30 layout+render requests per second).
+        let now = CACurrentMediaTime()
+        let minDisplayInterval: CFTimeInterval = 1.0 / 30.0
+        if now - lastDisplayFrameTime >= minDisplayInterval {
+            lastDisplayFrameTime = now
+            let ci = CIImage(cvPixelBuffer: pixelBuffer)
+            if let cgImage = ciContext.createCGImage(ci, from: ci.extent) {
+                latestFrames[feedID] = cgImage
+            }
         }
 
         // 2. Forward to pipeline (actor hop — fire and forget)
@@ -166,6 +179,10 @@ private final class LocalCaptureSession: NSObject, AVCaptureVideoDataOutputSampl
     let session: AVCaptureSession
     let outputQueue: DispatchQueue
 
+    /// Reused serial queue for session start/stop operations.
+    /// Creating a new DispatchQueue per call leaks kernel objects — store and reuse.
+    private let sessionControlQueue: DispatchQueue
+
     /// Called on `outputQueue` with each new pixel buffer and its presentation time.
     var onFrame: ((CVPixelBuffer, CMTime) -> Void)?
 
@@ -179,6 +196,10 @@ private final class LocalCaptureSession: NSObject, AVCaptureVideoDataOutputSampl
             label: "com.jarvis.mac.feedmanager.output.\(feedID.uuidString)",
             qos: .userInitiated
         )
+        self.sessionControlQueue = DispatchQueue(
+            label: "com.jarvis.mac.feedmanager.control.\(feedID.uuidString)",
+            qos: .utility
+        )
         super.init()
         configure()
     }
@@ -186,16 +207,14 @@ private final class LocalCaptureSession: NSObject, AVCaptureVideoDataOutputSampl
     // MARK: Start / stop
 
     func start() {
-        let q = DispatchQueue(label: "com.jarvis.mac.feedmanager.session.\(feedID.uuidString)")
-        q.async { [weak self] in
+        sessionControlQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
             self.session.startRunning()
         }
     }
 
     func stop() {
-        let q = DispatchQueue(label: "com.jarvis.mac.feedmanager.session.stop.\(feedID.uuidString)")
-        q.async { [weak self] in
+        sessionControlQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
             self.session.stopRunning()
         }

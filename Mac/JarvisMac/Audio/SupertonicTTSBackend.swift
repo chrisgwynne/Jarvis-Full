@@ -108,6 +108,20 @@ final class SupertonicTTSBackend: TTSBackend, @unchecked Sendable {
         #endif
     }
 
+    // MARK: Load / unload
+
+    /// Release ONNX sessions and voice style from memory.
+    /// The next speak() call will lazily reload via preload().
+    func unload() {
+        #if canImport(OnnxRuntimeBindings)
+        stop()
+        engine      = nil
+        loadedStyle = nil
+        lastError   = nil
+        Log.app.info("[Supertonic] Engine unloaded — memory released")
+        #endif
+    }
+
     // MARK: TextToSpeaking — speak
 
     func speak(_ text: String) {

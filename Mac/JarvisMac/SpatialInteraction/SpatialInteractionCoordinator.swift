@@ -282,7 +282,11 @@ final class SpatialAmbientCoordinator: ObservableObject {
         guard isEnabled else { cameraSource = "disabled"; return }
 
         if let cm = cameraManager, cm.isRunning {
-            cm.pixelBufferTap = { [weak self] buffer in self?.handleRawFrame(buffer) }
+            // pixelBufferTap is called from CameraSession.outputQueue (background thread).
+            // handleRawFrame is @MainActor-isolated, so we must hop explicitly.
+            cm.pixelBufferTap = { [weak self] buffer in
+                Task { @MainActor [weak self] in self?.handleRawFrame(buffer) }
+            }
             cameraSource = "shared"
         } else {
             let pipeline = CameraPipeline()
@@ -306,8 +310,7 @@ final class SpatialAmbientCoordinator: ObservableObject {
         fallbackPipeline?.stop()
         fallbackPipeline = nil
         cancellables.removeAll()
-        displayTimer?.invalidate()
-        displayTimer = nil
+        stopPhysicsTick()
 
         tracker.reset()
         gestures.reset()
@@ -385,8 +388,7 @@ final class SpatialAmbientCoordinator: ObservableObject {
 
     private func _pauseTracking() {
         cameraManager?.pixelBufferTap = nil
-        displayTimer?.invalidate()
-        displayTimer     = nil
+        stopPhysicsTick()
         presenceState    = .noHand
         isHUDOpen        = false
         isTrackingActive = false
@@ -394,7 +396,10 @@ final class SpatialAmbientCoordinator: ObservableObject {
 
     private func _resumeTracking() {
         guard let cm = cameraManager else { return }
-        cm.pixelBufferTap = { [weak self] buffer in self?.handleRawFrame(buffer) }
+        // pixelBufferTap is called from CameraSession.outputQueue (background thread).
+        cm.pixelBufferTap = { [weak self] buffer in
+            Task { @MainActor [weak self] in self?.handleRawFrame(buffer) }
+        }
         startPhysicsTick()
     }
 
@@ -972,13 +977,23 @@ final class SpatialAmbientCoordinator: ObservableObject {
     // MARK: - Physics tick
 
     private func startPhysicsTick() {
+        stopPhysicsTick()
+        // 30fps is sufficient for smooth physics. Timer fires on the main run loop
+        // (it is scheduled on MainActor), so physicsTick() can be called directly —
+        // no Task hop needed. Do NOT add to .common mode: that causes the timer to
+        // fire during scroll tracking and event handling, starving WindowServer.
         displayTimer = Timer.scheduledTimer(
-            withTimeInterval: 1.0 / 60.0,
+            withTimeInterval: 1.0 / 30.0,
             repeats: true
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.physicsTick() }
+            self?.physicsTick()
         }
-        RunLoop.main.add(displayTimer!, forMode: .common)
+        // Leave the timer in .default mode only (do not add to .common).
+    }
+
+    private func stopPhysicsTick() {
+        displayTimer?.invalidate()
+        displayTimer = nil
     }
 
     private func physicsTick() {

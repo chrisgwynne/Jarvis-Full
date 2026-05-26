@@ -29,11 +29,34 @@ final class MediaEntityProvider: EntityProvider {
 // MARK: - AppEntityProvider
 
 /// Matches against locally installed macOS applications.
+///
+/// Reserved overlay nouns are excluded so that Jarvis's own internal overlay
+/// vocabulary ("news", "calendar", "camera", …) can never be hijacked by a
+/// same-named system app (News.app, Calendar.app, …).  The phrase-store always
+/// runs before EntityFirstResolver now (see JarvisController handleTranscript),
+/// but this blocklist is a defence-in-depth guard: even if the order ever
+/// changes, "show me the news" can never resolve to com.apple.news.
+///
+/// Apps that the user explicitly names with an "app" qualifier ("open the News
+/// app", "launch Apple News") still reach the app launcher because those
+/// transcripts produce longer spans that don't match any overlay noun.
 final class AppEntityProvider: EntityProvider {
     let providerName = "app"
 
+    /// Single-word nouns that Jarvis uses as internal overlay command vocabulary.
+    /// Any installed app whose lowercase display name exactly equals one of these
+    /// is excluded from entity resolution so it cannot shadow an overlay intent.
+    static let reservedOverlayNouns: Set<String> = [
+        // Jarvis overlay names
+        "news", "calendar", "camera", "dashboard", "timeline", "memory",
+        "chat", "home", "tasks", "brain", "screen", "mail", "notes",
+        "music", "messages", "reminders", "photos", "maps", "weather",
+        "github", "settings", "diagnostics", "shopify", "obsidian",
+        // Common single-word app names that collide with conversation vocabulary
+        "contacts", "finder", "safari", "terminal", "preview",
+    ]
+
     private static let cachedApps: [EntityCandidate] = {
-        let ws = NSWorkspace.shared
         let searchURLs = [
             URL(fileURLWithPath: "/Applications"),
             URL(fileURLWithPath: "/System/Applications"),
@@ -51,6 +74,8 @@ final class AppEntityProvider: EntityProvider {
                     ?? appURL.deletingPathExtension().lastPathComponent
                 let normalized = name.lowercased()
                 guard !seen.contains(normalized) else { continue }
+                // Skip apps whose name exactly matches a reserved overlay noun.
+                guard !reservedOverlayNouns.contains(normalized) else { continue }
                 seen.insert(normalized)
                 let bundle = Bundle(url: appURL)
                 let bundleID = bundle?.bundleIdentifier
@@ -130,8 +155,12 @@ final class HomeAssistantEntityProvider: EntityProvider {
     func candidates(for spans: [String]) async -> [EntityCandidate] {
         var results: [EntityCandidate] = []
 
-        // Flatten alias store entries to candidates
+        // Flatten alias store entries to candidates.
+        // Skip camera.* entities — those are routed through the dedicated HA camera
+        // phrase commands (with location keywords) and must never win via entity resolution,
+        // which would incorrectly route "show me the camera" to an HA camera.
         for entry in aliasStore.aliases {
+            guard !entry.entityID.lowercased().hasPrefix("camera.") else { continue }
             let displayName = entry.friendlyName
             results.append(EntityCandidate(
                 entityId: entry.entityID,
@@ -145,9 +174,10 @@ final class HomeAssistantEntityProvider: EntityProvider {
             ))
         }
 
-        // Also expose registry entities if available
+        // Also expose registry entities if available (camera.* excluded, same reason).
         if let reg = registry {
             for entity in reg.entities {
+                guard !entity.entityID.lowercased().hasPrefix("camera.") else { continue }
                 let name = entity.friendlyName.isEmpty ? entity.entityID : entity.friendlyName
                 results.append(EntityCandidate(
                     entityId: entity.entityID,

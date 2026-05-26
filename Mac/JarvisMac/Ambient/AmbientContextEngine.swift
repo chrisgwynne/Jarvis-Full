@@ -208,11 +208,15 @@ final class AmbientContextEngine {
     private func startSamplingLoop() {
         guard samplingEnabled, samplingTask == nil else { return }
         let interval = context.watchMode.isActive ? watchIntervalSeconds : samplingIntervalSeconds
-        samplingTask = Task { @MainActor [weak self] in
+        // Use Task.detached at .utility priority so the sleep and screen-capture IPC
+        // do not hold the @MainActor hostage. runScreenCapture is async and does its
+        // heavy work (SCStreamConfiguration / OCR) without blocking the main thread —
+        // it only hops back to @MainActor for the final @Observable state mutations.
+        samplingTask = Task.detached(priority: .utility) { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
-                guard let self, !Task.isCancelled else { return }
-                await self.runScreenCapture(force: false)
+                guard !Task.isCancelled else { return }
+                await self?.runScreenCapture(force: false)
             }
         }
     }

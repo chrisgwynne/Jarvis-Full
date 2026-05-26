@@ -145,7 +145,7 @@ enum CommandPhraseDefaults {
     // MARK: - Camera
 
     static var camera: [CommandDefinition] { [
-        def("show_camera", "Show Camera", .camera, "Open the live camera overlay.", .low, [
+        def("show_camera", "Show Camera", .camera, "Open the live camera overlay.", .medium, [
             ("show camera",                     .exact),
             ("open camera",                     .exact),
             ("camera",                          .exact),
@@ -1351,8 +1351,6 @@ enum CommandPhraseDefaults {
 
         def("home_show_camera", "Show HA Camera", .homeAssistant,
             "Show a Home Assistant camera entity.", .low, [
-            ("show camera",                      .startsWith),
-            ("show the camera",                  .startsWith),
             ("show front door camera",           .exact),
             ("show front door",                  .exact),
             ("show backyard",                    .contains),
@@ -1611,10 +1609,6 @@ enum CommandPhraseDefaults {
 
         def("show_ha_camera", "Show Camera", .homeAssistant,
             "Open a specific Home Assistant camera by name.", .high, [
-            ("show camera",                 .startsWith),
-            ("open camera",                 .startsWith),
-            ("show the camera",             .startsWith),
-            ("open the camera",             .startsWith),
             ("show front door camera",      .exact),
             ("open front door camera",      .exact),
             ("show doorbell camera",        .exact),
@@ -1628,8 +1622,6 @@ enum CommandPhraseDefaults {
             ("front door camera",           .exact),
             ("doorbell camera",             .exact),
             ("ring camera",                 .exact),
-            ("pull up the camera",          .startsWith),
-            ("bring up the camera",         .startsWith),
         ]),
 
         def("close_ha_camera", "Close Camera", .homeAssistant,

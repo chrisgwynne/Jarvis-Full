@@ -35,15 +35,25 @@ final class GatewayAuthStore {
     private(set) var activePairingCode: ActivePairingCode? = nil
     private(set) var tokenRotationCount: Int = 0
 
-    init() { load() }
+    init() {
+        load()
+        // Read once from KeychainService (served from cache if already preloaded).
+        // Never use a computed property for gatewayToken — each call would
+        // be a fresh SecItemCopyMatching, triggering repeated OS prompts.
+        _gatewayToken = KeychainService.shared.get(KeychainAccount.gatewayToken)
+    }
 
     // MARK: - Gateway token
-    var gatewayToken: String? { Keychain.get(KeychainAccount.gatewayToken) }
+
+    /// Cached in memory after first read. Updated by regenerateGatewayToken().
+    private var _gatewayToken: String?
+    var gatewayToken: String? { _gatewayToken }
 
     @discardableResult
     func regenerateGatewayToken() -> String {
         let t = UUID().uuidString + UUID().uuidString // 72-char entropy
-        Keychain.set(t, for: KeychainAccount.gatewayToken)
+        KeychainService.shared.set(t, for: KeychainAccount.gatewayToken)
+        _gatewayToken = t
         tokenRotationCount += 1
         return t
     }

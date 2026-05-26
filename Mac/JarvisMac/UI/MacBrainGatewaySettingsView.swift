@@ -170,9 +170,16 @@ struct MacBrainGatewaySettingsView: View {
                 if let code = authStore.activePairingCode, !code.isExpired {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .top, spacing: 16) {
-                            // QR code
-                            let payload = "jarvis-pair://\(code.code)"
-                            QRCodeView(content: payload, size: 140)
+                            // QR encodes JSON { host, port, auth } — the format
+                            // Android's MacBridgeQrScanScreen.parseQrPayload() expects.
+                            let host = controller.state.tailscaleIP
+                                ?? TailscaleService.findLocalIP()
+                                ?? "127.0.0.1"
+                            let port = controller.prefs.current.brainServerPort
+                            let token = GatewayAuthStore.shared.gatewayToken
+                                ?? GatewayAuthStore.shared.regenerateGatewayToken()
+                            let qrJSON = "{\"host\":\"\(host)\",\"port\":\(port),\"auth\":\"\(token)\"}"
+                            QRCodeView(content: qrJSON, size: 140)
                                 .cornerRadius(8)
 
                             VStack(alignment: .leading, spacing: 6) {
@@ -184,16 +191,16 @@ struct MacBrainGatewaySettingsView: View {
                                 Spacer()
                                 Button {
                                     NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(payload, forType: .string)
+                                    NSPasteboard.general.setString(qrJSON, forType: .string)
                                     codeCopied = true
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { codeCopied = false }
                                 } label: {
-                                    Label(codeCopied ? "Copied" : "Copy Link", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
+                                    Label(codeCopied ? "Copied" : "Copy JSON", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
                                 }
                                 .buttonStyle(.borderless).font(.caption)
                             }
                         }
-                        Text("Scan the QR code or enter the 6-digit code in the Android Jarvis app. Valid for 5 minutes.")
+                        Text("Scan the QR code with the Android Jarvis app to pair. The 6-digit code above is for manual entry.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else {

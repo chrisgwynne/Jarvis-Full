@@ -108,6 +108,7 @@ final class EntityFirstResolver {
             return nil
         }
 
+
         // Clarification: two candidates close together
         let second = scored.dropFirst().first
         let needsClarification: Bool = {

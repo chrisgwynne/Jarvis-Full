@@ -316,6 +316,11 @@ final class OverlayManager {
         overlays.contains(where: { $0.kind == kind })
     }
 
+    /// Maximum number of overlays that may be open simultaneously.
+    /// Each overlay is a full SwiftUI/Metal compositing layer; too many
+    /// simultaneously cause WindowServer compositing pressure.
+    private static let maxOverlays = 5
+
     /// Open the overlay if not already in the stack. If it exists, bring it
     /// to the top (focus it) and un-minimize. Returns true if a NEW overlay
     /// was created, false if an existing one was focused.
@@ -331,6 +336,13 @@ final class OverlayManager {
                 "kind": kind.rawValue, "action": "focus",
             ])
             return false
+        }
+        // Safety cap: evict the oldest non-pinned overlay before opening a new one
+        // to prevent unbounded Metal compositing layer growth.
+        while overlays.count >= Self.maxOverlays,
+              let oldest = overlays.first(where: { !$0.isPinned }) {
+            Log.ui.warning("[OverlaySystem] cap hit — evicting oldest overlay: \(oldest.kind.rawValue)")
+            close(oldest.kind)
         }
         var newState = OverlayState(kind: kind)
         // Restore a previously saved manual frame for this kind, if any.

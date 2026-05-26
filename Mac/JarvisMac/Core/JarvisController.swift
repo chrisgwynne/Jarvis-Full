@@ -658,6 +658,15 @@ final class JarvisController {
         startupCoordinator.advance(to: .loadingSettings)
         syncStartupDiagnostics()
 
+        // Pre-warm every Keychain entry in a single pass so all subsequent
+        // reads within this session are served from the in-memory cache.
+        // This collapses N potential OS prompts into one batch, and after
+        // the user clicks "Always Allow" on each item once, subsequent
+        // launches require zero prompts (cached ACL entries persist).
+        let _secrets = SecretsSnapshot.load()
+        _ = _secrets  // captured for potential future DI; silences unused warning
+        Log.app.info("[startup] \(KeychainService.shared.startupReport(), privacy: .public)")
+
         // 1. Permissions
         let micGranted = await requestMicAccess()
         state.microphoneStatus = micGranted ? .ready : .denied
@@ -1485,6 +1494,7 @@ final class JarvisController {
         }
 
         state.log("app", .info, "Jarvis bootstrap complete")
+        Log.app.info("[startup] keychain final: \(KeychainService.shared.startupReport(), privacy: .public)")
         breadcrumb.write(subsystem: "app", action: "bootstrap_complete")
         context.setPhase(state.phase)
     }
@@ -2733,6 +2743,36 @@ final class JarvisController {
             return
         }
 
+        // === Media suppression gate ===
+        // When live media is playing (watch/video mode), do NOT route commands
+        // through the normal pipeline.  The wake word remains armed in passive
+        // mode so the user can still say "Jarvis" to interrupt, but incidental
+        // words from ambient audio — or conversational musings like
+        // "you shouldn't be listening to the news when it's on" — must never
+        // trigger overlays or commands.
+        //
+        // Only a small allowlist of explicit stop/close/mute phrases passes through.
+        // This gate runs before ALL routing — before phrase matching, ConversationRouter,
+        // EntityFirstResolver, and IntentRouter.
+        if state.mediaPlaybackState.isPlaying {
+            let tLow = trimmedGuard.lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".?!,;:"))
+            let mediaSuppressAllowlist: [String] = [
+                "stop", "pause", "close", "hide", "mute",
+                "close news", "hide news", "stop news", "stop watching",
+                "close the news", "hide the news", "stop the news",
+                "jarvis stop", "stop listening", "go quiet",
+                "stop playing",
+            ]
+            let isAllowed = mediaSuppressAllowlist.contains(tLow)
+                || mediaSuppressAllowlist.contains(where: { tLow.hasPrefix($0) })
+            guard isAllowed else {
+                state.log("conv", .info,
+                    "transcript_suppressed reason=media_playing text=\"\(tLow.prefix(40))\"")
+                return
+            }
+        }
+
         // User spoke — cancel any conversational timeout, mark session active,
         // and reset the 10-minute armed window from now.
         conversationalTimeoutTask?.cancel()
@@ -2889,32 +2929,6 @@ final class JarvisController {
             }
         }
 
-        // === Step 2.7: EntityFirstResolver ===
-        // Runs before phrase matching so specific named entities ("EuroNews")
-        // outrank generic category intents ("news"). Falls through when no
-        // entity clears the confidence threshold.
-        if let entityResult = await EntityFirstResolver.shared.resolve(
-            transcript: normalized, rawText: rawTranscript
-        ) {
-            if entityResult.needsClarification,
-               let competitor = entityResult.competingCandidates.first {
-                let q = EntityIntentBinder.clarificationText(for: entityResult, against: competitor)
-                speak(q)
-                // Store pending context so the follow-up routes correctly
-                activePendingContext = PendingConversationContext.clarification(
-                    originalTranscript: rawTranscript, question: q)
-                return
-            }
-            if let binding = EntityIntentBinder.bind(entityResult) {
-                state.log("entity", .info,
-                    "entity_resolved span=\"\(entityResult.originalSpan)\" → \(entityResult.displayName) [\(entityResult.entityType.rawValue)] conf=\(String(format:"%.2f",entityResult.confidence)) provider=\(entityResult.provider)")
-                rollingMemory.addUserTurn(rawTranscript)
-                speak(binding.spokenPrefix)
-                await execute(binding.intent)
-                return
-            }
-        }
-
         // === Camera-command trace ===
         // Emitted for every transcript that looks vision-related so we can
         // see exactly which stage it reaches (or fails at) in the debug log.
@@ -2961,13 +2975,43 @@ final class JarvisController {
             return mappedIntent
         }()
 
+        // === Step 2.7: EntityFirstResolver ===
+        // Runs AFTER phrase-store matching so Jarvis's own overlay vocabulary
+        // always wins before external entity resolution.  A bare noun like "news"
+        // must open the Jarvis News overlay, not com.apple.news.
+        // EntityFirstResolver only activates when the phrase-store has no match —
+        // i.e. the user said something genuinely entity-specific ("open EuroNews").
+        if phraseIntent == nil {
+            if let entityResult = await EntityFirstResolver.shared.resolve(
+                transcript: normalized, rawText: rawTranscript
+            ) {
+                if entityResult.needsClarification,
+                   let competitor = entityResult.competingCandidates.first {
+                    let q = EntityIntentBinder.clarificationText(for: entityResult, against: competitor)
+                    speak(q)
+                    activePendingContext = PendingConversationContext.clarification(
+                        originalTranscript: rawTranscript, question: q)
+                    return
+                }
+                if let binding = EntityIntentBinder.bind(entityResult) {
+                    state.log("entity", .info,
+                        "entity_resolved span=\"\(entityResult.originalSpan)\" → \(entityResult.displayName) [\(entityResult.entityType.rawValue)] conf=\(String(format:"%.2f",entityResult.confidence)) provider=\(entityResult.provider) skipped_phrase_store=true")
+                    rollingMemory.addUserTurn(rawTranscript)
+                    speak(binding.spokenPrefix)
+                    await execute(binding.intent)
+                    return
+                }
+            }
+        }
+
         // === Step 3: route ===
         latency.mark(.intentRoute)
         // Priority order:
         //   1. Phrase-store match (user-editable, data-driven)
-        //   2. Parsed-command route (NLP-based structured parse)
-        //   3. Substring router (legacy fallback)
-        //   4. Emergency vision semantic fallback (see below)
+        //   2. EntityFirstResolver (specific named entities, only if no phrase match)
+        //   3. Parsed-command route (NLP-based structured parse)
+        //   4. Substring router (legacy fallback)
+        //   5. Emergency vision semantic fallback (see below)
         var intent: Intent
         var routedVia = "parsed"
         if let pi = phraseIntent {
