@@ -317,6 +317,7 @@ internal sealed class StubSessionMemoryStore : ISessionMemoryStore
     public Task<long> GetStoreSizeAsync() => Task.FromResult(0L);
 }
 
+#pragma warning disable CS0067 // test stubs implement interface events that are never raised
 internal sealed class StubAppUsageTracker : IAppUsageTracker
 {
     public IReadOnlyList<AppUsageEntry> GetRecent(int maxEntries = 10) => [];

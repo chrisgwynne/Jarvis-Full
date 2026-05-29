@@ -26,6 +26,7 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly int _port;
+    private readonly BridgeTokenStore? _tokenStore;
     private readonly IDiagnostics? _diagnostics;
     private readonly ILogger<WebSocketBrowserContextProvider>? _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -38,12 +39,15 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
     private BrowserContextSnapshot _current = BrowserContextSnapshot.Empty;
     private bool _connected;
     private long _acceptedConnections;
+    private long _authRejected;
 
     public WebSocketBrowserContextProvider(
+        BridgeTokenStore? tokenStore = null,
         IDiagnostics? diagnostics = null,
         ILogger<WebSocketBrowserContextProvider>? logger = null,
         int port = 49321)
     {
+        _tokenStore = tokenStore;
         _diagnostics = diagnostics;
         _logger = logger;
         _port = port;
@@ -55,6 +59,8 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
 
     public int Port => _port;
     public long TotalConnections => Interlocked.Read(ref _acceptedConnections);
+    /// <summary>Count of connections rejected because they presented a missing/wrong token.</summary>
+    public long AuthRejected => Interlocked.Read(ref _authRejected);
 
     public async Task<bool> SendJsonAsync(string json, CancellationToken cancellationToken = default)
     {
@@ -142,6 +148,25 @@ public sealed class WebSocketBrowserContextProvider : IBrowserContext, IAsyncDis
                 ctx.Response.StatusCode = 400;
                 ctx.Response.Close();
                 continue;
+            }
+
+            // Token auth: when a token store is configured the client must present
+            // the shared secret as ?token=… (constant-time compared). Loopback bind
+            // is the second boundary. When no store is configured, auth is disabled
+            // (legacy/dev behaviour) so existing setups keep working.
+            if (_tokenStore is not null)
+            {
+                var provided = ctx.Request.QueryString["token"];
+                var expected = _tokenStore.GetOrCreate();
+                if (string.IsNullOrEmpty(provided) || !BridgeTokenStore.ConstantTimeEquals(provided, expected))
+                {
+                    Interlocked.Increment(ref _authRejected);
+                    _diagnostics?.Record(DiagnosticLevel.Warn, "browser", "auth rejected",
+                        new Dictionary<string, object?> { ["hasToken"] = !string.IsNullOrEmpty(provided) });
+                    ctx.Response.StatusCode = 401;
+                    ctx.Response.Close();
+                    continue;
+                }
             }
 
             Interlocked.Increment(ref _acceptedConnections);

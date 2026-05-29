@@ -2,6 +2,7 @@ using FluentAssertions;
 using Jarvis.Core.Awareness;
 using Jarvis.Core.Focus;
 using Jarvis.Core.Presence;
+using Jarvis.Core.Proactive;
 using Jarvis.Core.Settings;
 using Jarvis.Core.Snapshot;
 using Jarvis.DesktopAwareness;
