@@ -1,0 +1,49 @@
+name: Windows CI
+
+on:
+  push:
+    paths:
+      - 'Windows/**'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    paths:
+      - 'Windows/**'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build + test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: Windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore Jarvis.sln
+
+      - name: Build
+        run: dotnet build Jarvis.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Jarvis.sln -c Release --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: Windows/**/TestResults/**
+          if-no-files-found: ignore
+          retention-days: 7

@@ -3,50 +3,54 @@
     Auto Backup + device-transfer policy for Jarvis.
 
     WHAT SYNCS
-      The Room database (jarvis.db) — memory facts, wiki pages, saved
-      routines, conversation summaries, reminders, speaker profiles,
-      etc. Plus the non-encrypted SharedPreferences stores used by
-      the presence / learning layer.
+      Only the non-encrypted SharedPreferences stores used by the
+      presence / learning layer (known SSIDs, action ledger, conversation
+      thread metadata, routine synth). These contain no message bodies,
+      contacts, transcripts, location, or biometric data.
 
-    WHAT DOES NOT
-      EncryptedSharedPreferences (jarvis_settings.xml) holds API keys,
-      OAuth refresh tokens, and the master-key-encrypted payloads. The
-      AES master key lives in the Android KeyStore which is per-device
-      and does NOT survive backup or device transfer — restoring an
-      encrypted prefs file with a different master key silently produces
-      unreadable data. Simpler to re-enter keys on a new device than to
-      debug corrupted auth.
-
-      Anything under files/ (TFLite models, recordings, image outputs)
-      is excluded — it's either re-downloadable or regenerated locally.
+    WHAT DOES NOT (and why)
+      * The Room database (jarvis.db) is EXCLUDED. It stores conversation
+        transcripts/summaries, memory facts (user name, home/work
+        location), knowledge, reminders, and speaker voice embeddings
+        (biometric). These must not leave the device in cleartext via
+        Google cloud backup or device transfer. The DB is currently
+        unencrypted at rest, so excluding it is the privacy-safe default.
+        (Follow-up: re-enable encrypted backup once the DB is migrated to
+        SQLCipher with a Keystore-held passphrase — see issue #13.)
+      * EncryptedSharedPreferences (jarvis_settings.xml) holds API keys
+        and OAuth tokens. The AES master key lives in the Android KeyStore
+        which is per-device and does NOT survive backup/transfer, so a
+        restored encrypted prefs file is unreadable. Re-enter keys on a
+        new device.
+      * Anything under files/ (TFLite models, recordings, image outputs)
+        is re-downloadable or regenerated locally.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Room database: memory, knowledge, routines, expectations. -->
-        <include domain="database" path="jarvis.db" />
-        <include domain="database" path="jarvis.db-wal" />
-        <include domain="database" path="jarvis.db-shm" />
-
         <!-- Non-encrypted SharedPreferences the presence + learning layer use. -->
         <include domain="sharedpref" path="jarvis_known_ssids.xml" />
         <include domain="sharedpref" path="jarvis_action_ledger.xml" />
         <include domain="sharedpref" path="jarvis_conversation_threads.xml" />
         <include domain="sharedpref" path="jarvis_routine_synth.xml" />
 
-        <!-- Hard excludes so a future pref file isn't accidentally captured. -->
+        <!-- Hard excludes: sensitive DB (transcripts, facts, voice embeddings),
+             encrypted prefs, and all local files must never be captured. -->
+        <exclude domain="database" path="jarvis.db" />
+        <exclude domain="database" path="jarvis.db-wal" />
+        <exclude domain="database" path="jarvis.db-shm" />
         <exclude domain="sharedpref" path="jarvis_settings.xml" />
         <exclude domain="file" />
         <exclude domain="external" />
     </cloud-backup>
 
     <device-transfer>
-        <include domain="database" path="jarvis.db" />
-        <include domain="database" path="jarvis.db-wal" />
-        <include domain="database" path="jarvis.db-shm" />
         <include domain="sharedpref" path="jarvis_known_ssids.xml" />
         <include domain="sharedpref" path="jarvis_action_ledger.xml" />
         <include domain="sharedpref" path="jarvis_conversation_threads.xml" />
         <include domain="sharedpref" path="jarvis_routine_synth.xml" />
+        <exclude domain="database" path="jarvis.db" />
+        <exclude domain="database" path="jarvis.db-wal" />
+        <exclude domain="database" path="jarvis.db-shm" />
         <exclude domain="sharedpref" path="jarvis_settings.xml" />
         <exclude domain="file" />
         <exclude domain="external" />

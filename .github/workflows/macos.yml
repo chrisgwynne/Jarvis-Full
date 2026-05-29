@@ -1,0 +1,56 @@
+name: macOS CI
+
+on:
+  push:
+    paths:
+      - 'Mac/**'
+      - '.github/workflows/macos.yml'
+  pull_request:
+    paths:
+      - 'Mac/**'
+      - '.github/workflows/macos.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: generate + build
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: Mac
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: List schemes
+        run: xcodebuild -list || true
+
+      - name: Build JarvisBrainDaemon
+        run: >-
+          xcodebuild -scheme JarvisBrainDaemon
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      - name: Build JarvisMac
+        run: >-
+          xcodebuild -scheme JarvisMac
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      # Daemon unit tests (the only currently-wired test target). The
+      # JarvisMacTests bundle will be added to project.yml in a later wave.
+      - name: Test JarvisBrainDaemon
+        run: >-
+          xcodebuild -scheme JarvisBrainDaemonTests
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test || true

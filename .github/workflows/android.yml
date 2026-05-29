@@ -1,0 +1,61 @@
+name: Android CI
+
+# Canonical Android CI. Lives at the repo root so GitHub Actions actually
+# discovers it (the previous workflows under Android/.github/ never ran).
+on:
+  push:
+    paths:
+      - 'Android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'Android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: assemble + test + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: Android
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21 matches gradle/gradle-daemon-jvm.properties (toolchainVersion=21).
+      # The old workflows pinned 17, which mismatched the daemon toolchain.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Assemble debug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Lint
+        run: ./gradlew --no-daemon --stacktrace lintDebug
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            Android/app/build/reports/**
+            Android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+          retention-days: 7
