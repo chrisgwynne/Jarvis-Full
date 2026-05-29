@@ -1,17 +1,19 @@
 name: Android CI
 
-# Canonical Android CI. Lives at the repo root so GitHub Actions actually
-# discovers it (the previous workflows under Android/.github/ never ran).
+# Canonical Android CI (repo root so Actions discovers it — the old
+# Android/.github/ workflows never ran). On failure it posts the tail of
+# the build log to PR #8 so failures are visible without log download access.
 on:
   push:
     paths:
       - 'Android/**'
       - '.github/workflows/android.yml'
-  pull_request:
-    paths:
-      - 'Android/**'
-      - '.github/workflows/android.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: android-${{ github.ref }}
@@ -25,11 +27,11 @@ jobs:
     defaults:
       run:
         working-directory: Android
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
       # JDK 21 matches gradle/gradle-daemon-jvm.properties (toolchainVersion=21).
-      # The old workflows pinned 17, which mismatched the daemon toolchain.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -41,13 +43,28 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Assemble debug
-        run: ./gradlew --no-daemon --stacktrace assembleDebug
+        run: set -o pipefail; ./gradlew --no-daemon --stacktrace assembleDebug 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: Unit tests
-        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+        run: set -o pipefail; ./gradlew --no-daemon --stacktrace testDebugUnitTest 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: Lint
-        run: ./gradlew --no-daemon --stacktrace lintDebug
+        run: set -o pipefail; ./gradlew --no-daemon --stacktrace lintDebug 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      - name: Report failure to PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### ❌ Android CI failed";
+            echo "Commit \`$GITHUB_SHA\` · [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)";
+            echo '';
+            echo '```';
+            tail -n 200 "$RUNNER_TEMP/ci.log" 2>/dev/null || echo "(no log captured before failure)";
+            echo '```';
+          } > "$RUNNER_TEMP/comment.md"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/8/comments" -F "body=@$RUNNER_TEMP/comment.md" || true
 
       - name: Upload reports
         if: always()

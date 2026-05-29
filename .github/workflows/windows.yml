@@ -5,11 +5,12 @@ on:
     paths:
       - 'Windows/**'
       - '.github/workflows/windows.yml'
-  pull_request:
-    paths:
-      - 'Windows/**'
-      - '.github/workflows/windows.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -23,6 +24,7 @@ jobs:
     defaults:
       run:
         working-directory: Windows
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -31,19 +33,25 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore
-        run: dotnet restore Jarvis.sln
+        run: set -o pipefail; dotnet restore Jarvis.sln 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: Build
-        run: dotnet build Jarvis.sln -c Release --no-restore
+        run: set -o pipefail; dotnet build Jarvis.sln -c Release --no-restore 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: Test
-        run: dotnet test Jarvis.sln -c Release --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+        run: set -o pipefail; dotnet test Jarvis.sln -c Release --no-build --verbosity normal 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-test-results
-          path: Windows/**/TestResults/**
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Report failure to PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### ❌ Windows CI failed";
+            echo "Commit \`$GITHUB_SHA\` · [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)";
+            echo '';
+            echo '```';
+            tail -n 200 "$RUNNER_TEMP/ci.log" 2>/dev/null || echo "(no log captured before failure)";
+            echo '```';
+          } > "$RUNNER_TEMP/comment.md"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/8/comments" -F "body=@$RUNNER_TEMP/comment.md" || true

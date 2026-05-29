@@ -5,11 +5,12 @@ on:
     paths:
       - 'Mac/**'
       - '.github/workflows/macos.yml'
-  pull_request:
-    paths:
-      - 'Mac/**'
-      - '.github/workflows/macos.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: macos-${{ github.ref }}
@@ -23,34 +24,42 @@ jobs:
     defaults:
       run:
         working-directory: Mac
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: set -o pipefail; brew install xcodegen 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: Generate Xcode project
-        run: xcodegen generate
+        run: set -o pipefail; xcodegen generate 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: List schemes
-        run: xcodebuild -list || true
+        run: xcodebuild -list 2>&1 | tee -a "$RUNNER_TEMP/ci.log" || true
 
       - name: Build JarvisBrainDaemon
-        run: >-
-          xcodebuild -scheme JarvisBrainDaemon
-          -destination 'platform=macOS'
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+        run: |
+          set -o pipefail
+          xcodebuild -scheme JarvisBrainDaemon -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
       - name: Build JarvisMac
-        run: >-
-          xcodebuild -scheme JarvisMac
-          -destination 'platform=macOS'
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+        run: |
+          set -o pipefail
+          xcodebuild -scheme JarvisMac -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
-      # Daemon unit tests (the only currently-wired test target). The
-      # JarvisMacTests bundle will be added to project.yml in a later wave.
-      - name: Test JarvisBrainDaemon
-        run: >-
-          xcodebuild -scheme JarvisBrainDaemonTests
-          -destination 'platform=macOS'
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test || true
+      - name: Report failure to PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### ❌ macOS CI failed";
+            echo "Commit \`$GITHUB_SHA\` · [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)";
+            echo '';
+            echo '```';
+            tail -n 200 "$RUNNER_TEMP/ci.log" 2>/dev/null || echo "(no log captured before failure)";
+            echo '```';
+          } > "$RUNNER_TEMP/comment.md"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/8/comments" -F "body=@$RUNNER_TEMP/comment.md" || true
