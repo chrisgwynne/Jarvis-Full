@@ -47,7 +47,11 @@ class SmsTool(
         // Body missing: decline so the local guard handles it — same reason as
         // WhatsAppTool. Keeps the confirmation gate out of the missing-body path.
         if (intent.body.isBlank()) return null
-        Log.d(TAG, "[SMS_PARSED] recipient=\"${intent.recipient}\" body=\"${intent.body}\" route=SMS")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "[SMS_PARSED] recipient=\"${intent.recipient}\" body=\"${intent.body}\" route=SMS")
+        } else {
+            Log.d(TAG, "[SMS_PARSED] recipient=[redacted] body=[body: ${intent.body.length} chars] route=SMS")
+        }
         return ToolInput(
             transcript,
             mapOf("name" to intent.recipient, "message" to intent.body)

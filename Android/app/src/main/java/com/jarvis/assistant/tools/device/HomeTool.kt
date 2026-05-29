@@ -122,7 +122,11 @@ class HomeTool(
             )
         }
 
-        Log.d(TAG, "[HOME_LOCATION_FOUND] address=\"${home.address}\" hasCoords=${home.lat != null}")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "[HOME_LOCATION_FOUND] address=\"${home.address}\" hasCoords=${home.lat != null}")
+        } else {
+            Log.d(TAG, "[HOME_LOCATION_FOUND] address=[address redacted] hasCoords=${home.lat != null}")
+        }
 
         val mapsHandler = MapsIntentHandler(context)
         val travelMode  = if (mode == "WALK") TravelMode.WALKING else TravelMode.DRIVING

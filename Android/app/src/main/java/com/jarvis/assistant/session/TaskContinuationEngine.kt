@@ -175,7 +175,11 @@ class TaskContinuationEngine(
         val body = m?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
 
         return if (body != null) {
-            Log.d(TAG, "[CONTINUATION_MATCHED] reply to=${msg.sender} body=$body channel=${msg.channel}")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "[CONTINUATION_MATCHED] reply to=${msg.sender} body=$body channel=${msg.channel}")
+            } else {
+                Log.d(TAG, "[CONTINUATION_MATCHED] reply to=[redacted] body=[body: ${body.length} chars] channel=${msg.channel}")
+            }
             val toolName = when (msg.channel) {
                 com.jarvis.assistant.session.context.MessageChannel.WHATSAPP -> "whatsapp_send"
                 else -> "sms_send"

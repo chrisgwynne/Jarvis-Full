@@ -139,8 +139,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         val uri = intent.data ?: return
         if (uri.scheme == "com.jarvis.assistant" && uri.host == "oauth") {
-            val code = uri.getQueryParameter("code") ?: return
-            OAuthCallbackHolder.invoke(code)
+            val code  = uri.getQueryParameter("code")  ?: return
+            val state = uri.getQueryParameter("state") ?: return
+            OAuthCallbackHolder.invoke(code, state)
         }
     }
 

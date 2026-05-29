@@ -60,7 +60,11 @@ class SavedLocationsStore(context: Context) {
             }
             .putLong(keySetAt(label.lowercase()), System.currentTimeMillis())
             .apply()
-        Log.d(TAG, "[SAVED_PLACE_SAVED] label=$label address=\"$address\" hasCoords=${lat != null}")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "[SAVED_PLACE_SAVED] label=$label address=\"$address\" hasCoords=${lat != null}")
+        } else {
+            Log.d(TAG, "[SAVED_PLACE_SAVED] label=$label address=[address redacted] hasCoords=${lat != null}")
+        }
     }
 
     /** Retrieve a saved place by label, or null if not set. */
