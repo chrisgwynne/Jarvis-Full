@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Jarvis logo">
+  <defs>
+    <radialGradient id="favCore" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="45%" stop-color="#8ad0ff"/>
+      <stop offset="100%" stop-color="#3a7bff"/>
+    </radialGradient>
+    <linearGradient id="favRing" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6aa8ff"/>
+      <stop offset="100%" stop-color="#9b6bff"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="#eef4ff"/>
+  <circle cx="32" cy="32" r="22" fill="none" stroke="url(#favRing)" stroke-width="3" opacity="0.85"/>
+  <circle cx="32" cy="32" r="13" fill="url(#favCore)"/>
+  <circle cx="32" cy="32" r="13" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.6"/>
+</svg>

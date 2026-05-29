@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jarvis — Your personal AI assistant, everywhere you work</title>
+  <meta name="description" content="Jarvis connects your Mac, Android phone, and Windows machine into one natural, conversation-first assistant. Talk naturally — it detects commands inside the conversation and acts while it keeps talking." />
+  <meta name="theme-color" content="#f4f8ff" />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Decorative background blobs -->
+  <div class="bg-decor" aria-hidden="true">
+    <span class="blob blob-1"></span>
+    <span class="blob blob-2"></span>
+    <span class="blob blob-3"></span>
+  </div>
+
+  <!-- ===================== NAV ===================== -->
+  <header class="nav" id="nav">
+    <div class="container nav__inner">
+      <a class="brand" href="#top" aria-label="Jarvis home">
+        <span class="brand__orb" aria-hidden="true"></span>
+        <span class="brand__name">Jarvis</span>
+      </a>
+      <nav class="nav__links" aria-label="Primary">
+        <a href="#concept">Concept</a>
+        <a href="#features">Features</a>
+        <a href="#platforms">Platforms</a>
+        <a href="#how">How it works</a>
+        <a href="#privacy">Privacy</a>
+      </nav>
+      <div class="nav__cta">
+        <a class="btn btn--primary btn--sm" href="https://github.com/chrisgwynne/jarvis-full">Download Jarvis</a>
+      </div>
+      <button class="nav__toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <nav class="nav__mobile" id="navMobile" aria-label="Mobile">
+      <a href="#concept">Concept</a>
+      <a href="#features">Features</a>
+      <a href="#platforms">Platforms</a>
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+      <a class="btn btn--primary" href="https://github.com/chrisgwynne/jarvis-full">Download Jarvis</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- ===================== HERO ===================== -->
+    <section class="hero" id="hero">
+      <div class="container hero__grid">
+        <div class="hero__copy reveal">
+          <span class="eyebrow">Conversation-first assistant</span>
+          <h1 class="hero__title">Your personal AI assistant,<span class="grad-text"> everywhere you work.</span></h1>
+          <p class="hero__sub">Jarvis connects your Mac, Android phone, and Windows machine into one natural, conversation-first assistant.</p>
+          <div class="hero__actions">
+            <a class="btn btn--primary btn--lg" href="https://github.com/chrisgwynne/jarvis-full">Download Jarvis</a>
+            <a class="btn btn--ghost btn--lg" href="#features">See Features</a>
+          </div>
+          <ul class="pills" aria-label="Supported platforms">
+            <li class="pill"><span class="pill__dot pill__dot--mac"></span>Mac Brain</li>
+            <li class="pill"><span class="pill__dot pill__dot--android"></span>Android Connector</li>
+            <li class="pill"><span class="pill__dot pill__dot--win"></span>Windows Control</li>
+          </ul>
+        </div>
+
+        <div class="hero__visual reveal">
+          <div class="orb" aria-hidden="true">
+            <span class="orb__core"></span>
+            <span class="orb__ring orb__ring--1"></span>
+            <span class="orb__ring orb__ring--2"></span>
+          </div>
+          <div class="device-float">
+            <img src="assets/hero-mockup.svg" alt="Placeholder illustration of the Jarvis assistant interface running across a Mac and an Android phone" width="720" height="520" />
+          </div>
+        </div>
+      </div>
+      <a class="scroll-cue" href="#concept" aria-label="Scroll to learn more">
+        <span></span>
+      </a>
+    </section>
+
+    <!-- ===================== CORE CONCEPT ===================== -->
+    <section class="section" id="concept">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">The idea</span>
+          <h2>One assistant. Three roles. Zero setup headaches.</h2>
+          <p class="lead">Jarvis listens, understands, acts, and keeps talking. Your Mac does the thinking, your phone reaches into the real world, and your PC stays in the flow — so it feels like one assistant, not three apps.</p>
+        </div>
+
+        <div class="concept-grid">
+          <article class="glass concept-card reveal">
+            <div class="concept-card__icon icon-chip">
+              <!-- brain -->
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3 2.5 2.5 0 0 0 3-2.5V5.5A2.5 2.5 0 0 0 9 3Z"/><path d="M15 3a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3"/></svg>
+            </div>
+            <h3>Mac is the brain</h3>
+            <p>The Mac runs the conversation, memory, and planning. It orchestrates everything and coordinates your connected devices behind the scenes.</p>
+          </article>
+
+          <article class="glass concept-card reveal">
+            <div class="concept-card__icon icon-chip">
+              <!-- phone -->
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+            </div>
+            <h3>Android is the connector</h3>
+            <p>Your phone is how Jarvis reaches the real world — calls, messages, camera, and location — with a clean, simple app you barely have to think about.</p>
+          </article>
+
+          <article class="glass concept-card reveal">
+            <div class="concept-card__icon icon-chip">
+              <!-- monitor -->
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <h3>Windows is the workspace</h3>
+            <p>On your PC, Jarvis opens apps and supports your workflow — controlled desktop help that stays out of the way until you need it.</p>
+          </article>
+
+          <article class="glass concept-card concept-card--wide reveal">
+            <div class="concept-card__icon icon-chip">
+              <!-- waveform -->
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="7" x2="16" y2="17"/><line x1="20" y1="10" x2="20" y2="14"/></svg>
+            </div>
+            <h3>It listens, understands, acts — and keeps talking</h3>
+            <p>You speak the way you normally would. Jarvis figures out what you mean, quietly handles anything that needs doing, and stays in the conversation the whole time. No commands to memorise. Easy enough for anyone in the house.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== CONVERSATION-FIRST ===================== -->
+    <section class="section section--tint" id="conversation">
+      <div class="container conv__grid">
+        <div class="conv__copy reveal">
+          <span class="eyebrow">Why it feels different</span>
+          <h2>It talks <span class="grad-text">with</span> you — not <em>at</em> you.</h2>
+          <p class="lead">Most assistants force every sentence into a rigid command. Miss the magic phrase and you get “I can’t do that.” Jarvis treats what you say as a real conversation first, then notices the action hidden inside it.</p>
+          <ul class="check-list">
+            <li><span class="check" aria-hidden="true">✓</span> No rigid command syntax to learn</li>
+            <li><span class="check" aria-hidden="true">✓</span> Catches actions buried in normal speech</li>
+            <li><span class="check" aria-hidden="true">✓</span> Acts in the background while the conversation flows</li>
+            <li><span class="check" aria-hidden="true">✓</span> Picks the topic back up once it’s done</li>
+          </ul>
+        </div>
+
+        <div class="conv__demo reveal">
+          <div class="glass chat" role="img" aria-label="Example conversation showing Jarvis detecting an embedded command. The user says they had a bad day and asks to open the camera. Jarvis responds with empathy, opens the camera in the background, and keeps the conversation going.">
+            <div class="chat__head">
+              <span class="orb orb--mini" aria-hidden="true"><span class="orb__core"></span></span>
+              <span class="chat__title">Jarvis</span>
+              <span class="chat__status"><span class="dot-live"></span>Listening</span>
+            </div>
+
+            <div class="bubble bubble--user">
+              <p>I’ve had a bad day. Can you open the camera so I can check my face?</p>
+              <div class="annot annot--user">
+                <span class="annot__tag annot__tag--mood">conversation</span>
+                <span class="annot__tag annot__tag--cmd">embedded command</span>
+              </div>
+            </div>
+
+            <div class="bubble bubble--bot">
+              <p>Oh no — sorry it’s been rough. <span class="hl">Camera’s up</span> so you can take a look. Want to talk about what happened?</p>
+              <div class="annot annot--bot">
+                <span class="annot__chip">Understood the mood</span>
+                <span class="annot__chip annot__chip--act">Opened camera</span>
+                <span class="annot__chip">Kept the conversation going</span>
+              </div>
+            </div>
+
+            <div class="chat__action">
+              <span class="chat__action-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              </span>
+              Camera opened on your phone · action ran in the background
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FEATURES GRID ===================== -->
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">What it can do</span>
+          <h2>A real assistant, not just a chatbot.</h2>
+          <p class="lead">Everything below works through plain conversation. Ask for it the way you’d ask a person.</p>
+        </div>
+
+        <div class="feature-grid" id="featureGrid">
+          <!-- Cards injected from data attributes via JS-free static markup -->
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">💬</span>
+            <h3>Natural conversation</h3>
+            <p>Chat the way you actually talk. Jarvis follows context and keeps up — no robotic phrasing required.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🎯</span>
+            <h3>Embedded command detection</h3>
+            <p>It spots the thing you want done inside a normal sentence and just does it.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">📱</span>
+            <h3>Android phone control</h3>
+            <p>Reach your real phone — open apps, act on notifications, and trigger phone features by voice.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🧠</span>
+            <h3>Mac brain orchestration</h3>
+            <p>Your Mac plans, remembers, and coordinates every device so the whole system feels like one mind.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🖥️</span>
+            <h3>Windows control</h3>
+            <p>Launch apps and drive desktop workflows on your PC without breaking your focus.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">✉️</span>
+            <h3>Messages &amp; calls</h3>
+            <p>Send a text, fire off a WhatsApp, or place a call — Jarvis confirms before anything leaves your phone.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">📸</span>
+            <h3>Camera &amp; screenshots</h3>
+            <p>Open the camera, grab a photo, or capture the screen the moment you ask.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">📅</span>
+            <h3>Calendar &amp; reminders</h3>
+            <p>Add events, set reminders, and check what’s next — all in the same breath as the rest of your chat.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">📍</span>
+            <h3>Location &amp; ETA</h3>
+            <p>Ask where you are, how long a trip takes, or when you’ll arrive, and get a straight answer.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🏠</span>
+            <h3>Home Assistant control</h3>
+            <p>Dim the lights, set the thermostat, or run a scene through your existing Home Assistant setup.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">⚡</span>
+            <h3>Local-first actions</h3>
+            <p>Wherever it can, Jarvis acts on your own devices first — quick, private, and dependable.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🛟</span>
+            <h3>Smart fallback</h3>
+            <p>If the fast path isn’t available, Jarvis falls back gracefully and keeps going instead of giving up.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🎙️</span>
+            <h3>Voice input &amp; speech</h3>
+            <p>Speak to it and hear it answer in a natural voice — hands-free from across the room.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">✋</span>
+            <h3>Interruptible responses</h3>
+            <p>Talk over it any time. Jarvis stops, listens, and adjusts — just like a real conversation.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🔒</span>
+            <h3>Privacy-conscious design</h3>
+            <p>Built to keep sensitive actions on your own devices, with diagnostics kept out of your way.</p>
+          </article>
+          <article class="glass feature-card reveal">
+            <span class="feature-card__ic icon-chip">🌀</span>
+            <h3>Background task execution</h3>
+            <p>Actions run quietly in the background so the conversation never has to stop and wait.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== MID CTA ===================== -->
+    <section class="cta-band">
+      <div class="container cta-band__inner glass reveal">
+        <div>
+          <h2>Ready to meet your assistant?</h2>
+          <p>Set it up once on your Mac, pair your phone, and start talking.</p>
+        </div>
+        <div class="cta-band__actions">
+          <a class="btn btn--primary btn--lg" href="https://github.com/chrisgwynne/jarvis-full">Download Jarvis</a>
+          <a class="btn btn--ghost btn--lg" href="#how">See how it works</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PLATFORM SECTIONS ===================== -->
+    <section class="section" id="platforms">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">Built for your setup</span>
+          <h2>Three devices, working as one.</h2>
+          <p class="lead">Each platform plays to its strengths — and they stay in sync so you don’t have to think about which one is doing the work.</p>
+        </div>
+
+        <!-- Mac -->
+        <div class="platform reveal">
+          <div class="platform__copy">
+            <span class="badge badge--mac">Mac · The Brain</span>
+            <h3>The mind of the whole system</h3>
+            <p>Your Mac runs the conversation, holds the memory, and does the planning. It handles the deeper tasks and coordinates every connected device, so the assistant always feels consistent no matter where you’re talking to it.</p>
+            <ul class="mini-list">
+              <li>Conversation, memory &amp; planning in one place</li>
+              <li>Coordinates your phone and PC behind the scenes</li>
+              <li>Runs quietly from the menu bar</li>
+            </ul>
+          </div>
+          <figure class="platform__shot glass">
+            <img src="assets/placeholder-mac.svg" alt="Mac Brain Dashboard Placeholder" width="560" height="380" loading="lazy" />
+          </figure>
+        </div>
+
+        <!-- Android -->
+        <div class="platform platform--reverse reveal">
+          <div class="platform__copy">
+            <span class="badge badge--android">Android · The Connector</span>
+            <h3>Your phone, gently in the loop</h3>
+            <p>The Android app is deliberately simple — an orb, a tap-to-talk button, and a clear connection status. It quietly handles calls, messages, WhatsApp, camera, and location, asking only for the permissions it genuinely needs. No dials, no diagnostics, no clutter.</p>
+            <ul class="mini-list">
+              <li>Calls, messages &amp; WhatsApp by voice</li>
+              <li>Camera &amp; location when you ask for them</li>
+              <li>Clean, appliance-like app — minimal settings</li>
+            </ul>
+          </div>
+          <figure class="platform__shot glass">
+            <img src="assets/placeholder-android.svg" alt="Android Connector Placeholder" width="560" height="380" loading="lazy" />
+          </figure>
+        </div>
+
+        <!-- Windows -->
+        <div class="platform reveal">
+          <div class="platform__copy">
+            <span class="badge badge--win">Windows · The Workspace</span>
+            <h3>Desktop help that respects your focus</h3>
+            <p>On Windows, Jarvis launches apps and supports your productivity workflows, with keyboard and mouse automation where it’s available. It lives in the system tray and stays out of the way — built to grow with new desktop abilities over time.</p>
+            <ul class="mini-list">
+              <li>App launching &amp; productivity workflows</li>
+              <li>Keyboard / mouse automation where supported</li>
+              <li>Lightweight tray app, built for future extensibility</li>
+            </ul>
+          </div>
+          <figure class="platform__shot glass">
+            <img src="assets/placeholder-windows.svg" alt="Windows Control Placeholder" width="560" height="380" loading="lazy" />
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== HOW IT WORKS ===================== -->
+    <section class="section section--tint" id="how">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">How it works</span>
+          <h2>From a sentence to done — in four steps.</h2>
+          <p class="lead">There’s nothing to configure in the moment. You just talk.</p>
+        </div>
+
+        <ol class="steps">
+          <li class="glass step reveal">
+            <span class="step__num">1</span>
+            <h3>Speak naturally</h3>
+            <p>Say what’s on your mind, the way you’d say it to a person.</p>
+          </li>
+          <li class="glass step reveal">
+            <span class="step__num">2</span>
+            <h3>Jarvis understands</h3>
+            <p>It reads the whole sentence — tone, context, and meaning — not just keywords.</p>
+          </li>
+          <li class="glass step reveal">
+            <span class="step__num">3</span>
+            <h3>It detects the action</h3>
+            <p>If something needs doing, Jarvis finds the command tucked inside your words.</p>
+          </li>
+          <li class="glass step reveal">
+            <span class="step__num">4</span>
+            <h3>It acts &amp; keeps talking</h3>
+            <p>The action runs in the background while the conversation carries on.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ===================== COMPARISON ===================== -->
+    <section class="section" id="compare">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">How it compares</span>
+          <h2>Jarvis vs. a standard voice assistant.</h2>
+          <p class="lead">The difference isn’t one feature — it’s how the whole thing behaves.</p>
+        </div>
+
+        <div class="table-wrap glass reveal">
+          <table class="compare" aria-label="Comparison of Jarvis versus standard voice assistants">
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col" class="compare__brand">
+                  <span class="orb orb--mini" aria-hidden="true"><span class="orb__core"></span></span> Jarvis
+                </th>
+                <th scope="col">Standard assistant</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Natural conversation</th><td class="yes" aria-label="Yes">✓</td><td class="part" aria-label="Limited">Limited</td></tr>
+              <tr><th scope="row">Embedded actions</th><td class="yes" aria-label="Yes">✓</td><td class="no" aria-label="No">—</td></tr>
+              <tr><th scope="row">Multi-platform control</th><td class="yes" aria-label="Yes">✓</td><td class="no" aria-label="No">—</td></tr>
+              <tr><th scope="row">Android phone control</th><td class="yes" aria-label="Yes">✓</td><td class="part" aria-label="Limited">Limited</td></tr>
+              <tr><th scope="row">Mac brain orchestration</th><td class="yes" aria-label="Yes">✓</td><td class="no" aria-label="No">—</td></tr>
+              <tr><th scope="row">Windows support</th><td class="yes" aria-label="Yes">✓</td><td class="no" aria-label="No">—</td></tr>
+              <tr><th scope="row">Local-first design</th><td class="yes" aria-label="Yes">✓</td><td class="no" aria-label="No">—</td></tr>
+              <tr><th scope="row">Keeps talking after actions</th><td class="yes" aria-label="Yes">✓</td><td class="no" aria-label="No">—</td></tr>
+              <tr><th scope="row">Advanced personal automation</th><td class="yes" aria-label="Yes">✓</td><td class="part" aria-label="Limited">Limited</td></tr>
+              <tr><th scope="row">Home Assistant integration</th><td class="yes" aria-label="Yes">✓</td><td class="part" aria-label="Limited">Varies</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TRUST / PRIVACY ===================== -->
+    <section class="section section--tint" id="privacy">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">Trust &amp; privacy</span>
+          <h2>Local-first, and on your side.</h2>
+          <p class="lead">Jarvis is designed to keep your actions close to home and put you in control — without overpromising what any software can guarantee.</p>
+        </div>
+
+        <div class="trust-grid">
+          <article class="glass trust-card reveal">
+            <span class="trust-card__ic icon-chip">⚡</span>
+            <h3>Local-first where possible</h3>
+            <p>Jarvis prefers to act on your own devices first, falling back to other paths only when it has to.</p>
+          </article>
+          <article class="glass trust-card reveal">
+            <span class="trust-card__ic icon-chip">📱</span>
+            <h3>Phone actions stay on-device</h3>
+            <p>Where it can, your phone carries out phone actions itself rather than routing them elsewhere.</p>
+          </article>
+          <article class="glass trust-card reveal">
+            <span class="trust-card__ic icon-chip">🧠</span>
+            <h3>The Mac orchestrates</h3>
+            <p>Your own Mac coordinates the conversation and planning as the hub of your setup.</p>
+          </article>
+          <article class="glass trust-card reveal">
+            <span class="trust-card__ic icon-chip">🎛️</span>
+            <h3>You stay in control</h3>
+            <p>Sensitive actions like sending a message or placing a call are confirmed before they happen.</p>
+          </article>
+          <article class="glass trust-card reveal">
+            <span class="trust-card__ic icon-chip">🙈</span>
+            <h3>Diagnostics stay hidden</h3>
+            <p>Technical internals are kept out of everyday use, so the experience stays calm and simple.</p>
+          </article>
+          <article class="glass trust-card reveal">
+            <span class="trust-card__ic icon-chip">✨</span>
+            <h3>Minimal by design</h3>
+            <p>No clutter, no dashboards in your face — just an assistant that does what you ask.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FINAL CTA ===================== -->
+    <section class="final-cta">
+      <div class="container">
+        <div class="glass final-cta__card reveal">
+          <div class="orb orb--big" aria-hidden="true">
+            <span class="orb__core"></span>
+            <span class="orb__ring orb__ring--1"></span>
+            <span class="orb__ring orb__ring--2"></span>
+          </div>
+          <h2>Build your own Jarvis-style assistant.</h2>
+          <p>Bring your Mac, phone, and PC together into one assistant that talks like a person and acts like a pro.</p>
+          <div class="final-cta__actions">
+            <a class="btn btn--primary btn--lg" href="https://github.com/chrisgwynne/jarvis-full">Download Jarvis</a>
+            <a class="btn btn--ghost btn--lg" href="https://github.com/chrisgwynne/jarvis-full">View Setup Guide</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <a class="brand" href="#top" aria-label="Jarvis home">
+          <span class="brand__orb" aria-hidden="true"></span>
+          <span class="brand__name">Jarvis</span>
+        </a>
+        <p class="footer__tag">A conversation-first personal assistant across Mac, Android, and Windows.</p>
+      </div>
+      <nav class="footer__col" aria-label="Platforms">
+        <h4>Platforms</h4>
+        <a href="#platforms">Mac</a>
+        <a href="#platforms">Android</a>
+        <a href="#platforms">Windows</a>
+      </nav>
+      <nav class="footer__col" aria-label="Product">
+        <h4>Product</h4>
+        <a href="#features">Features</a>
+        <a href="https://github.com/chrisgwynne/jarvis-full">Setup</a>
+        <a href="#privacy">Privacy</a>
+      </nav>
+      <nav class="footer__col" aria-label="More">
+        <h4>More</h4>
+        <a href="https://github.com/chrisgwynne/jarvis-full">GitHub</a>
+        <a href="#top">Jarvis</a>
+      </nav>
+    </div>
+    <div class="container footer__base">
+      <span>© <span id="year">2026</span> Jarvis. An independent, MCU-inspired assistant project — not affiliated with any film studio or trademark holder.</span>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
