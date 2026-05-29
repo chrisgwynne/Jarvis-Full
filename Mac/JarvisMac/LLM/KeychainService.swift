@@ -165,18 +165,35 @@ final class KeychainService {
         return String(data: data, encoding: .utf8)
     }
 
+    /// High-value auth credentials that must NOT use the world-open ACL. These
+    /// gate access to the Brain Gateway / Mac↔device bridge; a world-open ACL
+    /// would let ANY process on the machine read them (#14). They use the default
+    /// keychain ACL instead, which still permits the daemon (same code-signing
+    /// identity) to read without a world-open policy.
+    private static let aclScopedKeys: Set<String> = [
+        "gateway_token",
+        "brain_server_token",
+        "websocket_auth_token",
+    ]
+
     private func rawSet(_ key: String, value: String) {
         let data  = Data(value.utf8)
         let searchQ = baseQuery(key) as CFDictionary
         // Try update first (preserves existing ACL on already-migrated items)
         let updateAttrs: [String: Any] = [kSecValueData as String: data]
         if SecItemUpdate(searchQ, updateAttrs as CFDictionary) == errSecItemNotFound {
-            // Item doesn't exist — create it with an open access policy so any
-            // binary signed by the same developer can read without a new prompt.
+            // Item doesn't exist — create it.
             var addQ = baseQuery(key)
             addQ[kSecValueData as String]     = data
             addQ[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            if let openAccess = makeOpenAccess() {
+            if Self.aclScopedKeys.contains(key) {
+                // Sensitive credential: use the DEFAULT keychain ACL (app/team
+                // scoped). Do NOT attach the world-open SecAccess. The daemon,
+                // signed by the same identity, can still read it.
+                log.debug("[Keychain] creating '\(key, privacy: .public)' with scoped (default) ACL")
+            } else if let openAccess = makeOpenAccess() {
+                // Low-sensitivity user-entered API tokens: open ACL avoids
+                // repeated OS prompts across Debug/Release/Xcode builds.
                 addQ[kSecAttrAccess as String] = openAccess
             }
             SecItemAdd(addQ as CFDictionary, nil)
@@ -198,9 +215,10 @@ final class KeychainService {
     /// repeated "wants to use your confidential information" dialogs when the
     /// same secret is accessed by different builds (Debug vs Release vs Xcode).
     ///
-    /// Security note: these are API tokens entered by the user in the Settings
-    /// UI. Restricting them to a specific binary path provides no meaningful
-    /// security since the token is already known to the user's machine.
+    /// Security note: this open ACL is used ONLY for low-sensitivity user-entered
+    /// API tokens (Spotify, GitHub, etc.). High-value bridge credentials in
+    /// `aclScopedKeys` (gateway/brain/websocket tokens) deliberately bypass this
+    /// and use the default team-scoped ACL — see `rawSet` (#14).
     private func makeOpenAccess() -> SecAccess? {
         // Passing an empty CFArray for trustedList means: no application
         // restrictions — any application on this system can use the item

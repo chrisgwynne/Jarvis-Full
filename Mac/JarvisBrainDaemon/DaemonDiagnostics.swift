@@ -6,6 +6,8 @@ final class DaemonDiagnostics {
     var requestsServed: Int = 0
     var unauthorizedAttempts: Int = 0
     var port: Int = 8765
+    /// True when the listener is bound to loopback only (set by BrainDaemonServer).
+    var bindLocalOnly: Bool = false
 
     // Per-platform WebSocket client counts (Task 5)
     var connectedAndroidClients: Int = 0

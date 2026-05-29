@@ -312,6 +312,22 @@ enum NaturalCommandParser {
         return nil
     }
 
+    // MARK: Word-boundary matching
+
+    /// True if `word` appears as a whole token in the (already-normalized,
+    /// space-separated, lowercased) string `t`. Avoids the false positives of
+    /// `contains` — e.g. `containsWord(in:"newspaper stand", "news")` is false,
+    /// `containsWord(in:"the news", "news")` is true. Punctuation is stripped
+    /// from token edges so "news." / "news," still match.
+    static func containsWord(in t: String, _ word: String) -> Bool {
+        let punctuation = CharacterSet(charactersIn: ".?!,;:'\"")
+        for token in t.split(separator: " ") {
+            let cleaned = token.trimmingCharacters(in: punctuation)
+            if cleaned == word { return true }
+        }
+        return false
+    }
+
     // MARK: Target
 
     private static func detectTarget(in t: String,
@@ -326,10 +342,10 @@ enum NaturalCommandParser {
         if t.contains("headlines") { return (.headlines, nil) }
         // "news" as a standalone command or together with an explicit action verb.
         // A bare `t.contains("news")` would fire on conversational context such as
-        // "you shouldn't be listening to the news when it's on" — which must never
-        // route to the news overlay.  Require either an exact match, a news-prefixed
-        // topic phrase, or an action verb being present alongside the word.
-        if t == "news" || t.hasPrefix("news ") || (action != nil && t.contains("news")) {
+        // "you shouldn't be listening to the news when it's on" — and even substrings
+        // like "newspaper"/"renews". Require either an exact match, a news-prefixed
+        // topic phrase, or an action verb alongside "news" as a WHOLE WORD (#50).
+        if t == "news" || t.hasPrefix("news ") || (action != nil && containsWord(in: t, "news")) {
             return (.news, nil)
         }
         if t.contains("camera")    { return (.camera, nil) }

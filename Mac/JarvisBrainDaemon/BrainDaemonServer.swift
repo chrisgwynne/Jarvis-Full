@@ -21,6 +21,12 @@ final class BrainDaemonServer {
 
     let port: Int
 
+    /// When true the listener binds to the loopback interface (127.0.0.1) only,
+    /// so the daemon is unreachable over Wi-Fi / Tailscale / LAN. Controlled by
+    /// the `JARVIS_DAEMON_BIND_LOCAL` env var ("1"/"true"/"yes"). Defaults off to
+    /// preserve the existing Tailscale-reachable behaviour.
+    let bindLocalOnly: Bool
+
     init() {
         if let envPort = ProcessInfo.processInfo.environment["JARVIS_DAEMON_PORT"],
            let p = Int(envPort), p > 0, p < 65536 {
@@ -28,7 +34,10 @@ final class BrainDaemonServer {
         } else {
             port = 8765
         }
+        let bindEnv = (ProcessInfo.processInfo.environment["JARVIS_DAEMON_BIND_LOCAL"] ?? "").lowercased()
+        bindLocalOnly = ["1", "true", "yes"].contains(bindEnv)
         DaemonDiagnostics.shared.port = port
+        DaemonDiagnostics.shared.bindLocalOnly = bindLocalOnly
     }
 
     // MARK: - Lifecycle
@@ -48,6 +57,14 @@ final class BrainDaemonServer {
             ipOptions.version = .v4
         }
         params.allowLocalEndpointReuse = true
+
+        // Loopback-only bind: pin the listener's local endpoint to 127.0.0.1 so
+        // the kernel refuses connections arriving on any other interface. Without
+        // this the listener accepts on all interfaces (incl. Wi-Fi / Tailscale).
+        if bindLocalOnly {
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: nwPort)
+            serverLog.info("Daemon binding to loopback only (127.0.0.1)")
+        }
 
         do {
             listener = try NWListener(using: params, on: nwPort)

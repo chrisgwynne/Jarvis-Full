@@ -108,27 +108,29 @@ final class DaemonAppBridge: ObservableObject {
     // MARK: - Receive loop
 
     private func receive() {
+        // The URLSession completion handler runs on a background (nonisolated)
+        // queue. Touching `connection`, `handleText`, `receive()` etc. directly
+        // from here is a main-actor isolation violation. Marshal everything back
+        // onto the main actor before touching any @MainActor state.
         connection?.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let message):
-                Task { @MainActor in
+            Task { @MainActor in
+                guard let self else { return }
+                switch result {
+                case .success(let message):
                     self.isConnected = true
                     self.reconnectAttempts = 0
-                }
-                switch message {
-                case .string(let text):
-                    self.handleText(text)
-                case .data(let data):
-                    if let text = String(data: data, encoding: .utf8) {
+                    switch message {
+                    case .string(let text):
                         self.handleText(text)
+                    case .data(let data):
+                        if let text = String(data: data, encoding: .utf8) {
+                            self.handleText(text)
+                        }
+                    @unknown default: break
                     }
-                @unknown default: break
-                }
-                self.receive()  // continue loop
-            case .failure(let error):
-                self.logger.warning("DaemonAppBridge receive error: \(error.localizedDescription)")
-                Task { @MainActor in
+                    self.receive()  // continue loop
+                case .failure(let error):
+                    self.logger.warning("DaemonAppBridge receive error: \(error.localizedDescription)")
                     self.isConnected = false
                     self.scheduleReconnect()
                 }
@@ -237,10 +239,13 @@ final class DaemonAppBridge: ObservableObject {
     }
 
     private func startPing() {
-        pingTask = Task {
+        pingTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(25))
-                connection?.sendPing { _ in }
+                guard let self else { return }
+                // `connection` is @MainActor-isolated; touch it only after the
+                // explicit main-actor hop above.
+                self.connection?.sendPing { _ in }
             }
         }
     }

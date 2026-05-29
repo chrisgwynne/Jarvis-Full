@@ -2764,11 +2764,16 @@ final class JarvisController {
                 "jarvis stop", "stop listening", "go quiet",
                 "stop playing",
             ]
+            // Word-boundary match (#50): an allowlist entry matches only when it
+            // is the whole transcript or is followed by a space — so "stop"
+            // matches "stop the music" but NOT "stopwatch", and "mute" does not
+            // match "muted notifications".
             let isAllowed = mediaSuppressAllowlist.contains(tLow)
-                || mediaSuppressAllowlist.contains(where: { tLow.hasPrefix($0) })
+                || mediaSuppressAllowlist.contains(where: { tLow.hasPrefix($0 + " ") })
             guard isAllowed else {
+                // PII (#29): never log the raw transcript — log its length only.
                 state.log("conv", .info,
-                    "transcript_suppressed reason=media_playing text=\"\(tLow.prefix(40))\"")
+                    "transcript_suppressed reason=media_playing len=\(tLow.count)")
                 return
             }
         }
@@ -2781,7 +2786,9 @@ final class JarvisController {
         if conversationalArmed { armConversationalMode() }
         timingEngine.userStoppedSpeaking()  // final transcript = end of user turn
         SpeechTurnStore.shared.update { $0.transcriptLength = text.count }
-        ExecutionTracer.shared.addStep("transcript", detail: String(text.prefix(60)), runtimeID: "conversation")
+        // PII (#29): record only the transcript length in the execution trace,
+        // never the spoken text (traces are surfaced in diagnostics UI/logs).
+        ExecutionTracer.shared.addStep("transcript", detail: "len=\(text.count)", runtimeID: "conversation")
         conversation.cancelTimeout()  // user spoke — cancel any silence timeout
 
         // Streaming interruption: if Jarvis was mid-sentence streaming, hand off the
@@ -2803,13 +2810,16 @@ final class JarvisController {
                 // Resolution deferred to LLM — keep pending context alive so
                 // tryLLMFallback can see it and inject conversation history.
                 state.lastFollowUpResolution = "llm"
+                // PII (#29): the assistant question can contain user content —
+                // log its length, not the text.
                 state.log("conv", .info,
-                    "follow_up_deferred_to_llm q=\"\(pending.assistantQuestion.prefix(40))\"")
+                    "follow_up_deferred_to_llm q_len=\(pending.assistantQuestion.count)")
                 // Fall through — context still set, LLM will use history.
             } else if resolution.didHandle {
                 clearPendingContext(resolution: resolution.reply != nil ? "yes/no→speak" : "intent")
+                // PII (#29): log only whether a reply was produced + its length.
                 state.log("conv", .info,
-                    "follow_up_resolved reply=\"\(resolution.reply?.prefix(40) ?? "-")\"")
+                    "follow_up_resolved has_reply=\(resolution.reply != nil) reply_len=\(resolution.reply?.count ?? 0)")
                 if let reply = resolution.reply { speak(reply) }
                 if let intent = resolution.intent { await execute(intent) }
                 return

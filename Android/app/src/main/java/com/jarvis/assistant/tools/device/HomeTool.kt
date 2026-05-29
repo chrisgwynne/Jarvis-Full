@@ -50,7 +50,7 @@ class HomeTool(
         private const val TAG = "HomeTool"
 
         private val NAVIGATE_HOME_RE = Regex(
-            """(?:navigate|drive|take\s+me|go)\s+home\b""" +
+            """(?:navigate|drive|take\s+me|go|head|travel(?:ling)?)\s+home\b""" +
             """|(?:start|open|begin)\s+(?:navigation|directions)\s+home\b""" +
             """|(?:take\s+me\s+home)\b""",
             RegexOption.IGNORE_CASE

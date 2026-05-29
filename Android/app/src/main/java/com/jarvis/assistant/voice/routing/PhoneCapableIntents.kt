@@ -67,9 +67,14 @@ object PhoneCapableIntents {
 
         // Maps / location
         Regex("""\b(?:navigate|directions|where\s+am\s+i|how\s+(?:long|far)\s+to|take\s+me\s+(?:to|home))\b""", RegexOption.IGNORE_CASE),
+        // Home navigation phrasings handled locally by HomeTool (#28):
+        // "navigate/drive/go/head/travel(ling) home", "directions home", "ETA home".
+        Regex("""\b(?:navigate|drive|go|head|travel(?:ling)?)\s+home\b""", RegexOption.IGNORE_CASE),
 
-        // Camera / media
+        // Camera / media — "take a photo/picture/selfie/video" and the bare
+        // word "selfie" (#28), which routes to the front-camera capture tool.
         Regex("""\btake\s+(?:a\s+)?(?:photo|picture|selfie|video)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bselfie\b""", RegexOption.IGNORE_CASE),
         Regex("""\bstart\s+recording\b""", RegexOption.IGNORE_CASE),
         Regex("""\bscreenshot\b""", RegexOption.IGNORE_CASE),
 

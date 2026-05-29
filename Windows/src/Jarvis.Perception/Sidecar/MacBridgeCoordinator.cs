@@ -137,9 +137,51 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
         if (_outbound.IsAddingCompleted) return Task.FromResult(false);
         frame.ProtocolVersion ??= SidecarProtocol.Version;
         frame.Seq             ??= Interlocked.Increment(ref _outboundSeq);
-        while (_outbound.Count >= OutboundQueueCap - 1 && _outbound.TryTake(out _)) { }
+        // Two-lane eviction under pressure: drop the oldest *evictable* frame (partials,
+        // heartbeats, presence …) but never a transcript.final — the Mac needs every final
+        // to stitch the conversation. Falls back to dropping the oldest only if the whole
+        // queue is finals (pathological; keeps the queue bounded rather than blocking).
+        while (_outbound.Count >= OutboundQueueCap - 1)
+        {
+            if (!EvictOneFromOutbound()) break;
+        }
         try { _outbound.Add(frame, cancellationToken); return Task.FromResult(true); }
         catch { return Task.FromResult(false); }
+    }
+
+    /// <summary>Removes one frame to make room, preferring non-final frames. Returns false
+    /// if nothing could be removed. Any transcript.final frames skipped while searching are
+    /// re-queued in their original order so finals survive eviction.</summary>
+    private bool EvictOneFromOutbound()
+    {
+        List<SidecarFrame>? preservedFinals = null;
+        try
+        {
+            while (_outbound.TryTake(out var head))
+            {
+                if (!string.Equals(head.Type, SidecarFrameTypes.TranscriptFinal, StringComparison.Ordinal))
+                {
+                    // Dropped a non-final frame — restore the finals we set aside and report success.
+                    if (preservedFinals is not null)
+                        foreach (var f in preservedFinals) _outbound.Add(f);
+                    return true;
+                }
+                (preservedFinals ??= new List<SidecarFrame>()).Add(head);
+            }
+        }
+        catch { /* AddingCompleted raced — fall through */ }
+
+        // Queue was entirely finals (or empty). Restore all but the oldest final so the
+        // queue still makes room; never silently lose more than one.
+        if (preservedFinals is { Count: > 0 })
+        {
+            for (var i = 1; i < preservedFinals.Count; i++)
+            {
+                try { _outbound.Add(preservedFinals[i]); } catch { break; }
+            }
+            return true; // oldest final (index 0) intentionally dropped as last resort
+        }
+        return false;
     }
 
     public IReadOnlyList<SidecarFrame> SnapshotOutbound()

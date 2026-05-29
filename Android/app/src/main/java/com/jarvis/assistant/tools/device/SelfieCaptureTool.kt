@@ -62,7 +62,11 @@ class SelfieCaptureTool(
 
         private val TRIGGERS = Regex(
             """take\s+a\s+selfie""" +
-            """|selfie\s+(?:photo|picture|shot)?""" +
+            // Bare "selfie" (#28) — including the single-word utterance.  Safe
+            // because ViewMediaTool / ShareMediaTool are registered ahead of
+            // this tool, so "show/send the selfie" match those first and only a
+            // standalone "selfie" (optionally + photo/picture/shot) reaches here.
+            """|\bselfie\b(?:\s+(?:photo|picture|shot))?""" +
             """|front\s+camera\s+(?:photo|picture|shot)?""" +
             """|photo\s+of\s+(?:my|me)\s+(?:face|self)?""" +
             """|(?:picture|photo)\s+of\s+me(?:\s+please)?""",

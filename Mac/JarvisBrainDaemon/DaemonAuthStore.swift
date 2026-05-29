@@ -90,15 +90,35 @@ final class DaemonAuthStore {
         flushTimer = timer
     }
 
-    /// Persists pending lastSeenAt updates if any have accumulated. Safe to call
-    /// from the timer or directly (e.g. on shutdown).
+    /// Persists pending lastSeenAt updates if any have accumulated, and pulls in
+    /// any externally-written changes (e.g. a Mac-app revocation) so the daemon
+    /// does not keep authorising a revoked device with stale in-memory state
+    /// (#33). Safe to call from the timer or directly (e.g. on shutdown).
     func flushIfDirty() {
         let shouldFlush: Bool = storeLock.withLock {
             let dirty = lastSeenDirty
             lastSeenDirty = false
             return dirty
         }
-        if shouldFlush { save() }
+        if shouldFlush {
+            // save() already reloads + merges under the flock before writing,
+            // so a flush both persists our changes and absorbs external ones.
+            save()
+        } else if fileChangedExternally() {
+            // No pending writes but the file changed on disk — reload so a
+            // revocation made by the Mac app takes effect promptly.
+            reloadFromDisk()
+        }
+    }
+
+    /// Tracks the data file's modification date to cheaply detect external writes.
+    private var lastKnownModified: Date?
+    private func fileChangedExternally() -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: storeURL.path),
+              let modified = attrs[.modificationDate] as? Date else { return false }
+        defer { lastKnownModified = modified }
+        guard let last = lastKnownModified else { return false } // first observation
+        return modified > last
     }
 
     // MARK: - Gateway token (Keychain, cached)
@@ -207,30 +227,50 @@ final class DaemonAuthStore {
     }
 
     private func save() {
-        // Snapshot under the lock, then write to disk OUTSIDE the lock so a slow
-        // disk does not block auth checks. Note: `pairedDevices`/`_pairedDevices`
-        // must NOT be touched via the computed property here (NSLock is not
-        // recursive) — snapshot `_pairedDevices` directly.
-        let snapshot: [PairedDevice] = storeLock.withLock { _pairedDevices }
-        guard let d = try? JSONEncoder().encode(snapshot) else { return }
         try? FileManager.default.createDirectory(
             at: storeURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
-        try? d.write(to: storeURL, options: .atomic)
+        // DUAL-WRITER RACE (#33): the Mac app's GatewayAuthStore writes this same
+        // file. Take the cross-process flock, RELOAD the latest on-disk state,
+        // MERGE with our in-memory change (revocation sticky / newest lastSeen),
+        // then write — all under the flock. The in-process `storeLock` snapshots
+        // and re-applies `_pairedDevices` so auth checks are never blocked on disk
+        // I/O. flock is taken OUTSIDE storeLock to avoid holding the in-process
+        // lock across disk operations.
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            let snapshot: [PairedDevice] = storeLock.withLock { _pairedDevices }
+            let onDisk = GatewayAuthFileLock.readDevices(at: storeURL)
+            let merged = GatewayAuthFileLock.merge(local: snapshot, disk: onDisk)
+            storeLock.withLock { _pairedDevices = merged }
+            GatewayAuthFileLock.writeDevices(merged, to: storeURL)
+        }
     }
 
     private func load() {
-        storeLock.withLock {
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            // Read the raw bytes so we can detect/back up corrupt JSON.
             guard let data = try? Data(contentsOf: storeURL) else { return }
             if let decoded = try? JSONDecoder().decode([PairedDevice].self, from: data) {
-                _pairedDevices = decoded
+                storeLock.withLock { _pairedDevices = decoded }
             } else {
                 // Corrupt JSON — backup and start fresh
                 let backupURL = storeURL.deletingPathExtension().appendingPathExtension("json.bak")
                 try? data.write(to: backupURL, options: .atomic)
                 serverLog.error("DaemonAuthStore: corrupt JSON — backed up to .bak, starting with empty registry")
-                pairedDevices = []
+                storeLock.withLock { _pairedDevices = [] }
             }
+        }
+    }
+
+    /// Re-reads the file under the cross-process lock and merges externally-written
+    /// changes (e.g. a Mac-app revocation) into the in-memory list. Call on a poll
+    /// or before an auth-sensitive read to pick up the other writer's changes.
+    func reloadFromDisk() {
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            let snapshot: [PairedDevice] = storeLock.withLock { _pairedDevices }
+            let onDisk = GatewayAuthFileLock.readDevices(at: storeURL)
+            let merged = GatewayAuthFileLock.merge(local: snapshot, disk: onDisk)
+            storeLock.withLock { _pairedDevices = merged }
         }
     }
 

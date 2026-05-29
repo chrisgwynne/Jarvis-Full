@@ -70,6 +70,7 @@ class InstantCommandRouter(
             "volume_control"     to "VOLUME",
             "media_control"      to "MEDIA",
             "camera_capture"     to "CAMERA",
+            "selfie_capture"     to "CAMERA",   // bare "selfie" routes here (#28)
 
             // Smart home (Home Assistant — lights, scenes, devices).
             "smart_home"         to "HOME_ASSISTANT_DEVICE",
@@ -83,6 +84,9 @@ class InstantCommandRouter(
             "scroll_screen"      to "SCROLL",
             "quick_reply"        to "QUICK_REPLY",
             "start_navigation"   to "START_NAVIGATION",
+            // Home navigation ("navigate/drive/travel home", ETA home) is a
+            // deterministic device action — keep it instant (#28).
+            "home_navigation"    to "HOME_NAVIGATION",
 
             // Unified Action Graph — multi-step routine execution.
             "run_graph"          to "RUN_GRAPH",

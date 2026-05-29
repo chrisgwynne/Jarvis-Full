@@ -97,7 +97,13 @@ public sealed class WinRtMicrophoneCapture : IMicrophoneCapture
     private async void OnWakeDetected(object? sender, WakeDetection ev)
     {
         _diagnostics?.Record(DiagnosticLevel.Info, "wake", "detected",
-            new Dictionary<string, object?> { ["phrase"] = ev.Phrase, ["confidence"] = ev.Confidence });
+            new Dictionary<string, object?>
+            {
+                // Privacy: never log the raw recognized phrase — record length + short hash only.
+                ["phraseLen"] = DiagnosticsRedaction.Length(ev.Phrase),
+                ["phraseHash"] = DiagnosticsRedaction.Hash(ev.Phrase),
+                ["confidence"] = ev.Confidence
+            });
         // Open the active window: pause wake, start STT.
         try
         {

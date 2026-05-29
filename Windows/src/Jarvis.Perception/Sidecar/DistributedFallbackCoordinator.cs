@@ -45,15 +45,47 @@ public sealed class DistributedFallbackCoordinator : IDistributedFallbackCoordin
         // Degraded / Reconnecting / Disabled — queue with cap.
         if (_queue.Count >= QueueCap)
         {
-            // Drop-oldest so the most recent frames survive (Mac cares more about "what
-            // just happened" than "what happened five minutes ago").
-            _queue.TryDequeue(out _);
-            Interlocked.Decrement(ref _queued);
+            // Two-lane drop: shed the oldest *evictable* frame (partials/heartbeats) but
+            // never a transcript.final — the Mac needs every final to stitch the
+            // conversation. Falls back to dropping the oldest only if the queue is all
+            // finals (pathological), so the queue stays bounded.
+            EvictOneNonFinal();
         }
         _queue.Enqueue(frame);
         Interlocked.Increment(ref _queued);
         _buffering = true;
         return true;
+    }
+
+    /// <summary>Dequeues one frame, preferring a non-final to drop. transcript.final frames
+    /// scanned while searching are re-enqueued so they survive; if the queue is entirely
+    /// finals the oldest is dropped as a last resort to keep the queue bounded.</summary>
+    private void EvictOneNonFinal()
+    {
+        List<SidecarFrame>? preservedFinals = null;
+        while (_queue.TryDequeue(out var head))
+        {
+            Interlocked.Decrement(ref _queued);
+            if (!string.Equals(head.Type, SidecarFrameTypes.TranscriptFinal, StringComparison.Ordinal))
+            {
+                // Dropped a non-final. Restore the finals we set aside (re-counting them).
+                if (preservedFinals is not null)
+                    foreach (var f in preservedFinals) { _queue.Enqueue(f); Interlocked.Increment(ref _queued); }
+                return;
+            }
+            (preservedFinals ??= new List<SidecarFrame>()).Add(head);
+        }
+
+        // Queue was all finals (or empty): re-enqueue all but the oldest.
+        if (preservedFinals is { Count: > 0 })
+        {
+            for (var i = 1; i < preservedFinals.Count; i++)
+            {
+                _queue.Enqueue(preservedFinals[i]);
+                Interlocked.Increment(ref _queued);
+            }
+            // index 0 (oldest final) intentionally dropped as last resort
+        }
     }
 
     private void OnStatusChanged(object? sender, BridgeStatus status)
