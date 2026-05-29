@@ -63,11 +63,13 @@ final class DaemonAuthStore {
     var pairedDevices: [PairedDevice] { storeLock.withLock { _pairedDevices } }
     var activePairingCode: ActivePairingCode? { storeLock.withLock { _activePairingCode } }
 
-    // ── lastSeenAt debounce ───────────────────────────────────────────────
+    // ── lastSeenAt debounce (#37) ─────────────────────────────────────────
     // recordSeen() fires on every inbound frame and ping (potentially many per
-    // second per device). Persisting to disk on each call is wasteful. Instead
-    // we mark the store dirty and flush at most once every `flushInterval`
-    // seconds on a dedicated timer.
+    // second per device). Persisting to disk on each call was hammering the SSD
+    // and holding the cross-process flock for every message. Instead we mark the
+    // store dirty and flush at most once every `flushInterval` seconds on a
+    // dedicated timer. The flush also reloads when the file changed externally so
+    // a Mac-app revocation takes effect without a daemon restart (#33).
     private var lastSeenDirty = false
     private let flushInterval: TimeInterval = 15
     private var flushTimer: DispatchSourceTimer?

@@ -265,8 +265,9 @@ class JarvisApp : Application() {
             )
         personalityLoader = com.jarvis.assistant.personality
             .PersonalityProfileLoader(this)
-        // Eager load so the first LLM request doesn't pay the asset I/O.
-        personalityLoader.load()
+        // Pre-warm the personality cache off the main thread so cold-start
+        // doesn't block on asset I/O (#43).
+        Thread { personalityLoader.load() }.start()
         wearablesSettings = com.jarvis.assistant.wearables.meta
             .WearablesSettingsRepository(
                 com.jarvis.assistant.util.SettingsStore(this)
