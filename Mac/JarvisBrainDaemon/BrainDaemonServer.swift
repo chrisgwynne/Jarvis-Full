@@ -41,10 +41,12 @@ final class BrainDaemonServer {
         // Use explicit IPv4 so Tailscale traffic (100.x.x.x on utun interfaces) can reach us.
         // NWParameters.tcp defaults to IPv6 dual-stack, but macOS does NOT forward
         // IPv4 packets from Tailscale's utun interface to IPv6 dual-stack sockets.
-        let ipOptions = NWProtocolIP.Options()
-        ipOptions.version = .v4
         let params = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
-        params.defaultProtocolStack.internetProtocol = ipOptions
+        // NWProtocolIP.Options has no public initializer; configure the IP
+        // options that already exist on the parameters' default protocol stack.
+        if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ipOptions.version = .v4
+        }
         params.allowLocalEndpointReuse = true
 
         do {
