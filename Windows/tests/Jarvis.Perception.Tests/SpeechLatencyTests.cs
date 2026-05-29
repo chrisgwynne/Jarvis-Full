@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using FluentAssertions;
+using Xunit;
 using Jarvis.Core.Logging;
 using Jarvis.Core.Sidecar;
 using Jarvis.Settings;

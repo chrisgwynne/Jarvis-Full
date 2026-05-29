@@ -78,6 +78,7 @@ file sealed class NullClipboardMonitor : IClipboardMonitor
 file sealed class NullBrowserContext : IBrowserContext
 {
     public BrowserContextSnapshot Current => BrowserContextSnapshot.Empty;
+    public bool IsConnected => false;
     public event EventHandler<BrowserContextSnapshot>? Updated { add { } remove { } }
 }
 
