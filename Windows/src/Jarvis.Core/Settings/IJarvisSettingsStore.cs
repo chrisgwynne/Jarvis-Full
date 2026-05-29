@@ -22,7 +22,7 @@ public sealed record JarvisSettings
     public MouseChordSettings MouseChord { get; init; } = new();
     /// <summary>Daemon gateway config. Pairing-code flow stores the session token here.
     /// When <see cref="BrainGatewayConfig.BaseUrl"/> is non-empty the bridge connects to
-    /// /v1/windows/ws; when empty the bridge stays Disabled.</summary>
+    /// /v2/ws (the canonical unified route); when empty the bridge stays Disabled.</summary>
     public BrainGatewayConfig Gateway { get; init; } = new();
     /// <summary>Context engine: app usage timeline, snapshot building, bridge enrichment.</summary>
     public ContextEngineSettings ContextEngine { get; init; } = new();
@@ -303,13 +303,13 @@ public sealed record RedactionSettings
 //
 // Windows connects to JarvisBrainDaemon via one place: BaseUrl (port 8765).
 // No bearer token UI — authentication is handled via the pairing-code flow.
-// The WebSocket URL is derived as {ws|wss}://{host}/v1/windows/ws.
+// The WebSocket URL is derived as {ws|wss}://{host}/v2/ws (canonical unified route).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
 /// Single source of truth for the Mac Brain Gateway connection.
 /// When <see cref="BaseUrl"/> is non-empty and <see cref="SessionToken"/> is set
-/// (obtained via pairing-code exchange), the bridge connects to /v1/windows/ws.
+/// (obtained via pairing-code exchange), the bridge connects to /v2/ws.
 /// When BaseUrl is empty the bridge stays Disabled; when BaseUrl is set but no
 /// SessionToken the bridge transitions to PairingRequired.
 /// </summary>

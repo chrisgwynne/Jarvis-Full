@@ -91,7 +91,12 @@ public sealed class DistributedConversationCoordinator : IDistributedConversatio
         try
         {
             var json = JsonSerializer.Serialize(new { sessionId = _sessionId, deviceId = _deviceId });
-            File.WriteAllText(_path, json);
+            // Atomic write: serialize to a temp file in the same directory, then move it over
+            // the target. A crash or power loss mid-write leaves the old file intact instead of
+            // a truncated/corrupt distributed.json that would reset the conversation context.
+            var tmp = _path + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, _path, overwrite: true);
         }
         catch (Exception ex)
         {

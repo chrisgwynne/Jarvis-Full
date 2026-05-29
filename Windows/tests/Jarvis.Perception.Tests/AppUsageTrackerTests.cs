@@ -280,7 +280,9 @@ public class DashboardViewModelTests
         var timeline = new PrivacySafeTimeline(new[] { MakeEntry("Code", WorkflowCategory.Coding) });
         var snap = new WindowsContextSnapshot(
             CapturedAt: DateTimeOffset.UtcNow,
-            Semantic: SemanticSnapshot.Empty,
+            // Workflow must differ from the VM's default (Unknown) so CurrentWorkflow actually
+            // changes — a correct INotifyPropertyChanged suppresses no-op notifications.
+            Semantic: SemanticSnapshot.Empty with { Workflow = WorkflowCategory.Coding },
             Timeline: timeline,
             RecentProcessNames: new[] { "Code" },
             Focus: DefaultFocusForDashboard,

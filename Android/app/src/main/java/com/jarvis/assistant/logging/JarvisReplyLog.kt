@@ -6,9 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import org.json.JSONObject
 import java.io.File
 import java.time.Instant
 import java.util.UUID
@@ -32,7 +30,6 @@ enum class ReplySource(val key: String) {
 
 // MARK: - Log entry
 
-@Serializable
 data class ReplyLogEntry(
     val id: String = UUID.randomUUID().toString(),
     val timestampMs: Long = Instant.now().toEpochMilli(),
@@ -53,6 +50,10 @@ data class ReplyLogEntry(
  * [context.filesDir]/jarvis/reply_log.jsonl.
  *
  * Thread-safe: all I/O dispatched on [Dispatchers.IO].
+ *
+ * Serialisation is hand-rolled via [org.json] (always on the Android
+ * classpath) rather than kotlinx.serialization, which is not a project
+ * dependency.
  */
 class JarvisReplyLogger private constructor(context: Context) {
 
@@ -60,7 +61,6 @@ class JarvisReplyLogger private constructor(context: Context) {
     private val logFile: File
     private val maxBytes = 4 * 1024 * 1024L   // 4 MB cap
     private val maxEntries = 2_000
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
     private var cache: MutableList<ReplyLogEntry>? = null
 
@@ -79,6 +79,40 @@ class JarvisReplyLogger private constructor(context: Context) {
         fun get(): JarvisReplyLogger =
             instance ?: error("JarvisReplyLogger not initialized — call init() in Application.onCreate()")
     }
+
+    // MARK: JSON (org.json — no external dependency)
+
+    private fun encode(e: ReplyLogEntry): String = JSONObject().apply {
+        put("id", e.id)
+        put("timestampMs", e.timestampMs)
+        put("source", e.source)
+        put("intent", e.intent ?: JSONObject.NULL)
+        put("phraseKey", e.phraseKey ?: JSONObject.NULL)
+        put("spokenText", e.spokenText)
+        put("device", e.device)
+        put("editableFlag", e.editableFlag)
+        put("correctedText", e.correctedText ?: JSONObject.NULL)
+        put("accepted", e.accepted ?: JSONObject.NULL)
+    }.toString()
+
+    private fun JSONObject.optStringOrNull(key: String): String? =
+        if (!has(key) || isNull(key)) null else optString(key)
+
+    private fun decode(line: String): ReplyLogEntry? = runCatching {
+        val o = JSONObject(line)
+        ReplyLogEntry(
+            id           = o.optStringOrNull("id") ?: UUID.randomUUID().toString(),
+            timestampMs  = o.optLong("timestampMs", Instant.now().toEpochMilli()),
+            source       = o.optStringOrNull("source") ?: ReplySource.SYSTEM.key,
+            intent       = o.optStringOrNull("intent"),
+            phraseKey    = o.optStringOrNull("phraseKey"),
+            spokenText   = o.optStringOrNull("spokenText") ?: "",
+            device       = o.optStringOrNull("device") ?: "android",
+            editableFlag = o.optBoolean("editableFlag", true),
+            correctedText = o.optStringOrNull("correctedText"),
+            accepted     = if (!o.has("accepted") || o.isNull("accepted")) null else o.optBoolean("accepted"),
+        )
+    }.getOrNull()
 
     // MARK: Append
 
@@ -101,7 +135,7 @@ class JarvisReplyLogger private constructor(context: Context) {
     }
 
     private fun writeEntry(entry: ReplyLogEntry) {
-        val line = json.encodeToString(entry) + "\n"
+        val line = encode(entry) + "\n"
         logFile.appendText(line, Charsets.UTF_8)
         cache?.let {
             it.add(entry)
@@ -133,7 +167,7 @@ class JarvisReplyLogger private constructor(context: Context) {
         val loaded = if (!logFile.exists()) mutableListOf()
         else logFile.readLines(Charsets.UTF_8)
             .filter { it.isNotBlank() }
-            .mapNotNull { runCatching { json.decodeFromString<ReplyLogEntry>(it) }.getOrNull() }
+            .mapNotNull { decode(it) }
             .toMutableList()
         if (loaded.size > maxEntries) loaded.subList(0, loaded.size - maxEntries).clear()
         cache = loaded
@@ -153,14 +187,14 @@ class JarvisReplyLogger private constructor(context: Context) {
     }
 
     private fun rewriteFile(entries: List<ReplyLogEntry>) {
-        val content = entries.joinToString("\n") { json.encodeToString(it) } + "\n"
+        val content = entries.joinToString("\n") { encode(it) } + "\n"
         logFile.writeText(content, Charsets.UTF_8)
     }
 
     // MARK: Export
 
     suspend fun exportJSONL(): String = withContext(Dispatchers.IO) {
-        allEntries().joinToString("\n") { json.encodeToString(it) }
+        allEntries().joinToString("\n") { encode(it) }
     }
 
     suspend fun exportCSV(): String = withContext(Dispatchers.IO) {

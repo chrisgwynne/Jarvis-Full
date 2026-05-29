@@ -13,7 +13,6 @@ struct MacBrainGatewaySettingsView: View {
 
     @State private var pairingCountdown: Int = 0
     @State private var pairingTimer: Timer? = nil
-    @State private var codeCopied = false
     @State private var urlCopied = false
     @State private var pairingError: String? = nil
 
@@ -170,15 +169,16 @@ struct MacBrainGatewaySettingsView: View {
                 if let code = authStore.activePairingCode, !code.isExpired {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .top, spacing: 16) {
-                            // QR encodes JSON { host, port, auth } — the format
-                            // Android's MacBridgeQrScanScreen.parseQrPayload() expects.
+                            // SECURITY (#14): the QR encodes ONLY connection coordinates
+                            // and the one-time 6-digit pairing code — never the master
+                            // gateway token. Android exchanges the code for a scoped
+                            // device token over the wire; the master token stays in the
+                            // Mac Keychain and is never displayed, copied, or QR-encoded.
                             let host = controller.state.tailscaleIP
                                 ?? TailscaleService.findLocalIP()
                                 ?? "127.0.0.1"
                             let port = controller.prefs.current.brainServerPort
-                            let token = GatewayAuthStore.shared.gatewayToken
-                                ?? GatewayAuthStore.shared.regenerateGatewayToken()
-                            let qrJSON = "{\"host\":\"\(host)\",\"port\":\(port),\"auth\":\"\(token)\"}"
+                            let qrJSON = "{\"host\":\"\(host)\",\"port\":\(port),\"code\":\"\(code.code)\"}"
                             QRCodeView(content: qrJSON, size: 140)
                                 .cornerRadius(8)
 
@@ -188,19 +188,9 @@ struct MacBrainGatewaySettingsView: View {
                                     .foregroundStyle(.green)
                                 Text("Expires in \(pairingCountdown)s")
                                     .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Button {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(qrJSON, forType: .string)
-                                    codeCopied = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { codeCopied = false }
-                                } label: {
-                                    Label(codeCopied ? "Copied" : "Copy JSON", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
-                                }
-                                .buttonStyle(.borderless).font(.caption)
                             }
                         }
-                        Text("Scan the QR code with the Android Jarvis app to pair. The 6-digit code above is for manual entry.")
+                        Text("Scan the QR code with the Android Jarvis app to pair, or type the 6-digit code manually. The code expires shortly and grants a scoped device token — it never exposes the master key.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else {

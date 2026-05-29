@@ -33,12 +33,19 @@ public class GuidanceDebounceTests
     [Fact]
     public async Task New_query_cancels_in_flight()
     {
-        var src = new SlowSource(TimeSpan.FromMilliseconds(200));
+        // Use a blocking source rather than wall-clock delays: the first call waits
+        // until _unblock is signalled (or its CancellationToken fires). This removes
+        // the race where Task.Delay(50) can exceed the SlowSource delay on loaded CI.
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var unblock = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var src = new BlockingSource(started, unblock);
         var svc = BuildService(src);
+
         var first = svc.AskAsync("save");
-        await Task.Delay(50);
-        var second = svc.AskAsync("continue");
+        await started.Task;                                  // first is definitely in DiscoverAsync now
+        var second = svc.AskAsync("continue");              // cancels first
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+        unblock.TrySetResult(true);                         // let second's DiscoverAsync finish
         var result = await second;
         result.Query.Should().Be("continue");
     }
@@ -78,16 +85,29 @@ public class GuidanceDebounceTests
         }
     }
 
-    private sealed class SlowSource : IUiTargetSource
+    /// <summary>
+    /// Signals <paramref name="started"/> when DiscoverAsync is entered, then blocks until
+    /// <paramref name="unblock"/> is set OR the CancellationToken fires — whichever comes first.
+    /// This removes wall-clock timing from the cancellation test.
+    /// </summary>
+    private sealed class BlockingSource : IUiTargetSource
     {
-        private readonly TimeSpan _delay;
-        public SlowSource(TimeSpan delay) => _delay = delay;
+        private readonly TaskCompletionSource<bool> _started;
+        private readonly TaskCompletionSource<bool> _unblock;
+
+        public BlockingSource(TaskCompletionSource<bool> started, TaskCompletionSource<bool> unblock)
+        {
+            _started = started;
+            _unblock = unblock;
+        }
+
         public TargetSource Source => TargetSource.UiAutomation;
+
         public async Task<IReadOnlyList<UiTarget>> DiscoverAsync(TargetDiscoveryContext c, CancellationToken ct)
         {
-            await Task.Delay(_delay, ct);
-            return new[] { new UiTarget("X", "button", new Rect(0, 0, 80, 24), 0.8, TargetSource.UiAutomation,
-                ActionHint: "click", Enabled: true) };
+            _started.TrySetResult(true);
+            await _unblock.Task.WaitAsync(ct);
+            return Array.Empty<UiTarget>();
         }
     }
 

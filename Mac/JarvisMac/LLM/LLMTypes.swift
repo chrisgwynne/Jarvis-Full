@@ -97,7 +97,7 @@ enum LLMError: LocalizedError {
 // MARK: - Provider routing mode
 
 enum LLMProviderMode: String, Codable, CaseIterable, Identifiable {
-    case auto           // xAI → MiniMax → Gemini → llama.cpp (only enabled providers)
+    case auto           // Local → xAI → MiniMax → Gemini (local-first; only enabled providers)
     case xaiFirst       // xAI → MiniMax → Gemini → llama.cpp
     case xaiOnly
     case miniMaxFirst   // MiniMax → xAI → Gemini → llama.cpp
@@ -112,7 +112,7 @@ enum LLMProviderMode: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .auto:          return "Auto (xAI → MiniMax → Gemini → Local)"
+        case .auto:          return "Auto (Local → xAI → MiniMax → Gemini)"
         case .xaiFirst:      return "xAI (Grok) first"
         case .xaiOnly:       return "xAI only"
         case .miniMaxFirst:  return "MiniMax first"

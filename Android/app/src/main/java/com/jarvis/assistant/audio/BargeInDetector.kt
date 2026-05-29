@@ -61,7 +61,20 @@ class BargeInDetector(
     // Raised from 300 Hz to 500 Hz so fricatives ("s" in "stop", "sh" in
     // "shush", the /dʒ/ onset of "Jarvis") don't push the frame out of the
     // voiced-speech window.
-    private val zcrMaxHz: Double = 500.0
+    private val zcrMaxHz: Double = 500.0,
+    // ── Profile-awareness (#21) ───────────────────────────────────────────────
+    // When supplied, the active microphone path is resolved at each start() and
+    // its per-profile RMS threshold / sustain-hold override the constructor
+    // defaults above.  This keeps single-word barge-ins reliable on close
+    // headset mics while staying strict on the loudspeaker path where TTS bleed
+    // is worst.  Null → behaviour is identical to the fixed defaults.
+    private val profileProvider: (() -> MicInputProfiler.MicProfile)? = null,
+    // ── Echo / self-trigger guard (#21) ───────────────────────────────────────
+    // Returns the text Jarvis is currently speaking (empty when nothing is
+    // playing).  Used purely as a guard: barge-in monitoring only arms while
+    // there is genuinely spoken content, so a stale detector can't fire on
+    // ambient room noise after TTS has finished.  Null → guard disabled.
+    private val lastSpokenTextProvider: (() -> String)? = null
 ) {
 
     companion object {
@@ -81,6 +94,12 @@ class BargeInDetector(
      */
     fun start() {
         stop()
+
+        // Resolve per-profile tuning once per arm (#21).  Falls back to the
+        // constructor defaults when no profile provider is wired.
+        val profile = profileProvider?.invoke()
+        val activeThreshold = profile?.let { MicInputProfiler.bargeInEnergyThreshold(it) } ?: energyThreshold
+        val activeHoldMs    = profile?.let { MicInputProfiler.bargeInHoldMs(it) } ?: holdMs
 
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
@@ -121,8 +140,8 @@ class BargeInDetector(
             record.release()
             return
         }
-        Log.d(TAG, "[BARGE_IN_ARMED] threshold=$energyThreshold holdMs=$holdMs")
-        Log.d(TAG, "Monitoring started (threshold=$energyThreshold, holdMs=$holdMs)")
+        Log.d(TAG, "[BARGE_IN_ARMED] threshold=$activeThreshold holdMs=$activeHoldMs profile=${profile ?: "default"}")
+        Log.d(TAG, "Monitoring started (threshold=$activeThreshold, holdMs=$activeHoldMs)")
 
         detectJob = scope.launch {
             try {
@@ -140,9 +159,19 @@ class BargeInDetector(
                     val read = record.read(buf, 0, buf.size)
                     if (read <= 0) { delay(10); continue }
 
+                    // Echo / self-trigger guard (#21): if a provider is wired and
+                    // Jarvis has nothing currently spoken, the TTS turn has ended
+                    // and any energy is ambient — disarm rather than risk a
+                    // self-trigger on our own trailing audio or room noise.
+                    if (lastSpokenTextProvider != null &&
+                        lastSpokenTextProvider.invoke().isBlank()
+                    ) {
+                        break
+                    }
+
                     val rms    = rms(buf, read)
                     val zcr    = zcr(buf, read)
-                    val isVoice = rms >= energyThreshold &&
+                    val isVoice = rms >= activeThreshold &&
                                   zcr >= zcrMinHz &&
                                   zcr <= zcrMaxHz
 
@@ -151,7 +180,7 @@ class BargeInDetector(
                         if (sustainStart == 0L) sustainStart = now
                         lastVoiceTime = now
                         val held = now - sustainStart
-                        if (held >= holdMs) {
+                        if (held >= activeHoldMs) {
                             Log.d(TAG, "Barge-in! RMS=%.0f ZCR=%.0f sustained=${held}ms".format(rms, zcr))
                             withContext(Dispatchers.Main) { onBargeIn() }
                             break

@@ -123,7 +123,11 @@ class ContactsPhoneLookupResolver(private val context: Context) : CallResolver {
                 if (cursor.moveToFirst()) {
                     val name = cursor.getString(0)
                     if (!name.isNullOrBlank()) {
+                        if (BuildConfig.DEBUG) {
                         Log.d(TAG, "Resolved: \"$number\" → \"$name\"")
+                    } else {
+                        Log.d(TAG, "Resolved: ****${number.takeLast(4)} → [name redacted]")
+                    }
                         ResolvedContact(
                             displayName = name,
                             isKnown     = true,
@@ -141,7 +145,11 @@ class ContactsPhoneLookupResolver(private val context: Context) : CallResolver {
                 confidence  = ResolutionConfidence.NONE
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Contact lookup failed for \"$number\": ${e.message}")
+            if (BuildConfig.DEBUG) {
+                Log.e(TAG, "Contact lookup failed for \"$number\": ${e.message}")
+            } else {
+                Log.e(TAG, "Contact lookup failed for ****${number.takeLast(4)}: ${e.message}")
+            }
             ResolvedContact(
                 displayName = formatFallback(number),
                 isKnown     = false,
@@ -151,7 +159,11 @@ class ContactsPhoneLookupResolver(private val context: Context) : CallResolver {
     }
 
     private fun noMatch(number: String): ResolvedContact {
-        Log.d(TAG, "No contact for: $number")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "No contact for: $number")
+        } else {
+            Log.d(TAG, "No contact for: ****${number.takeLast(4)}")
+        }
         return ResolvedContact(
             displayName = formatFallback(number),
             isKnown     = false,

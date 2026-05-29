@@ -38,13 +38,17 @@ enum class JarvisThemeMode { SYSTEM, LIGHT, DARK, AMOLED }
  */
 @Composable
 fun JarvisTheme(
-    mode: JarvisThemeMode = JarvisThemeMode.SYSTEM,
+    mode: JarvisThemeMode = JarvisThemeMode.LIGHT,
     dynamicColor: Boolean = false,
     systemDark: Boolean = androidx.compose.foundation.isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    // Light-theme-first (2026 redesign): the bright scheme is the intended
+    // product look.  SYSTEM deliberately resolves to LIGHT so a phone in
+    // system dark-mode does NOT silently degrade the bright design.  Dark and
+    // AMOLED remain available but are strictly opt-in via Settings → Appearance.
     val isDark = when (mode) {
-        JarvisThemeMode.SYSTEM -> systemDark
+        JarvisThemeMode.SYSTEM -> false
         JarvisThemeMode.LIGHT  -> false
         JarvisThemeMode.DARK,
         JarvisThemeMode.AMOLED -> true

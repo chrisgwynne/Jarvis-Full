@@ -2,54 +2,74 @@ package com.jarvis.assistant.ui.settings
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
-import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.BuildCircle
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * Top-level groupings shown in the settings home screen.
+ * Top-level groupings shown on the settings home screen.
  *
- * Declaration order = display order on the home screen.
- * Empty sections (all categories hidden or developerOnly) are skipped
- * automatically in [SettingsRootScreen].
+ * Declaration order = display order.  Empty sections are skipped in
+ * [SettingsRootScreen].
  *
- * The final shape is 5 user-visible sections + 1 developer-only:
- *   - Voice            (1 row : Voice)
- *   - Conversation     (2 rows: Conversation, Messaging)
- *   - Intelligence     (5 rows: AI Provider, Ambient Intelligence,
- *                       Memory, Trust & Autonomy, Vision)
- *   - Mac Integration  (1 row : Mac Integration)
- *   - About            (1 row : About & Help)
- *   - Developer &
- *     Diagnostics      (1 row : Developer Diagnostics, dev-only)
+ * ## 2026 simplification (see docs/SIMPLIFY_ANDROID_UX.md)
+ *
+ * Android is a connector/client for the Mac brain, so the visible root is
+ * reduced to the appliance-essential set:
+ *
+ *   - Mac connection   — connect/pair + status + device identity
+ *   - Voice            — microphone + Jarvis's spoken voice
+ *   - Permissions      — one place for all Android permission state
+ *   - Notifications    — alerts + status
+ *   - Troubleshooting  — single calm screen replacing all diagnostics
+ *   - About            — version, help, what Jarvis can do
+ *
+ * The former **Intelligence** (model/provider/persona/memory internals) and
+ * **Developer & Diagnostics** sections are intentionally NOT listed here —
+ * the brain owns that configuration.  Those categories still exist and their
+ * screens remain reachable via deep link / Developer Mode, but they no longer
+ * appear in normal navigation.  [SystemDiagnostics] is retained ONLY as the
+ * bucket those hidden, developer-only categories are tagged with so the root
+ * filter skips them; it is never rendered as a visible section.
  */
 internal enum class SettingsSection(
     val title: String,
     val icon: ImageVector,
 ) {
+    MacIntegration(
+        title = "Mac connection",
+        icon  = Icons.Filled.Psychology,
+    ),
     VoiceListening(
         title = "Voice",
         icon  = Icons.Filled.RecordVoiceOver,
     ),
-    Conversation(
-        title = "Conversation",
-        icon  = Icons.Filled.ChatBubbleOutline,
+    Permissions(
+        title = "Permissions",
+        icon  = Icons.Filled.Shield,
     ),
-    Intelligence(
-        title = "Intelligence",
-        icon  = Icons.Filled.Tune,
+    Notifications(
+        title = "Notifications",
+        icon  = Icons.Filled.Notifications,
     ),
-    MacIntegration(
-        title = "Mac Integration",
-        icon  = Icons.Filled.Psychology,
+    Troubleshooting(
+        title = "Troubleshooting",
+        icon  = Icons.Filled.BuildCircle,
     ),
     About(
         title = "About",
         icon  = Icons.AutoMirrored.Filled.HelpOutline,
     ),
+
+    /**
+     * Hidden bucket for developer-only / brain-owned categories.  Never shown
+     * as a section; exists so those categories have a [SettingsSection] to be
+     * tagged with and are filtered out of the visible root.
+     */
     SystemDiagnostics(
         title = "Developer & Diagnostics",
         icon  = Icons.Filled.Settings,

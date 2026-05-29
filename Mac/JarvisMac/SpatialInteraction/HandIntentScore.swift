@@ -132,13 +132,21 @@ struct HandIntentScore {
 
         // ── Stability (position scatter) ────────────────────────────────
         if recentPositions.count >= 3 {
-            let xs = recentPositions.map { Double($0.x) }
-            let ys = recentPositions.map { Double($0.y) }
-            let mx = xs.reduce(0, +) / Double(xs.count)
-            let my = ys.reduce(0, +) / Double(ys.count)
-            let variance = zip(xs, ys).map { pow($0 - mx, 2) + pow($1 - my, 2) }
-                                      .reduce(0, +) / Double(xs.count)
-            let stdDev = Float(sqrt(variance))
+            let xs: [Double] = recentPositions.map { Double($0.x) }
+            let ys: [Double] = recentPositions.map { Double($0.y) }
+            let count: Double = Double(xs.count)
+            let mx: Double = xs.reduce(0, +) / count
+            let my: Double = ys.reduce(0, +) / count
+            // Broken into explicit steps so the type-checker doesn't have to
+            // solve one large polymorphic expression (was: compiler timeout).
+            let squaredDistances: [Double] = zip(xs, ys).map { (x: Double, y: Double) -> Double in
+                let dx: Double = x - mx
+                let dy: Double = y - my
+                return dx * dx + dy * dy
+            }
+            let sumSquared: Double = squaredDistances.reduce(0, +)
+            let variance: Double = sumSquared / count
+            let stdDev: Float = Float(sqrt(variance))
             s.stabilityScore = max(0, min(1, 1.0 - stdDev / 22.0))
         } else {
             s.stabilityScore = 0.5
@@ -190,8 +198,15 @@ struct HandIntentScore {
 
         // ── Active gesture likelihood ───────────────────────────────────
         // Moving but controlled = deliberate intent. Pure stillness or chaos = low.
-        let movingButControlled = Float(1.0 - (recentVelocities.last.map { Double($0 / 200) }
-                                        .map { min(1, $0) } ?? 0.3)) * s.stabilityScore
+        // Broken into explicit steps to keep the type-checker fast.
+        let normalizedVelocity: Double
+        if let lastVel = recentVelocities.last {
+            normalizedVelocity = min(1.0, Double(lastVel) / 200.0)
+        } else {
+            normalizedVelocity = 0.3
+        }
+        let movingFactor: Float = Float(1.0 - normalizedVelocity)
+        let movingButControlled: Float = movingFactor * s.stabilityScore
         s.activeGestureLikelihood = cap(s.intentScore * 0.70 + movingButControlled * 0.30)
 
         return s

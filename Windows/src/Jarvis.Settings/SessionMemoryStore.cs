@@ -12,7 +12,7 @@ namespace Jarvis.Settings;
 public sealed class SessionMemoryStore : ISessionMemoryStore
 {
     private const long MaxFileSizeBytes = 512 * 1024;
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Jarvis",
         "sessions.jsonl");
@@ -22,12 +22,20 @@ public sealed class SessionMemoryStore : ISessionMemoryStore
         PropertyNameCaseInsensitive = true
     };
 
+    private readonly string FilePath;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly IDiagnostics? _diagnostics;
 
     public SessionMemoryStore(IDiagnostics? diagnostics = null)
+        : this(diagnostics, filePath: null) { }
+
+    /// <param name="filePath">Override the JSONL location. When null the per-user
+    /// %APPDATA%\Jarvis\sessions.jsonl path is used. Tests pass an isolated temp file so
+    /// parallel runs don't share state through the single static path.</param>
+    public SessionMemoryStore(IDiagnostics? diagnostics, string? filePath)
     {
         _diagnostics = diagnostics;
+        FilePath = filePath ?? DefaultFilePath;
     }
 
     public async Task<IReadOnlyList<WorkSession>> GetTodayAsync()

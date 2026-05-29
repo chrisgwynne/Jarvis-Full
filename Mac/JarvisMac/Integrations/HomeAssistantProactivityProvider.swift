@@ -141,6 +141,18 @@ final class HomeAssistantProactivityProvider: ProactivitySignalProvider {
         }
     }
 
+    // MARK: - Dedupe keys
+
+    /// Entity-independent dedupe key for doorbell events, shared by BOTH the
+    /// binary_sensor/motion emitter and the camera idle→streaming emitter. A
+    /// single physical doorbell press frequently triggers both paths (often with
+    /// different entity IDs), so keying on the entity let two alerts through.
+    /// Bucketing by `cooldown` window collapses them into one alert.
+    static func sharedDoorbellDedupeKey(cooldown: TimeInterval) -> String {
+        let bucket = Int(Date().timeIntervalSince1970 / cooldown)
+        return "ha.doorbell.event.\(bucket)"
+    }
+
     // MARK: - State change logic
 
     private func handleStateChange(entityId: String,
@@ -261,9 +273,14 @@ final class HomeAssistantProactivityProvider: ProactivitySignalProvider {
                 isDoorbellEvent: isDoorbellEntity,
                 alertPhrase: alertPhrase))
 
-            // Build ProactivitySignal with camera overlay payload
+            // Build ProactivitySignal with camera overlay payload.
+            // Doorbell dedupe key is ENTITY-INDEPENDENT (see sharedDoorbellDedupeKey):
+            // one physical doorbell press can surface as both a binary_sensor "on"
+            // event AND a camera.* idle→streaming event, often from different entity
+            // IDs. A per-entity key let both through as two alerts. Both emitters now
+            // share `ha.doorbell.event.<window>` so the orchestrator collapses them.
             let windowKey = isDoorbellEntity
-                ? "ha.doorbell.\(entityId).\(Int(Date().timeIntervalSince1970 / cooldown))"
+                ? Self.sharedDoorbellDedupeKey(cooldown: cooldown)
                 : "ha.camera_motion.\(entityId).\(Int(Date().timeIntervalSince1970 / cooldown))"
             let category = isDoorbellEntity ? "ha_doorbell" : "ha_camera_motion"
             let priority: SignalPriority = isDoorbellEntity ? .urgent : .high
@@ -299,7 +316,9 @@ final class HomeAssistantProactivityProvider: ProactivitySignalProvider {
                 linkedCameraID: entityId,
                 isDoorbellEvent: true,
                 alertPhrase: alertPhrase))
-            let windowKey = "ha.camera.active.\(entityId).\(Int(Date().timeIntervalSince1970 / cooldown))"
+            // Unified with the binary_sensor doorbell emitter above so a single
+            // press does not produce two alerts. See sharedDoorbellDedupeKey.
+            let windowKey = Self.sharedDoorbellDedupeKey(cooldown: cooldown)
             let signal = ProactivitySignal(
                 source: .homeAssistant,
                 title: "Doorbell",

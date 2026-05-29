@@ -19,7 +19,9 @@ public sealed class WpfApprovalGate : IApprovalGate
 
         return await app.Dispatcher.InvokeAsync(async () =>
         {
-            if (plan.Safety.Tier == SafetyTier.Confirm)
+            // Remote-origin intents (Mac bridge) never auto-confirm: always use the
+            // modal dialog so the user must explicitly approve (#50).
+            if (plan.Safety.Tier == SafetyTier.Confirm && !intent.IsRemoteOrigin)
             {
                 var toast = new ConfirmToastWindow(intent, plan, _confirmDuration);
                 toast.Show();

@@ -50,7 +50,12 @@ public sealed class RemoteOrchestrationCoordinator : IRemoteOrchestrationCoordin
             case SidecarFrameTypes.OrchestrateSpeak:
                 Interlocked.Increment(ref _speak);
                 _diagnostics?.Record(DiagnosticLevel.Info, "orchestrate", "speak requested",
-                    new Dictionary<string, object?> { ["text"] = frame.Text });
+                    new Dictionary<string, object?>
+                    {
+                        // Privacy: the speak text is user-facing content — log length + hash only.
+                        ["textLen"] = DiagnosticsRedaction.Length(frame.Text),
+                        ["textHash"] = DiagnosticsRedaction.Hash(frame.Text)
+                    });
                 SpeakRequested?.Invoke(this, frame.Text ?? string.Empty);
                 break;
             case SidecarFrameTypes.ProactiveNotify:

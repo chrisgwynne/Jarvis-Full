@@ -6,6 +6,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.BuildCircle
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.CheckCircle
@@ -77,74 +78,45 @@ internal enum class SettingsCategory(
     // USER-FACING TOP-LEVEL (10)
     // ────────────────────────────────────────────────────────────────────────
 
+    // Mac connection sits first — it's the core of an Android connector client.
+    MacIntegration(
+        title       = "Mac connection",
+        description = "Pair with your Mac and check the connection",
+        icon        = Icons.Filled.Psychology,
+        route       = "settings/mac_integration",
+        section     = SettingsSection.MacIntegration,
+    ),
+
     Voice(
-        title       = "Voice",
-        description = "Wake word, speech recognition and Jarvis's spoken voice",
+        title       = "Microphone & voice",
+        description = "Wake word, microphone and Jarvis's spoken voice",
         icon        = Icons.Filled.RecordVoiceOver,
         route       = "settings/voice",
         section     = SettingsSection.VoiceListening,
     ),
 
-    Conversation(
-        title       = "Conversation",
-        description = "How Jarvis replies, follow-ups and turn-taking",
-        icon        = Icons.Filled.ChatBubbleOutline,
-        route       = "settings/conversation",
-        section     = SettingsSection.Conversation,
-    ),
-    Messaging(
-        title       = "Messaging",
-        description = "Notification access, message context and reply settings",
-        icon        = Icons.Filled.Forum,
-        route       = "settings/messaging",
-        section     = SettingsSection.Conversation,
+    Permissions(
+        title       = "Permissions",
+        description = "What Jarvis can access on this phone",
+        icon        = Icons.Filled.Shield,
+        route       = "settings/permissions",
+        section     = SettingsSection.Permissions,
     ),
 
-    // "AI Provider" sits as the first row of the Intelligence section
-    // because everything else in Intelligence depends on it.
-    Advanced(
-        title       = "AI Provider",
-        description = "Choose the language model that powers responses",
-        icon        = Icons.Filled.Tune,
-        route       = "settings/advanced",
-        section     = SettingsSection.Intelligence,
-    ),
-    AmbientIntelligence(
-        title       = "Ambient Intelligence",
-        description = "When Jarvis notices things on its own and what it does about them",
-        icon        = Icons.Filled.AutoAwesome,
-        route       = "settings/ambient",
-        section     = SettingsSection.Intelligence,
-    ),
-    Memory(
-        title       = "Memory",
-        description = "What Jarvis remembers about you and how long it keeps it",
-        icon        = Icons.Filled.Memory,
-        route       = "settings/memory",
-        section     = SettingsSection.Intelligence,
-    ),
-    TrustAutonomy(
-        title       = "Trust & Autonomy",
-        description = "How much Jarvis can do without asking first",
-        icon        = Icons.Filled.VerifiedUser,
-        route       = "settings/trust_autonomy",
-        section     = SettingsSection.Intelligence,
+    Notifications(
+        title       = "Notifications",
+        description = "Alerts and status messages",
+        icon        = Icons.Filled.NotificationsNone,
+        route       = "settings/notifications",
+        section     = SettingsSection.Notifications,
     ),
 
-    Vision(
-        title       = "Vision",
-        description = "Camera, screenshots, OCR and visual memory",
-        icon        = Icons.Filled.CameraAlt,
-        route       = "settings/vision",
-        section     = SettingsSection.Intelligence,
-    ),
-
-    MacIntegration(
-        title       = "Mac Integration",
-        description = "Connect to Mac Jarvis for memory, context and commands",
-        icon        = Icons.Filled.Psychology,
-        route       = "settings/mac_integration",
-        section     = SettingsSection.MacIntegration,
+    Troubleshooting(
+        title       = "Troubleshooting",
+        description = "Fix connection, microphone, permission and command issues",
+        icon        = Icons.Filled.BuildCircle,
+        route       = "settings/troubleshooting",
+        section     = SettingsSection.Troubleshooting,
     ),
 
     AboutHelp(
@@ -153,6 +125,70 @@ internal enum class SettingsCategory(
         icon        = Icons.AutoMirrored.Filled.HelpOutline,
         route       = "settings/about_help",
         section     = SettingsSection.About,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
+    // BRAIN-OWNED — hidden from the visible root (developer-only).  Routes are
+    // preserved so deep links / Developer Mode still reach the screens, but per
+    // docs/SIMPLIFY_ANDROID_UX.md these no longer appear in normal navigation
+    // (the Mac brain owns model / persona / memory / conversation behaviour).
+    // ────────────────────────────────────────────────────────────────────────
+
+    Conversation(
+        title       = "Conversation",
+        description = "How Jarvis replies, follow-ups and turn-taking",
+        icon        = Icons.Filled.ChatBubbleOutline,
+        route       = "settings/conversation",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Messaging(
+        title       = "Messaging",
+        description = "Notification access, message context and reply settings",
+        icon        = Icons.Filled.Forum,
+        route       = "settings/messaging",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Advanced(
+        title       = "AI Provider",
+        description = "Choose the language model that powers responses",
+        icon        = Icons.Filled.Tune,
+        route       = "settings/advanced",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    AmbientIntelligence(
+        title       = "Ambient Intelligence",
+        description = "When Jarvis notices things on its own and what it does about them",
+        icon        = Icons.Filled.AutoAwesome,
+        route       = "settings/ambient",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Memory(
+        title       = "Memory",
+        description = "What Jarvis remembers about you and how long it keeps it",
+        icon        = Icons.Filled.Memory,
+        route       = "settings/memory",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    TrustAutonomy(
+        title       = "Trust & Autonomy",
+        description = "How much Jarvis can do without asking first",
+        icon        = Icons.Filled.VerifiedUser,
+        route       = "settings/trust_autonomy",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+    Vision(
+        title       = "Vision",
+        description = "Camera, screenshots, OCR and visual memory",
+        icon        = Icons.Filled.CameraAlt,
+        route       = "settings/vision",
+        section     = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
     ),
 
     // ────────────────────────────────────────────────────────────────────────
@@ -283,14 +319,6 @@ internal enum class SettingsCategory(
         description   = "Sarcasm, humour, pushback and serious-mode auto-detect",
         icon          = Icons.Filled.EmojiPeople,
         route         = "settings/personality",
-        section       = SettingsSection.SystemDiagnostics,
-        developerOnly = true,
-    ),
-    Notifications(
-        title         = "Notifications",
-        description   = "Alerts and status messages",
-        icon          = Icons.Filled.NotificationsNone,
-        route         = "settings/notifications",
         section       = SettingsSection.SystemDiagnostics,
         developerOnly = true,
     ),

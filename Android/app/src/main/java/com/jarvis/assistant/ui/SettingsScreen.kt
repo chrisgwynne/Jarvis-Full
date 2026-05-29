@@ -111,6 +111,23 @@ fun SettingsScreen(
             )
         }
 
+        // ── Permissions — one consolidated status screen ──────────────────
+        composable(SettingsCategory.Permissions.route) {
+            com.jarvis.assistant.ui.settings.screens.PermissionsScreen(
+                onBack = popToRoot, onClose = onBack
+            )
+        }
+
+        // ── Troubleshooting — single calm screen replacing diagnostics ────
+        composable(SettingsCategory.Troubleshooting.route) {
+            com.jarvis.assistant.ui.settings.screens.TroubleshootingScreen(
+                onBack              = popToRoot,
+                onClose             = onBack,
+                onOpenPermissions   = { settingsNav.navigate(SettingsCategory.Permissions.route) },
+                onOpenMacConnection = { settingsNav.navigate(SettingsCategory.MacIntegration.route) },
+            )
+        }
+
         // ── Developer Diagnostics (consolidated, dev-only entry point) ────
         composable(SettingsCategory.DeveloperDiagnostics.route) {
             com.jarvis.assistant.ui.settings.screens.DeveloperDiagnosticsScreen(

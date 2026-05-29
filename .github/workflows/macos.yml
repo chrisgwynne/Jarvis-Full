@@ -1,0 +1,68 @@
+name: macOS CI
+
+on:
+  push:
+    paths:
+      - 'Mac/**'
+      - '.github/workflows/macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: generate + build
+    # macos-15 ships Xcode 16, which can read the Xcode project format (77)
+    # that current XcodeGen emits. macos-14 (Xcode 15.4) rejects it.
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: Mac
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: set -o pipefail; brew install xcodegen 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      - name: Generate Xcode project
+        run: set -o pipefail; xcodegen generate 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      - name: List schemes
+        run: xcodebuild -list 2>&1 | tee -a "$RUNNER_TEMP/ci.log" || true
+
+      - name: Build JarvisBrainDaemon
+        run: |
+          set -o pipefail
+          xcodebuild -scheme JarvisBrainDaemon -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      - name: Build JarvisMac
+        run: |
+          set -o pipefail
+          xcodebuild -scheme JarvisMac -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      - name: Report failure to PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### ❌ macOS CI failed";
+            echo "Commit \`$GITHUB_SHA\` · [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)";
+            echo '';
+            echo 'Unique error lines:';
+            echo '```';
+            grep -iE "(e: file|: error|error:|error CS| error |FAILED|FAILURE|Exception|Unresolved reference|cannot find|could not|Unable to|not found|unable to type-check)" "$RUNNER_TEMP/ci.log" 2>/dev/null | awk '!seen[$0]++' | head -n 80 || echo "(no error lines matched; see run)";
+            echo '```';
+          } > "$RUNNER_TEMP/comment.md"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/8/comments" -F "body=@$RUNNER_TEMP/comment.md" || true

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Jarvis.Core.Awareness;
 using Jarvis.Core.Focus;
 using Jarvis.Core.Presence;
+using Jarvis.Core.Proactive;
 using Jarvis.Core.Settings;
 using Jarvis.Core.Snapshot;
 using Jarvis.DesktopAwareness;
@@ -400,11 +401,10 @@ public class SessionMemoryStoreTests : IDisposable
 
     public SessionMemoryStoreTests()
     {
-        // Use a temp file so tests are isolated
+        // Use a temp file so tests are isolated — the store no longer shares a single
+        // static %APPDATA% path, so parallel test classes can't corrupt each other's counts.
         _tempFile = Path.Combine(Path.GetTempPath(), $"jarvis-test-sessions-{Guid.NewGuid()}.jsonl");
-        // Patch the file path by subclassing is not possible; we test via the real store
-        // and rely on ClearAsync to reset state between tests.
-        _store = new Jarvis.Settings.SessionMemoryStore();
+        _store = new Jarvis.Settings.SessionMemoryStore(diagnostics: null, filePath: _tempFile);
     }
 
     public void Dispose()

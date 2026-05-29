@@ -102,6 +102,15 @@ public sealed class FocusSessionTracker : IFocusSessionTracker
                 _sessionStart = now;
                 _distractionCount = 0;
             }
+            else if (entry.StartedAt < _sessionStart)
+            {
+                // The session began no later than the earliest observed activity. A tracker
+                // constructed mid-session (or fed historical entries) must anchor focus
+                // duration to real activity, not to construction time — otherwise a long
+                // focused stretch reads as ~0 minutes. Never moves forward here (that's the
+                // distraction-reset path above), so it only ever lengthens the session.
+                _sessionStart = entry.StartedAt;
+            }
 
             // Count distractions in session (since _sessionStart)
             if (DistractionWorkflows.Contains(entry.Workflow))

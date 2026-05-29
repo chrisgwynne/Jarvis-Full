@@ -76,8 +76,12 @@ class CurrentLocationProvider(private val context: Context) {
             val isFresh   = elapsedMs < FRESH_WINDOW_MS
             val isApprox  = (location.accuracy ?: 0f) > 200f  // >200 m = coarse
 
-            Log.d(TAG, "Fix obtained: ${location.latitude},${location.longitude} " +
-                    "acc=${location.accuracy}m age=${elapsedMs / 1000}s")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Fix obtained: ${location.latitude},${location.longitude} " +
+                        "acc=${location.accuracy}m age=${elapsedMs / 1000}s")
+            } else {
+                Log.d(TAG, "Fix obtained: [lat/lng redacted] acc=${location.accuracy}m age=${elapsedMs / 1000}s")
+            }
 
             val geo = reverseGeocode(location.latitude, location.longitude)
 

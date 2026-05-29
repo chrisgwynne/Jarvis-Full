@@ -17,7 +17,7 @@ namespace Jarvis.Perception.Sidecar;
 /// Connection lifecycle:
 ///   - If <see cref="BrainGatewayConfig.BaseUrl"/> is empty → stays Disabled.
 ///   - If BaseUrl is set but no SessionToken → transitions to PairingRequired (user must pair).
-///   - If BaseUrl and SessionToken are both set → connects to /v1/windows/ws, sends
+///   - If BaseUrl and SessionToken are both set → connects to /v2/ws, sends
 ///     GatewayMessage envelopes, stops reconnecting on 401 or token-revoked nack.
 ///
 /// Reconnects with exponential backoff; transitions to Degraded on sustained failure.
@@ -137,9 +137,59 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
         if (_outbound.IsAddingCompleted) return Task.FromResult(false);
         frame.ProtocolVersion ??= SidecarProtocol.Version;
         frame.Seq             ??= Interlocked.Increment(ref _outboundSeq);
-        while (_outbound.Count >= OutboundQueueCap - 1 && _outbound.TryTake(out _)) { }
+        // Two-lane eviction under pressure: drop the oldest *evictable* frame (partials,
+        // heartbeats, presence …) but never a transcript.final — the Mac needs every final
+        // to stitch the conversation. Falls back to dropping the oldest only if the whole
+        // queue is finals (pathological; keeps the queue bounded rather than blocking).
+        while (_outbound.Count >= OutboundQueueCap - 1)
+        {
+            if (!EvictOneFromOutbound()) break;
+        }
         try { _outbound.Add(frame, cancellationToken); return Task.FromResult(true); }
         catch { return Task.FromResult(false); }
+    }
+
+    // Frame types that must never be dropped under queue pressure (#39 WIN-6).
+    private static bool IsHighPriority(string? type) =>
+        type is SidecarFrameTypes.TranscriptFinal
+             or SidecarFrameTypes.ExecuteAck
+             or SidecarFrameTypes.LeaseRequest
+             or SidecarFrameTypes.LeaseGrant
+             or SidecarFrameTypes.LeaseRevoke;
+
+    /// <summary>Removes one evictable frame to make room. High-priority frames
+    /// (transcript.final, execute.ack, lease.*) are set aside and restored. Returns false
+    /// if nothing could be removed.</summary>
+    private bool EvictOneFromOutbound()
+    {
+        List<SidecarFrame>? preserved = null;
+        try
+        {
+            while (_outbound.TryTake(out var head))
+            {
+                if (!IsHighPriority(head.Type))
+                {
+                    // Dropped an evictable frame — restore high-priority frames and report success.
+                    if (preserved is not null)
+                        foreach (var f in preserved) _outbound.Add(f);
+                    return true;
+                }
+                (preserved ??= new List<SidecarFrame>()).Add(head);
+            }
+        }
+        catch { /* AddingCompleted raced — fall through */ }
+
+        // Queue was entirely high-priority (or empty). Restore all but the oldest so the
+        // queue still makes room; never silently lose more than one.
+        if (preserved is { Count: > 0 })
+        {
+            for (var i = 1; i < preserved.Count; i++)
+            {
+                try { _outbound.Add(preserved[i]); } catch { break; }
+            }
+            return true; // oldest high-priority frame intentionally dropped as last resort
+        }
+        return false;
     }
 
     public IReadOnlyList<SidecarFrame> SnapshotOutbound()

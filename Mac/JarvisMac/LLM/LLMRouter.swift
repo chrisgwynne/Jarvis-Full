@@ -101,7 +101,11 @@ final class LLMRouter {
     /// `LLMRouterChainTests` in JarvisMacTests.
     func selectChain() -> [LLMProvider] {
         switch mode {
-        case .auto:          return [xai, miniMax, gemini, local]
+        // `.auto` is local-first: prefer the on-device model and only fall back
+        // to cloud providers when local is unavailable/low-confidence. This keeps
+        // queries private by default and avoids sending transcripts off-device
+        // unless necessary.
+        case .auto:          return [local, xai, miniMax, gemini]
         case .xaiFirst:      return [xai, miniMax, gemini, local]
         case .xaiOnly:       return [xai]
         case .miniMaxFirst:  return [miniMax, xai, gemini, local]

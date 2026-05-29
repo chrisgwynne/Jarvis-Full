@@ -20,10 +20,10 @@ public sealed class GatewayParityTests
     // ── Config: URL derivation ─────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("http://100.64.1.5:8765",        "ws://100.64.1.5:8765/v1/windows/ws")]
-    [InlineData("https://mac.tail.ts.net:8765",  "wss://mac.tail.ts.net:8765/v1/windows/ws")]
-    [InlineData("http://localhost:8765",         "ws://localhost:8765/v1/windows/ws")]
-    [InlineData("http://100.64.1.5:8765/",       "ws://100.64.1.5:8765/v1/windows/ws")]  // trailing slash stripped
+    [InlineData("http://100.64.1.5:8765",        "ws://100.64.1.5:8765/v2/ws")]
+    [InlineData("https://mac.tail.ts.net:8765",  "wss://mac.tail.ts.net:8765/v2/ws")]
+    [InlineData("http://localhost:8765",         "ws://localhost:8765/v2/ws")]
+    [InlineData("http://100.64.1.5:8765/",       "ws://100.64.1.5:8765/v2/ws")]  // trailing slash stripped
     public void DeriveWebSocketUrl_produces_correct_ws_url(string baseUrl, string expected)
     {
         var cfg = new BrainGatewayConfig { BaseUrl = baseUrl };

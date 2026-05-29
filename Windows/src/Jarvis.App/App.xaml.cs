@@ -19,7 +19,6 @@ using Jarvis.Diagnostics;
 using Jarvis.Perception.Dashboard;
 using Jarvis.Perception.Presence;
 using Jarvis.Perception.Proactive;
-using Jarvis.Settings;
 using Jarvis.App.Automation;
 using Jarvis.App.Capture;
 using Jarvis.App.Hotkeys;
@@ -35,7 +34,6 @@ using Jarvis.Core.Sidecar;
 using Jarvis.Perception.Conversation;
 using Jarvis.Perception.Guidance;
 using Jarvis.Perception.Sidecar;
-using Jarvis.Core.Memory;
 using Jarvis.Core.Tools;
 using Jarvis.Perception.Browser;
 using Jarvis.Perception.Capture;
@@ -85,10 +83,22 @@ public partial class App : System.Windows.Application
     private DateTimeOffset _lastInputAt = DateTimeOffset.UtcNow;
     private string? _lastForegroundApp;
     private bool _shuttingDown;
+    private Mutex? _singleInstanceMutex;
+    private CancellationTokenSource? _micRebindCts;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // WIN-8: single-instance guard — if another instance is already running, exit immediately.
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, name: "Jarvis.App.SingleInstance", out var createdNew);
+        if (!createdNew)
+        {
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            Shutdown();
+            return;
+        }
 
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandled;
         DispatcherUnhandledException += OnDispatcherUnhandled;
@@ -201,6 +211,12 @@ public partial class App : System.Windows.Application
         // bridge events; resolving them is enough to start them).
         var orchestration = _services.GetRequiredService<IRemoteOrchestrationCoordinator>();
         orchestration.Attach();
+        // WIN-5: surface Mac orchestration frames as user-visible actions (#39).
+        orchestration.SpeakRequested  += (_, text) => _ = tts.SpeakAsync(text);
+        orchestration.SilenceRequested += (_, _)   => _ = tts.StopAsync();
+        orchestration.ProactiveReceived += (_, notice) =>
+            diagnostics.Record(DiagnosticLevel.Info, "proactive.notify", notice.Title ?? "notice",
+                new Dictionary<string, object?> { ["source"] = notice.Source, ["text"] = notice.Body });
         _ = _services.GetRequiredService<IDistributedFallbackCoordinator>();
         var conversation = _services.GetRequiredService<IDistributedConversationCoordinator>();
         diagnostics.Record(DiagnosticLevel.Info, "conversation.session", "resumed",
@@ -242,7 +258,59 @@ public partial class App : System.Windows.Application
         }
 
         // Refresh the device list so the settings UI / diagnostics have something to show.
-        _ = _services.GetRequiredService<IAudioDeviceCoordinator>().RefreshAsync();
+        var audioCoord = _services.GetRequiredService<IAudioDeviceCoordinator>();
+        _ = audioCoord.RefreshAsync();
+
+        // WIN-4: rebind mic when the default audio device changes (#39).
+        audioCoord.DevicesChanged += async (_, _) =>
+        {
+            // Debounce: cancel any pending rebind and start a fresh one after a short delay
+            // so a rapid add→remove sequence doesn't thrash Start/Stop.
+            _micRebindCts?.Cancel();
+            _micRebindCts = new CancellationTokenSource();
+            var token = _micRebindCts.Token;
+            try
+            {
+                await Task.Delay(300, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested) return;
+                if (_mic is null) return;
+                var cfg = settingsStore.Current.Sidecar;
+                if (!cfg.Enabled || cfg.PrivacyMode) return;
+                var newId = cfg.MicrophoneId
+                    ?? audioCoord.Microphones.FirstOrDefault(m => m.IsDefault)?.Id;
+                await _mic.StopAsync(token).ConfigureAwait(false);
+                await _mic.StartAsync(newId, token).ConfigureAwait(false);
+                diagnostics.Record(DiagnosticLevel.Info, "mic", "rebound after device change",
+                    new Dictionary<string, object?> { ["mic"] = newId });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                diagnostics.Record(DiagnosticLevel.Warn, "mic", "rebind failed",
+                    new Dictionary<string, object?> { ["error"] = ex.Message });
+            }
+        };
+
+        // WIN-8: re-cycle bridge + audio on resume from sleep/hibernate (#39).
+        Microsoft.Win32.SystemEvents.PowerModeChanged += async (_, pme) =>
+        {
+            if (pme.Mode != Microsoft.Win32.PowerModes.Resume) return;
+            diagnostics.Record(DiagnosticLevel.Info, "lifecycle", "resume — cycling bridge + audio");
+            try
+            {
+                if (_macBridge is not null)
+                {
+                    await _macBridge.StopAsync().ConfigureAwait(false);
+                    await _macBridge.StartAsync().ConfigureAwait(false);
+                }
+                _ = audioCoord.RefreshAsync();
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Record(DiagnosticLevel.Warn, "lifecycle", "resume cycle failed",
+                    new Dictionary<string, object?> { ["error"] = ex.Message });
+            }
+        };
 
         // P6.7 — drive the AmbientAttentionModel from the awareness signals at 4 Hz and
         // forward to the renderer so the breathing rate / halo intensity can dial subtly.
@@ -877,6 +945,9 @@ public partial class App : System.Windows.Application
             if (_fileSink is not null) await _fileSink.DisposeAsync();
         }
         catch { /* shutting down */ }
+        _micRebindCts?.Cancel();
+        try { _singleInstanceMutex?.ReleaseMutex(); } catch { }
+        _singleInstanceMutex?.Dispose();
         base.OnExit(e);
     }
 

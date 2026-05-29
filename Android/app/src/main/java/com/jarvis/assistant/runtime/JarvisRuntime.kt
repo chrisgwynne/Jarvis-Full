@@ -386,7 +386,23 @@ class JarvisRuntime(
         .RecentActionContextStore()
     // Stash the most recent TranscriptCorrector score so the gate can read it.
     @Volatile private var lastCorrectorScore: Int = 0
-    private val bargeIn        = BargeInDetector(onBargeIn = { voicePipeline.handleBargeIn() })
+    // Wall-clock of the last assistant response (#24).  Lets the AttentionGate
+    // treat an utterance arriving shortly after Jarvis spoke as conversational
+    // momentum.  0L until Jarvis has responded at least once.
+    @Volatile private var lastJarvisResponseAtMs: Long = 0L
+    // AudioManager for the media-activity signal (#24) — `isMusicActive` tells
+    // the gate whether other media could be bleeding into the mic.
+    private val audioManager =
+        context.getSystemService(android.media.AudioManager::class.java)
+    private val bargeIn        = BargeInDetector(
+        onBargeIn = { voicePipeline.handleBargeIn() },
+        // #21: profile-aware thresholds (close headset vs loudspeaker bleed) +
+        // an echo guard that only keeps monitoring while TTS is genuinely
+        // playing.  Both are lambdas evaluated at start()/loop time, so the
+        // forward references to micProfiler/tts resolve at runtime.
+        profileProvider = { micProfiler.current() },
+        lastSpokenTextProvider = { tts.lastSpokenText },
+    )
     private var wakeDetector: WakeWordDetector? = null
 
     /**
@@ -3218,13 +3234,16 @@ class JarvisRuntime(
                         val toolMatch = turnToolMatch
                         val signals = AttentionSignals(
                             transcript               = transcript,
-                            sttConfidence            = 0f,
+                            // #24: real recogniser confidence (-1f → unknown,
+                            // mapped to 0f so the gate's low-confidence rule
+                            // only fires on a genuinely reported low score).
+                            sttConfidence            = speechCapture.lastConfidence.coerceAtLeast(0f),
                             mode                     = modeController.current,   // B3
                             activeWindowUntilMs      = attentionGate.activeWindowUntilMs,
-                            lastJarvisResponseMs     = 0L,
+                            lastJarvisResponseMs     = lastJarvisResponseAtMs,   // #24
                             nowMs                    = System.currentTimeMillis(),
                             isInCall                 = pendingCallInfo != null,
-                            isMediaPlaying           = false,
+                            isMediaPlaying           = audioManager?.isMusicActive == true,  // #24
                             isHeadsetConnected       = bluetoothSco.isHeadsetConnected,
                             screenOn                 = true,
                             isTtsActive              = machine.isIn<JarvisState.Speaking>(),
@@ -4738,6 +4757,7 @@ class JarvisRuntime(
                 else base
                 memoryWriter.writeTurn(sessionId, "assistant", formatted)
                 DeviceStateStore.update { copy(lastAssistantResponse = formatted) }
+                lastJarvisResponseAtMs = System.currentTimeMillis()   // #24
             }
 
             // Compress oldest turn-pairs if history is near the context window ceiling
@@ -4870,6 +4890,7 @@ class JarvisRuntime(
                 val formatted = ResponseFormatter.format(responseText)
                 memoryWriter.writeTurn(sessionId, "assistant", formatted)
                 DeviceStateStore.update { copy(lastAssistantResponse = formatted) }
+                lastJarvisResponseAtMs = System.currentTimeMillis()   // #24
                 // Merge the just-streamed resume with the spoken prefix so
                 // conversation history has one assistant turn, not two.
                 val merged = if (spoken.isBlank()) formatted else "$spoken $formatted"
@@ -5017,6 +5038,7 @@ class JarvisRuntime(
         val formatted = ResponseFormatter.format(text)
         memoryWriter.writeTurn(sessionId, "assistant", formatted)
         DeviceStateStore.update { copy(lastAssistantResponse = formatted) }
+        lastJarvisResponseAtMs = System.currentTimeMillis()   // #24
         if (settings.voiceResponse) ttsEngine.playAckTickAsync()
         Log.d(TAG, "[SILENT_SUCCESS_DELIVERED] text=\"$formatted\"")
     }
@@ -5068,6 +5090,7 @@ class JarvisRuntime(
         memoryWriter.writeTurn(sessionId, "assistant", formatted)
         brainEngine.collector.onJarvisResponse(formatted)
         DeviceStateStore.update { copy(lastAssistantResponse = formatted) }
+        lastJarvisResponseAtMs = System.currentTimeMillis()   // #24
 
         machine.transition(JarvisState.Speaking)
         DeviceStateStore.update { copy(ttsPlaying = true) }
@@ -5129,7 +5152,7 @@ class JarvisRuntime(
             isCharging             = false,
             screenOn               = true,    // wire ScreenStateReceiver later
             isHeadsetConnected     = bluetoothSco.isHeadsetConnected,
-            isMediaPlaying         = false,   // wire AudioManager.isMusicActive later
+            isMediaPlaying         = audioManager?.isMusicActive == true,   // #24
             foregroundAppPackage   = null,
             isOnline               = contextEngine.isOnline(),
             presence               = currentPresence(),

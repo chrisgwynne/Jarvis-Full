@@ -33,6 +33,42 @@ object JarvisBrand {
     val amber     = Color(0xFFFFAB40)
     val purple    = Color(0xFFCE93D8)
     val red       = Color(0xFFFF5252)
+
+    // ── 2026 premium light-theme accent ramp ──────────────────────────────────
+    // Electric blue / soft cyan / clean purple on white & warm blue-grey.
+    // These are the colours the redesigned light surfaces draw from; the
+    // darker -OnLight variants stay legible as text/fills on white.
+    val electricBlue      = Color(0xFF2563EB)   // primary CTA on light
+    val electricBlueBright = Color(0xFF3B82F6)  // gradient top stop
+    val softCyan          = Color(0xFF22D3EE)   // secondary accent / listening
+    val cleanPurple       = Color(0xFF7C5CFF)   // tertiary accent / speaking
+    val violetOnLight     = Color(0xFF6D28D9)   // purple text on white
+    val greenOnLight      = Color(0xFF059669)   // connected / success on white
+    val amberOnLight      = Color(0xFFD97706)   // thinking / warning on white
+    val redOnLight        = Color(0xFFDC2626)   // error / stop on white
+}
+
+/**
+ * Reusable brand gradients.  Built as plain colour lists so callers can feed
+ * them into [androidx.compose.ui.graphics.Brush.linearGradient] /
+ * `verticalGradient` at the size they need (Brush dimensions are layout-bound,
+ * so we expose the stops rather than a pre-sized Brush).
+ */
+object JarvisGradients {
+    /** Primary CTA — electric blue → clean purple, top-left to bottom-right. */
+    val primaryButton = listOf(JarvisBrand.electricBlueBright, JarvisBrand.cleanPurple)
+
+    /** App background wash — barely-there blue-grey lift on white. */
+    val lightBackdrop = listOf(Color(0xFFFFFFFF), Color(0xFFEEF3FB))
+
+    /** Glass-card sheen — subtle white→translucent-blue diagonal. */
+    val glassSheen = listOf(
+        Color(0x66FFFFFF),
+        Color(0x14FFFFFF),
+    )
+
+    /** Orb stage halo on the light hero card. */
+    val heroHalo = listOf(Color(0x143B82F6), Color(0x00FFFFFF))
 }
 
 /**
@@ -53,6 +89,19 @@ data class JarvisExtraColors(
     val statusRed: Color,
     val infoBg: Color,
     val successBg: Color,
+    // ── Premium design-system roles (added for the 2026 redesign) ─────────────
+    /** Accent used for "listening" / soft-cyan secondary moments. */
+    val accentCyan: Color = statusGreen,
+    /** Accent used for "speaking" / tertiary purple moments. */
+    val accentPurple: Color = statusPurple,
+    /** A glass-panel fill (semi-transparent surface for layered cards). */
+    val glassFill: Color = surfaceRaised,
+    /** Hairline used on glass panels / elevated surfaces. */
+    val glassBorder: Color = border,
+    /** Soft tint behind selected / highlighted rows. */
+    val accentSoft: Color = infoBg,
+    /** Ambient page-tint used at the bottom of the hero background wash. */
+    val backdropTint: Color = surfaceRaised,
 )
 
 val LocalJarvisExtraColors = staticCompositionLocalOf {
@@ -131,33 +180,44 @@ internal val AmoledExtras = JarvisExtraColors(
 // ── Light ────────────────────────────────────────────────────────────────────
 
 internal val LightColorScheme: ColorScheme = lightColorScheme(
-    primary            = JarvisBrand.cyanDeep,
+    primary            = JarvisBrand.electricBlue,        // electric blue CTA
     onPrimary          = Color.White,
-    primaryContainer   = Color(0xFFCFE5FF),
-    onPrimaryContainer = Color(0xFF001D3D),
-    secondary          = Color(0xFF6750A4),
+    primaryContainer   = Color(0xFFDCE7FF),               // soft blue chip fill
+    onPrimaryContainer = Color(0xFF0B2A6B),
+    secondary          = JarvisBrand.violetOnLight,       // clean purple
     onSecondary        = Color.White,
-    background         = Color(0xFFF8F9FB),
-    onBackground       = Color(0xFF1A1A24),
+    secondaryContainer = Color(0xFFEDE6FF),
+    onSecondaryContainer = Color(0xFF34146E),
+    tertiary           = Color(0xFF0E7490),               // deep cyan
+    onTertiary         = Color.White,
+    background         = Color(0xFFFAFBFE),               // near-white, faint blue
+    onBackground       = Color(0xFF121622),               // ink
     surface            = Color.White,
-    onSurface          = Color(0xFF1A1A24),
-    surfaceVariant     = Color(0xFFEEF0F4),
-    onSurfaceVariant   = Color(0xFF454556),
-    error              = Color(0xFFC62828),
+    onSurface          = Color(0xFF121622),
+    surfaceVariant     = Color(0xFFEEF2F9),               // warm blue-grey card
+    onSurfaceVariant   = Color(0xFF49506B),               // muted slate label
+    error              = JarvisBrand.redOnLight,
     onError            = Color.White,
-    outline            = Color(0xFFC4C7D2),
+    outline            = Color(0xFFD3DAE8),               // hairline on white
+    outlineVariant     = Color(0xFFE6EBF4),
 )
 
 internal val LightExtras = JarvisExtraColors(
     surfaceRaised = Color(0xFFFFFFFF),
-    divider       = Color(0xFFE4E6EC),
-    border        = Color(0xFFC4C7D2),
-    textMuted     = Color(0xFF6B6B80),
-    textFaint     = Color(0xFF9A9AB0),
-    statusGreen   = Color(0xFF1B7F3D),
-    statusAmber   = Color(0xFFB85C00),
-    statusPurple  = Color(0xFF6750A4),
-    statusRed     = Color(0xFFC62828),
-    infoBg        = Color(0xFFE3F2FD),
-    successBg     = Color(0xFFE8F5E9),
+    divider       = Color(0xFFEAEEF6),
+    border        = Color(0xFFDCE2EE),
+    textMuted     = Color(0xFF5B6275),
+    textFaint     = Color(0xFF9097AB),
+    statusGreen   = JarvisBrand.greenOnLight,
+    statusAmber   = JarvisBrand.amberOnLight,
+    statusPurple  = JarvisBrand.violetOnLight,
+    statusRed     = JarvisBrand.redOnLight,
+    infoBg        = Color(0xFFEAF2FF),
+    successBg     = Color(0xFFE7F7EF),
+    accentCyan    = Color(0xFF0E7490),
+    accentPurple  = JarvisBrand.violetOnLight,
+    glassFill     = Color(0xF2FFFFFF),                    // 95% white glass
+    glassBorder   = Color(0x14122149),                   // faint ink hairline
+    accentSoft    = Color(0xFFEAF2FF),
+    backdropTint  = Color(0xFFEFF4FC),
 )

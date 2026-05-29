@@ -21,6 +21,12 @@ final class BrainDaemonServer {
 
     let port: Int
 
+    /// When true the listener binds to the loopback interface (127.0.0.1) only,
+    /// so the daemon is unreachable over Wi-Fi / Tailscale / LAN. Controlled by
+    /// the `JARVIS_DAEMON_BIND_LOCAL` env var ("1"/"true"/"yes"). Defaults off to
+    /// preserve the existing Tailscale-reachable behaviour.
+    let bindLocalOnly: Bool
+
     init() {
         if let envPort = ProcessInfo.processInfo.environment["JARVIS_DAEMON_PORT"],
            let p = Int(envPort), p > 0, p < 65536 {
@@ -28,7 +34,10 @@ final class BrainDaemonServer {
         } else {
             port = 8765
         }
+        let bindEnv = (ProcessInfo.processInfo.environment["JARVIS_DAEMON_BIND_LOCAL"] ?? "").lowercased()
+        bindLocalOnly = ["1", "true", "yes"].contains(bindEnv)
         DaemonDiagnostics.shared.port = port
+        DaemonDiagnostics.shared.bindLocalOnly = bindLocalOnly
     }
 
     // MARK: - Lifecycle
@@ -41,11 +50,21 @@ final class BrainDaemonServer {
         // Use explicit IPv4 so Tailscale traffic (100.x.x.x on utun interfaces) can reach us.
         // NWParameters.tcp defaults to IPv6 dual-stack, but macOS does NOT forward
         // IPv4 packets from Tailscale's utun interface to IPv6 dual-stack sockets.
-        let ipOptions = NWProtocolIP.Options()
-        ipOptions.version = .v4
         let params = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
-        params.defaultProtocolStack.internetProtocol = ipOptions
+        // NWProtocolIP.Options has no public initializer; configure the IP
+        // options that already exist on the parameters' default protocol stack.
+        if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ipOptions.version = .v4
+        }
         params.allowLocalEndpointReuse = true
+
+        // Loopback-only bind: pin the listener's local endpoint to 127.0.0.1 so
+        // the kernel refuses connections arriving on any other interface. Without
+        // this the listener accepts on all interfaces (incl. Wi-Fi / Tailscale).
+        if bindLocalOnly {
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: nwPort)
+            serverLog.info("Daemon binding to loopback only (127.0.0.1)")
+        }
 
         do {
             listener = try NWListener(using: params, on: nwPort)
@@ -619,9 +638,13 @@ final class BrainDaemonServer {
                     guard let (result, consumed) = Self.parseNextWebSocketFrame(buf) else { break }
                     buf = Array(buf[consumed...])
 
+                    // Resolve the stable paired-device identity from the
+                    // per-connection client UUID. `recordSeen` keys on deviceId,
+                    // so passing the random clientId here would silently no-op.
+                    let resolvedDeviceId = DaemonMessageRouter.shared.deviceId(forClientId: clientId) ?? clientId
                     switch result {
                     case .text(let text):
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                         self.wrapAndRoute(rawJSON: text, fromClientId: clientId, platform: platform)
                         self.dispatchAndroidMessage(text: text, clientId: clientId, conn: conn, platform: platform)
                     case .close:
@@ -631,9 +654,9 @@ final class BrainDaemonServer {
                     case .ping:
                         let pongFrame = Data([0x8A, 0x00])
                         conn.send(content: pongFrame, completion: .contentProcessed { _ in })
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                     case .pong:
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                         if let sentAt = self.lastPingSentAt.removeValue(forKey: clientId) {
                             let rttMs = Date().timeIntervalSince(sentAt) * 1000.0
                             DaemonDiagnostics.shared.websocketRttMs = rttMs

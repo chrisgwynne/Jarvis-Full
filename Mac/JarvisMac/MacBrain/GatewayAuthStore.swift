@@ -115,19 +115,49 @@ final class GatewayAuthStore {
     func saveIfNeeded() { save() }
 
     // MARK: - Persistence
+    //
+    // DUAL-WRITER RACE (#33): this file is also written by JarvisBrainDaemon's
+    // DaemonAuthStore (a separate process). Without coordination, a daemon write
+    // (e.g. lastSeenAt heartbeat) can clobber a Mac-app write (e.g. a device
+    // revocation) and silently lose it. Mitigation: every save() takes an
+    // exclusive advisory file lock (flock), RELOADS the latest on-disk state,
+    // MERGES it with our in-memory change (revocation is sticky / wins), then
+    // writes — all under the lock. This makes concurrent writers safe.
+    //
+    // NOTE: the fully robust fix is to make only the daemon own the file and
+    // route Mac-side revoke/remove through a daemon endpoint. That is a larger
+    // change; this flock+reload+merge is the conservative interim mitigation.
     private var storeURL: URL {
         let sup = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return sup.appendingPathComponent("JarvisMac/gateway_paired_devices.json")
     }
+
     private func save() {
-        guard let d = try? JSONEncoder().encode(pairedDevices) else { return }
         try? FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? d.write(to: storeURL, options: .atomic)
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            // Reload the latest on-disk state and merge so we never clobber a
+            // concurrent writer (the daemon).
+            let onDisk = GatewayAuthFileLock.readDevices(at: storeURL)
+            let merged = GatewayAuthFileLock.merge(local: pairedDevices, disk: onDisk)
+            pairedDevices = merged
+            GatewayAuthFileLock.writeDevices(merged, to: storeURL)
+        }
     }
+
     private func load() {
-        guard let d = try? Data(contentsOf: storeURL),
-              let decoded = try? JSONDecoder().decode([PairedDevice].self, from: d) else { return }
-        pairedDevices = decoded
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            pairedDevices = GatewayAuthFileLock.readDevices(at: storeURL)
+        }
+    }
+
+    /// Re-reads the file under lock and merges any externally-written changes
+    /// (e.g. daemon lastSeenAt / pairings) into the in-memory list. Safe to call
+    /// before reading `pairedDevices` for display.
+    func reloadFromDiskIfChanged() {
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            let onDisk = GatewayAuthFileLock.readDevices(at: storeURL)
+            pairedDevices = GatewayAuthFileLock.merge(local: pairedDevices, disk: onDisk)
+        }
     }
     func sha256Hex(_ s: String) -> String {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()

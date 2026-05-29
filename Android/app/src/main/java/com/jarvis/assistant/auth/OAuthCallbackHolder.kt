@@ -18,7 +18,21 @@ object OAuthCallbackHolder {
     /** Called by MainActivity with the authorization code from the deep link. */
     var pendingCallback: ((code: String) -> Unit)? = null
 
-    fun invoke(code: String) {
+    /**
+     * Expected `state` nonce set by SettingsViewModel before launching the
+     * browser. Validated in [invoke] to prevent auth-code injection (#50).
+     */
+    @Volatile var pendingState: String? = null
+
+    /**
+     * Called by MainActivity with both the authorization code and the state
+     * nonce from the redirect URI.  Silently ignores the callback when the
+     * state does not match the expected value (CSRF guard).
+     */
+    fun invoke(code: String, state: String) {
+        val expected = pendingState
+        pendingState = null
+        if (expected == null || expected != state) return
         pendingCallback?.invoke(code)
         pendingCallback = null
     }

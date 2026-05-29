@@ -55,8 +55,25 @@ final class DaemonAuthStore {
     private let storeLock = NSLock()
     private let serverLog = Logger(subsystem: "com.jarvis.daemon", category: "auth")
 
-    private(set) var pairedDevices: [PairedDevice] = []
-    private(set) var activePairingCode: ActivePairingCode? = nil
+    // All mutable state below is guarded by `storeLock`. Public getters take the
+    // lock and return a copy so callers never observe a torn array.
+    private var _pairedDevices: [PairedDevice] = []
+    private var _activePairingCode: ActivePairingCode? = nil
+
+    var pairedDevices: [PairedDevice] { storeLock.withLock { _pairedDevices } }
+    var activePairingCode: ActivePairingCode? { storeLock.withLock { _activePairingCode } }
+
+    // ── lastSeenAt debounce (#37) ─────────────────────────────────────────
+    // recordSeen() fires on every inbound frame and ping (potentially many per
+    // second per device). Persisting to disk on each call was hammering the SSD
+    // and holding the cross-process flock for every message. Instead we mark the
+    // store dirty and flush at most once every `flushInterval` seconds on a
+    // dedicated timer. The flush also reloads when the file changed externally so
+    // a Mac-app revocation takes effect without a daemon restart (#33).
+    private var lastSeenDirty = false
+    private let flushInterval: TimeInterval = 15
+    private var flushTimer: DispatchSourceTimer?
+    private let flushQueue = DispatchQueue(label: "com.jarvis.daemon.auth.flush")
 
     init() {
         load()  // SECURITY AUDITED Phase 2: loadFromDisk called in init — pairedDevices populated on start
@@ -64,6 +81,46 @@ final class DaemonAuthStore {
         // KeychainHelper.get() per-request. The daemon process outlives the
         // main app; call invalidateGatewayToken() when the main app rotates.
         _gatewayToken = KeychainHelper.get("gateway_token")
+        startFlushTimer()
+    }
+
+    private func startFlushTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: flushQueue)
+        timer.schedule(deadline: .now() + flushInterval, repeating: flushInterval)
+        timer.setEventHandler { [weak self] in self?.flushIfDirty() }
+        timer.resume()
+        flushTimer = timer
+    }
+
+    /// Persists pending lastSeenAt updates if any have accumulated, and pulls in
+    /// any externally-written changes (e.g. a Mac-app revocation) so the daemon
+    /// does not keep authorising a revoked device with stale in-memory state
+    /// (#33). Safe to call from the timer or directly (e.g. on shutdown).
+    func flushIfDirty() {
+        let shouldFlush: Bool = storeLock.withLock {
+            let dirty = lastSeenDirty
+            lastSeenDirty = false
+            return dirty
+        }
+        if shouldFlush {
+            // save() already reloads + merges under the flock before writing,
+            // so a flush both persists our changes and absorbs external ones.
+            save()
+        } else if fileChangedExternally() {
+            // No pending writes but the file changed on disk — reload so a
+            // revocation made by the Mac app takes effect promptly.
+            reloadFromDisk()
+        }
+    }
+
+    /// Tracks the data file's modification date to cheaply detect external writes.
+    private var lastKnownModified: Date?
+    private func fileChangedExternally() -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: storeURL.path),
+              let modified = attrs[.modificationDate] as? Date else { return false }
+        defer { lastKnownModified = modified }
+        guard let last = lastKnownModified else { return false } // first observation
+        return modified > last
     }
 
     // MARK: - Gateway token (Keychain, cached)
@@ -84,14 +141,11 @@ final class DaemonAuthStore {
     func generatePairingCode() -> ActivePairingCode {
         let code = String(format: "%06d", Int.random(in: 100_000...999_999))
         let p = ActivePairingCode(code: code, expiresAt: Date().addingTimeInterval(300))
-        activePairingCode = p
+        storeLock.withLock { _activePairingCode = p }
         return p
     }
 
     func completePairing(code: String, deviceId: String, deviceName: String, platform: String = "") -> String? {
-        // SECURITY AUDITED Phase 2: expiresAt checked via isExpired before accepting code
-        guard let active = activePairingCode, !active.isExpired, active.code == code else { return nil }
-        pairedDevices.removeAll { $0.id == deviceId }
         let raw = UUID().uuidString + UUID().uuidString
         var dev = PairedDevice(
             id: deviceId,
@@ -102,8 +156,16 @@ final class DaemonAuthStore {
             tokenHash: sha256Hex(raw)
         )
         dev.platform = platform
-        pairedDevices.append(dev)
-        activePairingCode = nil
+
+        let accepted: Bool = storeLock.withLock {
+            // SECURITY AUDITED Phase 2: expiresAt checked via isExpired before accepting code
+            guard let active = _activePairingCode, !active.isExpired, active.code == code else { return false }
+            _pairedDevices.removeAll { $0.id == deviceId }
+            _pairedDevices.append(dev)
+            _activePairingCode = nil
+            return true
+        }
+        guard accepted else { return nil }
         save()
         return raw
     }
@@ -122,27 +184,41 @@ final class DaemonAuthStore {
         if let gt = gatewayToken, !gt.isEmpty, bearer == gt { return true }
         // Device tokens: always compared via SHA-256 hash; isRevoked guard is explicit
         let h = sha256Hex(bearer)
-        return pairedDevices.first { !$0.isRevoked && $0.tokenHash == h } != nil
+        return storeLock.withLock {
+            _pairedDevices.first { !$0.isRevoked && $0.tokenHash == h } != nil
+        }
     }
 
     // MARK: - Device management
 
     func revokeDevice(id: String) {
-        guard let i = pairedDevices.firstIndex(where: { $0.id == id }) else { return }
-        pairedDevices[i].isRevoked = true
-        save()
+        let changed: Bool = storeLock.withLock {
+            guard let i = _pairedDevices.firstIndex(where: { $0.id == id }) else { return false }
+            _pairedDevices[i].isRevoked = true
+            return true
+        }
+        if changed { save() }
     }
 
     func removeDevice(id: String) {
-        pairedDevices.removeAll { $0.id == id }
+        storeLock.withLock { _pairedDevices.removeAll { $0.id == id } }
         save()
     }
 
     func recordSeen(deviceId: String) {
-        guard let i = pairedDevices.firstIndex(where: { $0.id == deviceId }) else { return }
-        pairedDevices[i].lastSeenAt = Date()
-        // SECURITY AUDITED Phase 2: persist lastSeenAt so reconnection diagnostics survive restarts
-        save()
+        // SECURITY AUDITED Phase 2: persist lastSeenAt so reconnection diagnostics
+        // survive restarts — but debounced via dirty flag (flushed every 15s) so a
+        // chatty client does not hammer the disk on every frame/ping.
+        storeLock.withLock {
+            guard let i = _pairedDevices.firstIndex(where: { $0.id == deviceId }) else { return }
+            _pairedDevices[i].lastSeenAt = Date()
+            lastSeenDirty = true
+        }
+    }
+
+    /// Marks the active pairing code expired/cleared. Lock-guarded.
+    func clearActivePairingCode() {
+        storeLock.withLock { _activePairingCode = nil }
     }
 
     // MARK: - Persistence
@@ -153,27 +229,50 @@ final class DaemonAuthStore {
     }
 
     private func save() {
-        storeLock.withLock {
-            guard let d = try? JSONEncoder().encode(pairedDevices) else { return }
-            try? FileManager.default.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            try? d.write(to: storeURL, options: .atomic)
+        try? FileManager.default.createDirectory(
+            at: storeURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        // DUAL-WRITER RACE (#33): the Mac app's GatewayAuthStore writes this same
+        // file. Take the cross-process flock, RELOAD the latest on-disk state,
+        // MERGE with our in-memory change (revocation sticky / newest lastSeen),
+        // then write — all under the flock. The in-process `storeLock` snapshots
+        // and re-applies `_pairedDevices` so auth checks are never blocked on disk
+        // I/O. flock is taken OUTSIDE storeLock to avoid holding the in-process
+        // lock across disk operations.
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            let snapshot: [PairedDevice] = storeLock.withLock { _pairedDevices }
+            let onDisk = GatewayAuthFileLock.readDevices(at: storeURL)
+            let merged = GatewayAuthFileLock.merge(local: snapshot, disk: onDisk)
+            storeLock.withLock { _pairedDevices = merged }
+            GatewayAuthFileLock.writeDevices(merged, to: storeURL)
         }
     }
 
     private func load() {
-        storeLock.withLock {
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            // Read the raw bytes so we can detect/back up corrupt JSON.
             guard let data = try? Data(contentsOf: storeURL) else { return }
             if let decoded = try? JSONDecoder().decode([PairedDevice].self, from: data) {
-                pairedDevices = decoded
+                storeLock.withLock { _pairedDevices = decoded }
             } else {
                 // Corrupt JSON — backup and start fresh
                 let backupURL = storeURL.deletingPathExtension().appendingPathExtension("json.bak")
                 try? data.write(to: backupURL, options: .atomic)
                 serverLog.error("DaemonAuthStore: corrupt JSON — backed up to .bak, starting with empty registry")
-                pairedDevices = []
+                storeLock.withLock { _pairedDevices = [] }
             }
+        }
+    }
+
+    /// Re-reads the file under the cross-process lock and merges externally-written
+    /// changes (e.g. a Mac-app revocation) into the in-memory list. Call on a poll
+    /// or before an auth-sensitive read to pick up the other writer's changes.
+    func reloadFromDisk() {
+        GatewayAuthFileLock.withExclusiveLock(at: storeURL) {
+            let snapshot: [PairedDevice] = storeLock.withLock { _pairedDevices }
+            let onDisk = GatewayAuthFileLock.readDevices(at: storeURL)
+            let merged = GatewayAuthFileLock.merge(local: snapshot, disk: onDisk)
+            storeLock.withLock { _pairedDevices = merged }
         }
     }
 

@@ -128,9 +128,28 @@ enum QuestionClassifier {
             return .generalChat
         }
 
-        // ── Otherwise treat as unsupported-command shape ────────────────────
-        // The user probably wanted Jarvis to do something the deterministic
-        // pipeline didn't recognise.  Route to intent-JSON LLM.
-        return .unsupportedCommand
+        // ── Action-shaped vs conversational (#62) ───────────────────────────
+        // Conversation-first: an utterance with no question shape AND no obvious
+        // action verb is almost certainly chat, not a failed command. Only route
+        // to the intent-JSON LLM (`.unsupportedCommand`) when the text actually
+        // *looks* like an instruction (starts with an imperative verb). Everything
+        // else defaults to conversational free-text so Jarvis replies naturally
+        // instead of trying — and failing — to synthesise an action.
+        let actionVerbStarters: Set<String> = [
+            "set", "turn", "open", "close", "play", "pause", "stop", "start",
+            "make", "send", "create", "add", "remove", "delete", "show", "hide",
+            "switch", "enable", "disable", "mute", "unmute", "increase", "decrease",
+            "raise", "lower", "dim", "brighten", "lock", "unlock", "call", "text",
+            "email", "schedule", "remind", "launch", "run", "find", "search",
+            "skip", "resume", "restart", "move", "copy", "paste", "save", "cancel",
+        ]
+        let firstWord = words.first ?? ""
+        if actionVerbStarters.contains(firstWord) {
+            // Looks like an instruction the deterministic pipeline missed —
+            // route to intent-JSON LLM so it can map to an action.
+            return .unsupportedCommand
+        }
+        // No question shape, no action verb → treat as conversational chat.
+        return .generalChat
     }
 }

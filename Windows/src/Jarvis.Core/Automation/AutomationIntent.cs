@@ -17,6 +17,14 @@ public abstract record AutomationIntent
     /// <summary>Short, human-readable summary. Lives on the base so the approval prompt
     /// can render any intent without a discriminator switch.</summary>
     public abstract string Summary { get; }
+
+    /// <summary>
+    /// True when this intent was dispatched by a remote device (e.g. the Mac brain
+    /// bridge) rather than by a local voice command. Remote intents never auto-confirm
+    /// — they always require explicit user interaction regardless of the safety tier,
+    /// to prevent remote code execution without the user's knowledge (#50).
+    /// </summary>
+    public bool IsRemoteOrigin { get; init; } = false;
 }
 
 // ─── Window actions ──────────────────────────────────────────────────────────

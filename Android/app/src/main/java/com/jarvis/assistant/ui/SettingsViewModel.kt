@@ -448,6 +448,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         // Persist verifier so it survives across process restart (unlikely but safe)
         store.openAiCodeVerifier = verifier
 
+        // Store the state nonce for CSRF validation in the redirect handler (#50).
+        OAuthCallbackHolder.pendingState = state
+
         // Register callback — called by MainActivity when the redirect arrives
         OAuthCallbackHolder.pendingCallback = { code ->
             handleOAuthCode(code, verifier, clientId)

@@ -12,7 +12,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -137,8 +139,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         val uri = intent.data ?: return
         if (uri.scheme == "com.jarvis.assistant" && uri.host == "oauth") {
-            val code = uri.getQueryParameter("code") ?: return
-            OAuthCallbackHolder.invoke(code)
+            val code  = uri.getQueryParameter("code")  ?: return
+            val state = uri.getQueryParameter("state") ?: return
+            OAuthCallbackHolder.invoke(code, state)
         }
     }
 
@@ -175,60 +178,76 @@ private fun AppNavHost() {
 
 @Composable
 private fun PermissionRationaleScreen(onRequest: () -> Unit) {
-    val Cyan    = Color(0xFF3FA7FF)   // blueprint blue
-    val BgDark  = Color(0xFF060B14)   // deepest navy
-    val Surface = Color(0xFF0B1628)   // card surface
-
+    val scheme = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgDark)
-            .padding(32.dp)
+            .background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    com.jarvis.assistant.ui.theme.JarvisGradients.lightBackdrop
+                )
+            ),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Spacer(Modifier.height(8.dp))
             Text(
-                "Jarvis needs a few permissions",
-                color = Color(0xFFE0E0E0),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
+                "Let's get Jarvis set up",
+                color = scheme.onBackground,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
             )
-            PermissionItem("Microphone", "Required to hear wake words and spoken commands.")
-            PermissionItem("Phone", "Required to make calls — say \"call [name]\" to dial.")
-            PermissionItem("Contacts", "Required to look up names — say \"call John\" or \"text Sarah\".")
-            PermissionItem("SMS", "Required to send messages — say \"text [name] [message]\".")
-            PermissionItem("Location", "Allows Jarvis to know your approximate location for relevant answers.")
+            Text(
+                "Jarvis only asks for what it needs to be useful. You can change any of " +
+                    "these later in Settings.",
+                color = scheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+
+            PermissionItem("Microphone", "So Jarvis can hear you when you talk or say its name.")
+            PermissionItem("Phone & Contacts", "So you can say “call Sarah” and Jarvis knows who you mean.")
+            PermissionItem("Messages", "So you can send a text hands-free — “text Alex I'm on my way”.")
+            PermissionItem("Location", "For nearby answers, directions and commute times.")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                PermissionItem("Bluetooth", "Required to use a Bluetooth headset for hands-free voice input.")
+                PermissionItem("Bluetooth", "To use a headset for hands-free voice.")
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                PermissionItem("Notifications", "Required to show the 'Jarvis is listening' status.")
+                PermissionItem("Notifications", "To show a quiet “listening” status while Jarvis runs.")
             }
 
             Spacer(Modifier.height(8.dp))
 
-            Button(
+            com.jarvis.assistant.ui.components.JarvisButton(
+                text = "Continue",
                 onClick = onRequest,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Cyan),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Grant Permissions", color = Color(0xFF001529), fontWeight = FontWeight.Bold)
-            }
+                fillWidth = true,
+            )
+            Text(
+                "You'll be asked to confirm each permission on the next screen.",
+                color = scheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }
 
 @Composable
 private fun PermissionItem(name: String, reason: String) {
-    val Surface = Color(0xFF0B1628)   // blueprint card surface
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(8.dp))
-            .padding(12.dp)
+    val scheme = MaterialTheme.colorScheme
+    com.jarvis.assistant.ui.components.JarvisCard(
+        shape = com.jarvis.assistant.ui.theme.JarvisTokens.Shape.card,
+        contentPadding = PaddingValues(16.dp),
     ) {
-        Text(name, color = Color(0xFF3FA7FF), fontWeight = FontWeight.SemiBold)
-        Text(reason, color = Color(0xFF7A8FAA), fontSize = 13.sp)
+        Text(name, color = scheme.onSurface, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(reason, color = scheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -236,29 +255,30 @@ private fun PermissionItem(name: String, reason: String) {
 
 @Composable
 private fun BatteryOptimisationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF0B1628),     // blueprint card surface
+        containerColor = scheme.surface,
+        shape = RoundedCornerShape(24.dp),
         title = {
-            Text("Disable Battery Optimisation", color = Color(0xFFE0E0E0), fontWeight = FontWeight.Bold)
+            Text("Keep Jarvis running", color = scheme.onSurface, fontWeight = FontWeight.Bold)
         },
         text = {
             Text(
-                "Android may stop Jarvis when the screen turns off to save battery.\n\n" +
-                "Tapping OK will take you to the system screen where you can exempt " +
-                "Jarvis from battery optimisation. This is required for reliable " +
-                "always-on operation.",
-                color = Color(0xFFCCE0F0)       // blue-tinted body text
+                "Android can pause Jarvis when the screen turns off to save battery. " +
+                "To stay ready to listen, Jarvis needs to be exempt from battery " +
+                "optimisation. Tap Allow to open the system screen.",
+                color = scheme.onSurfaceVariant,
             )
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("OK", color = Color(0xFF3FA7FF), fontWeight = FontWeight.Bold)
+                Text("Allow", color = scheme.primary, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Not now", color = Color(0xFF4A6080))  // blueprint faint text
+                Text("Not now", color = scheme.onSurfaceVariant)
             }
         }
     )

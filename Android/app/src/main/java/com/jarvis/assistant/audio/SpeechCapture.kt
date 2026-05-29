@@ -76,6 +76,17 @@ class SpeechCapture(private val context: Context) {
     @Volatile private var activePossiblyCompleteSilenceMs = 600L
 
     /**
+     * Top recogniser confidence (0..1) for the most recent [listen] result, or
+     * -1f when the platform did not report a confidence for the chosen
+     * candidate.  Read by the AttentionGate (#24) so a genuinely low-confidence
+     * transcript can be treated as more likely background noise.  Volatile
+     * because it is written on the recogniser's callback thread and read from
+     * the runtime turn loop.
+     */
+    @Volatile var lastConfidence: Float = -1f
+        private set
+
+    /**
      * Apply per-profile VAD thresholds based on the detected microphone input path.
      * Call this whenever the headset connection state changes (before [listen]).
      */
@@ -273,7 +284,17 @@ class SpeechCapture(private val context: Context) {
                         selector != null   -> selector(matches, confidences)
                         else               -> matches.firstOrNull() ?: ""
                     }
-                    Log.d(TAG, "Result: len=${text.length} +${SystemClock.elapsedRealtime() - listenStartMs}ms")
+                    // Record the recogniser's own confidence for the AttentionGate (#24).
+                    // Prefer the confidence of the chosen candidate; fall back to the
+                    // top-scored value, and -1f when the platform reported none.
+                    lastConfidence = when {
+                        confidences == null || confidences.isEmpty() -> -1f
+                        else -> {
+                            val chosenIdx = matches.indexOf(text)
+                            confidences.getOrNull(chosenIdx) ?: confidences.maxOrNull() ?: -1f
+                        }
+                    }
+                    Log.d(TAG, "Result: len=${text.length} conf=${"%.2f".format(lastConfidence)} +${SystemClock.elapsedRealtime() - listenStartMs}ms")
                     cleanup()
                     if (cont.isActive) cont.resume(text)
                 }

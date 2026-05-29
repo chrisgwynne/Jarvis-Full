@@ -114,12 +114,12 @@ public partial class DashboardWindow : Window
         _                         => mode.ToString()
     };
 
-    private static Brush GetStatusBrush(PresenceMode mode, string bridgeStatus)
+    private static System.Windows.Media.Brush GetStatusBrush(PresenceMode mode, string bridgeStatus)
     {
         if (mode == PresenceMode.Silent)
-            return Brushes.Gray;
+            return System.Windows.Media.Brushes.Gray;
         if (bridgeStatus.StartsWith("Connected", StringComparison.OrdinalIgnoreCase))
-            return new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E));
-        return new SolidColorBrush(Color.FromRgb(0xF5, 0x9E, 0x0B));
+            return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x22, 0xC5, 0x5E));
+        return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0x9E, 0x0B));
     }
 }

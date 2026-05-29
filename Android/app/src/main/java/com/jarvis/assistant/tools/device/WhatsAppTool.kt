@@ -61,7 +61,11 @@ class WhatsAppTool(
         // confirmation "yes" rather than the message body — leaving no
         // PendingMessageIntent to catch the follow-up.
         if (intent.body.isBlank()) return null
-        Log.d(TAG, "[WA_PARSED] recipient=\"${intent.recipient}\" body=\"${intent.body}\" route=WHATSAPP")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "[WA_PARSED] recipient=\"${intent.recipient}\" body=\"${intent.body}\" route=WHATSAPP")
+        } else {
+            Log.d(TAG, "[WA_PARSED] recipient=[redacted] body=[body: ${intent.body.length} chars] route=WHATSAPP")
+        }
         return ToolInput(
             transcript,
             mapOf("name" to intent.recipient, "message" to intent.body)
