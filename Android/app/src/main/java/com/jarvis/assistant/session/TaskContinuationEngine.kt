@@ -1,5 +1,6 @@
 package com.jarvis.assistant.session
 
+import com.jarvis.assistant.BuildConfig
 import android.util.Log
 import com.jarvis.assistant.session.context.ContextBundle
 

@@ -17,6 +17,7 @@ object OrbStateMapper {
         is JarvisState.Thinking          -> OrbVisualState.Processing()
         is JarvisState.ToolRunning       -> OrbVisualState.Processing(state.toolName)
         is JarvisState.Speaking          -> OrbVisualState.Speaking()
+        is JarvisState.AwaitingRemoteReply -> OrbVisualState.Processing()
         is JarvisState.Silenced          -> OrbVisualState.Silencing
         is JarvisState.OfflineFallback   -> OrbVisualState.Degraded
         is JarvisState.MicUnavailable    -> OrbVisualState.MicBlocked

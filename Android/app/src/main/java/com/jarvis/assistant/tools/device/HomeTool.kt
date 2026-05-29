@@ -1,5 +1,6 @@
 package com.jarvis.assistant.tools.device
 
+import com.jarvis.assistant.BuildConfig
 import android.content.Context
 import android.content.Intent
 import android.net.Uri

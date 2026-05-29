@@ -1,5 +1,6 @@
 package com.jarvis.assistant.location
 
+import com.jarvis.assistant.BuildConfig
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log

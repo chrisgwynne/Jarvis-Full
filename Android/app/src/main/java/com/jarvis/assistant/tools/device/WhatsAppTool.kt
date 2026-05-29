@@ -1,5 +1,6 @@
 package com.jarvis.assistant.tools.device
 
+import com.jarvis.assistant.BuildConfig
 import android.content.Context
 import android.util.Log
 import com.jarvis.assistant.tools.ContactLookup
