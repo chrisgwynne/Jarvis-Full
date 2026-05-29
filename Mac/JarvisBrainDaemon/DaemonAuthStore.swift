@@ -55,8 +55,23 @@ final class DaemonAuthStore {
     private let storeLock = NSLock()
     private let serverLog = Logger(subsystem: "com.jarvis.daemon", category: "auth")
 
-    private(set) var pairedDevices: [PairedDevice] = []
-    private(set) var activePairingCode: ActivePairingCode? = nil
+    // All mutable state below is guarded by `storeLock`. Public getters take the
+    // lock and return a copy so callers never observe a torn array.
+    private var _pairedDevices: [PairedDevice] = []
+    private var _activePairingCode: ActivePairingCode? = nil
+
+    var pairedDevices: [PairedDevice] { storeLock.withLock { _pairedDevices } }
+    var activePairingCode: ActivePairingCode? { storeLock.withLock { _activePairingCode } }
+
+    // ── lastSeenAt debounce ───────────────────────────────────────────────
+    // recordSeen() fires on every inbound frame and ping (potentially many per
+    // second per device). Persisting to disk on each call is wasteful. Instead
+    // we mark the store dirty and flush at most once every `flushInterval`
+    // seconds on a dedicated timer.
+    private var lastSeenDirty = false
+    private let flushInterval: TimeInterval = 15
+    private var flushTimer: DispatchSourceTimer?
+    private let flushQueue = DispatchQueue(label: "com.jarvis.daemon.auth.flush")
 
     init() {
         load()  // SECURITY AUDITED Phase 2: loadFromDisk called in init — pairedDevices populated on start
@@ -64,6 +79,26 @@ final class DaemonAuthStore {
         // KeychainHelper.get() per-request. The daemon process outlives the
         // main app; call invalidateGatewayToken() when the main app rotates.
         _gatewayToken = KeychainHelper.get("gateway_token")
+        startFlushTimer()
+    }
+
+    private func startFlushTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: flushQueue)
+        timer.schedule(deadline: .now() + flushInterval, repeating: flushInterval)
+        timer.setEventHandler { [weak self] in self?.flushIfDirty() }
+        timer.resume()
+        flushTimer = timer
+    }
+
+    /// Persists pending lastSeenAt updates if any have accumulated. Safe to call
+    /// from the timer or directly (e.g. on shutdown).
+    func flushIfDirty() {
+        let shouldFlush: Bool = storeLock.withLock {
+            let dirty = lastSeenDirty
+            lastSeenDirty = false
+            return dirty
+        }
+        if shouldFlush { save() }
     }
 
     // MARK: - Gateway token (Keychain, cached)
@@ -84,14 +119,11 @@ final class DaemonAuthStore {
     func generatePairingCode() -> ActivePairingCode {
         let code = String(format: "%06d", Int.random(in: 100_000...999_999))
         let p = ActivePairingCode(code: code, expiresAt: Date().addingTimeInterval(300))
-        activePairingCode = p
+        storeLock.withLock { _activePairingCode = p }
         return p
     }
 
     func completePairing(code: String, deviceId: String, deviceName: String, platform: String = "") -> String? {
-        // SECURITY AUDITED Phase 2: expiresAt checked via isExpired before accepting code
-        guard let active = activePairingCode, !active.isExpired, active.code == code else { return nil }
-        pairedDevices.removeAll { $0.id == deviceId }
         let raw = UUID().uuidString + UUID().uuidString
         var dev = PairedDevice(
             id: deviceId,
@@ -102,8 +134,16 @@ final class DaemonAuthStore {
             tokenHash: sha256Hex(raw)
         )
         dev.platform = platform
-        pairedDevices.append(dev)
-        activePairingCode = nil
+
+        let accepted: Bool = storeLock.withLock {
+            // SECURITY AUDITED Phase 2: expiresAt checked via isExpired before accepting code
+            guard let active = _activePairingCode, !active.isExpired, active.code == code else { return false }
+            _pairedDevices.removeAll { $0.id == deviceId }
+            _pairedDevices.append(dev)
+            _activePairingCode = nil
+            return true
+        }
+        guard accepted else { return nil }
         save()
         return raw
     }
@@ -122,27 +162,41 @@ final class DaemonAuthStore {
         if let gt = gatewayToken, !gt.isEmpty, bearer == gt { return true }
         // Device tokens: always compared via SHA-256 hash; isRevoked guard is explicit
         let h = sha256Hex(bearer)
-        return pairedDevices.first { !$0.isRevoked && $0.tokenHash == h } != nil
+        return storeLock.withLock {
+            _pairedDevices.first { !$0.isRevoked && $0.tokenHash == h } != nil
+        }
     }
 
     // MARK: - Device management
 
     func revokeDevice(id: String) {
-        guard let i = pairedDevices.firstIndex(where: { $0.id == id }) else { return }
-        pairedDevices[i].isRevoked = true
-        save()
+        let changed: Bool = storeLock.withLock {
+            guard let i = _pairedDevices.firstIndex(where: { $0.id == id }) else { return false }
+            _pairedDevices[i].isRevoked = true
+            return true
+        }
+        if changed { save() }
     }
 
     func removeDevice(id: String) {
-        pairedDevices.removeAll { $0.id == id }
+        storeLock.withLock { _pairedDevices.removeAll { $0.id == id } }
         save()
     }
 
     func recordSeen(deviceId: String) {
-        guard let i = pairedDevices.firstIndex(where: { $0.id == deviceId }) else { return }
-        pairedDevices[i].lastSeenAt = Date()
-        // SECURITY AUDITED Phase 2: persist lastSeenAt so reconnection diagnostics survive restarts
-        save()
+        // SECURITY AUDITED Phase 2: persist lastSeenAt so reconnection diagnostics
+        // survive restarts — but debounced via dirty flag (flushed every 15s) so a
+        // chatty client does not hammer the disk on every frame/ping.
+        storeLock.withLock {
+            guard let i = _pairedDevices.firstIndex(where: { $0.id == deviceId }) else { return }
+            _pairedDevices[i].lastSeenAt = Date()
+            lastSeenDirty = true
+        }
+    }
+
+    /// Marks the active pairing code expired/cleared. Lock-guarded.
+    func clearActivePairingCode() {
+        storeLock.withLock { _activePairingCode = nil }
     }
 
     // MARK: - Persistence
@@ -153,20 +207,23 @@ final class DaemonAuthStore {
     }
 
     private func save() {
-        storeLock.withLock {
-            guard let d = try? JSONEncoder().encode(pairedDevices) else { return }
-            try? FileManager.default.createDirectory(
-                at: storeURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            try? d.write(to: storeURL, options: .atomic)
-        }
+        // Snapshot under the lock, then write to disk OUTSIDE the lock so a slow
+        // disk does not block auth checks. Note: `pairedDevices`/`_pairedDevices`
+        // must NOT be touched via the computed property here (NSLock is not
+        // recursive) — snapshot `_pairedDevices` directly.
+        let snapshot: [PairedDevice] = storeLock.withLock { _pairedDevices }
+        guard let d = try? JSONEncoder().encode(snapshot) else { return }
+        try? FileManager.default.createDirectory(
+            at: storeURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try? d.write(to: storeURL, options: .atomic)
     }
 
     private func load() {
         storeLock.withLock {
             guard let data = try? Data(contentsOf: storeURL) else { return }
             if let decoded = try? JSONDecoder().decode([PairedDevice].self, from: data) {
-                pairedDevices = decoded
+                _pairedDevices = decoded
             } else {
                 // Corrupt JSON — backup and start fresh
                 let backupURL = storeURL.deletingPathExtension().appendingPathExtension("json.bak")

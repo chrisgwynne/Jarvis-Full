@@ -84,6 +84,15 @@ final class DaemonMessageRouter {
         queue.sync { clients[clientId] != nil }
     }
 
+    /// Returns the authenticated device ID for a connection's internal client ID,
+    /// or nil if the client is unknown. The connection-level `clientId` is a fresh
+    /// per-connection UUID; the `deviceId` is the stable paired-device identity.
+    /// Frame handlers must persist `lastSeenAt` against the *deviceId*, not the
+    /// random connection UUID, or the lookup in DaemonAuthStore never matches.
+    func deviceId(forClientId clientId: String) -> String? {
+        queue.sync { clients[clientId]?.deviceId }
+    }
+
     // MARK: - Route incoming message
 
     func route(rawData: Data, fromClientId: String) {

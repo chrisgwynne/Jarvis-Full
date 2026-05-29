@@ -15,7 +15,9 @@ public sealed class JsonlReplyLogger : IReplyLogger
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
-        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        // camelCase enum values keep the export consistent with the camelCase property
+        // naming above (e.g. "command", "tool", "proactive"). Reads stay case-insensitive.
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
     private readonly string _filePath;
@@ -184,7 +186,7 @@ public sealed class JsonlReplyLogger : IReplyLogger
         {
             sb.AppendLine(string.Join(',',
                 e.Timestamp.ToString("O"),
-                e.Source.ToString(),
+                e.Source.ToString().ToLowerInvariant(),
                 e.Intent ?? "",
                 e.ResponseKey ?? "",
                 CsvEscape(e.SpokenText),

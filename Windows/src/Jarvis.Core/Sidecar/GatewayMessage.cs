@@ -6,8 +6,8 @@ namespace Jarvis.Core.Sidecar;
 // ─────────────────────────────────────────────────────────────────────────────
 // Canonical daemon gateway message envelope.
 //
-// All Windows ↔ JarvisBrainDaemon traffic on /v1/windows/ws uses this
-// structure. Internal Windows code still uses SidecarFrame; the bridge
+// All Windows ↔ JarvisBrainDaemon traffic on /v2/ws (canonical unified route)
+// uses this structure. Internal Windows code still uses SidecarFrame; the bridge
 // translates at the wire boundary so existing subscribers don't change.
 //
 // Matching the Android client contract so the daemon sees one message format

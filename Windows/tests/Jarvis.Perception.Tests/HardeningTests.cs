@@ -314,15 +314,20 @@ public class FocusSessionTrackerQueueTests
 public class SessionMemoryStoreHardeningTests : IDisposable
 {
     private readonly SessionMemoryStore _store;
+    private readonly string _tempFile;
 
     public SessionMemoryStoreHardeningTests()
     {
-        _store = new SessionMemoryStore();
+        // Isolated temp file so this class doesn't race the other SessionMemoryStore
+        // test classes through the shared %APPDATA% path under parallel execution.
+        _tempFile = Path.Combine(Path.GetTempPath(), $"jarvis-hardening-sessions-{Guid.NewGuid()}.jsonl");
+        _store = new SessionMemoryStore(diagnostics: null, filePath: _tempFile);
     }
 
     public void Dispose()
     {
         _ = _store.ClearAsync();
+        try { if (File.Exists(_tempFile)) File.Delete(_tempFile); } catch { }
     }
 
     [Fact]

@@ -621,9 +621,13 @@ final class BrainDaemonServer {
                     guard let (result, consumed) = Self.parseNextWebSocketFrame(buf) else { break }
                     buf = Array(buf[consumed...])
 
+                    // Resolve the stable paired-device identity from the
+                    // per-connection client UUID. `recordSeen` keys on deviceId,
+                    // so passing the random clientId here would silently no-op.
+                    let resolvedDeviceId = DaemonMessageRouter.shared.deviceId(forClientId: clientId) ?? clientId
                     switch result {
                     case .text(let text):
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                         self.wrapAndRoute(rawJSON: text, fromClientId: clientId, platform: platform)
                         self.dispatchAndroidMessage(text: text, clientId: clientId, conn: conn, platform: platform)
                     case .close:
@@ -633,9 +637,9 @@ final class BrainDaemonServer {
                     case .ping:
                         let pongFrame = Data([0x8A, 0x00])
                         conn.send(content: pongFrame, completion: .contentProcessed { _ in })
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                     case .pong:
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                         if let sentAt = self.lastPingSentAt.removeValue(forKey: clientId) {
                             let rttMs = Date().timeIntervalSince(sentAt) * 1000.0
                             DaemonDiagnostics.shared.websocketRttMs = rttMs

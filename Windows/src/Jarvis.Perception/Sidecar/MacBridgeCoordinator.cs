@@ -17,7 +17,7 @@ namespace Jarvis.Perception.Sidecar;
 /// Connection lifecycle:
 ///   - If <see cref="BrainGatewayConfig.BaseUrl"/> is empty → stays Disabled.
 ///   - If BaseUrl is set but no SessionToken → transitions to PairingRequired (user must pair).
-///   - If BaseUrl and SessionToken are both set → connects to /v1/windows/ws, sends
+///   - If BaseUrl and SessionToken are both set → connects to /v2/ws, sends
 ///     GatewayMessage envelopes, stops reconnecting on 401 or token-revoked nack.
 ///
 /// Reconnects with exponential backoff; transitions to Degraded on sustained failure.
