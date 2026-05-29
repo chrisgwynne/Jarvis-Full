@@ -76,6 +76,10 @@ public sealed class RemoteExecutionBridge : IRemoteExecutionBridge
             return;
         }
 
+        // All intents arriving from the Mac bridge are remote-origin: they must not
+        // auto-confirm regardless of safety tier (#50).
+        intent = intent with { IsRemoteOrigin = true };
+
         Interlocked.Increment(ref _accepted);
         AutomationResult result;
         try { result = await _executor.ExecuteAsync(intent).ConfigureAwait(false); }
