@@ -149,37 +149,45 @@ public sealed class MacBridgeCoordinator : IMacBridgeCoordinator
         catch { return Task.FromResult(false); }
     }
 
-    /// <summary>Removes one frame to make room, preferring non-final frames. Returns false
-    /// if nothing could be removed. Any transcript.final frames skipped while searching are
-    /// re-queued in their original order so finals survive eviction.</summary>
+    // Frame types that must never be dropped under queue pressure (#39 WIN-6).
+    private static bool IsHighPriority(string? type) =>
+        type is SidecarFrameTypes.TranscriptFinal
+             or SidecarFrameTypes.ExecuteAck
+             or SidecarFrameTypes.LeaseRequest
+             or SidecarFrameTypes.LeaseGrant
+             or SidecarFrameTypes.LeaseRevoke;
+
+    /// <summary>Removes one evictable frame to make room. High-priority frames
+    /// (transcript.final, execute.ack, lease.*) are set aside and restored. Returns false
+    /// if nothing could be removed.</summary>
     private bool EvictOneFromOutbound()
     {
-        List<SidecarFrame>? preservedFinals = null;
+        List<SidecarFrame>? preserved = null;
         try
         {
             while (_outbound.TryTake(out var head))
             {
-                if (!string.Equals(head.Type, SidecarFrameTypes.TranscriptFinal, StringComparison.Ordinal))
+                if (!IsHighPriority(head.Type))
                 {
-                    // Dropped a non-final frame — restore the finals we set aside and report success.
-                    if (preservedFinals is not null)
-                        foreach (var f in preservedFinals) _outbound.Add(f);
+                    // Dropped an evictable frame — restore high-priority frames and report success.
+                    if (preserved is not null)
+                        foreach (var f in preserved) _outbound.Add(f);
                     return true;
                 }
-                (preservedFinals ??= new List<SidecarFrame>()).Add(head);
+                (preserved ??= new List<SidecarFrame>()).Add(head);
             }
         }
         catch { /* AddingCompleted raced — fall through */ }
 
-        // Queue was entirely finals (or empty). Restore all but the oldest final so the
+        // Queue was entirely high-priority (or empty). Restore all but the oldest so the
         // queue still makes room; never silently lose more than one.
-        if (preservedFinals is { Count: > 0 })
+        if (preserved is { Count: > 0 })
         {
-            for (var i = 1; i < preservedFinals.Count; i++)
+            for (var i = 1; i < preserved.Count; i++)
             {
-                try { _outbound.Add(preservedFinals[i]); } catch { break; }
+                try { _outbound.Add(preserved[i]); } catch { break; }
             }
-            return true; // oldest final (index 0) intentionally dropped as last resort
+            return true; // oldest high-priority frame intentionally dropped as last resort
         }
         return false;
     }
