@@ -104,6 +104,13 @@ public sealed class JsonSettingsStore : IJarvisSettingsStore
             try { s = s with { Gateway = s.Gateway with { SessionToken = TokenCrypto.Protect(gwToken) } }; }
             catch { /* DPAPI unavailable — keep plaintext */ }
         }
+        // LLM API key (#32)
+        var apiKey = s.Llm.ApiKey;
+        if (!string.IsNullOrEmpty(apiKey) && !TokenCrypto.IsProtected(apiKey))
+        {
+            try { s = s with { Llm = s.Llm with { ApiKey = TokenCrypto.Protect(apiKey) } }; }
+            catch { /* DPAPI unavailable — keep plaintext */ }
+        }
         return s;
     }
 
@@ -114,6 +121,12 @@ public sealed class JsonSettingsStore : IJarvisSettingsStore
         {
             try { s = s with { Gateway = s.Gateway with { SessionToken = TokenCrypto.Unprotect(s.Gateway.SessionToken!) } }; }
             catch { s = s with { Gateway = s.Gateway with { SessionToken = null, Paired = false } }; }
+        }
+        // LLM API key (#32)
+        if (TokenCrypto.IsProtected(s.Llm.ApiKey))
+        {
+            try { s = s with { Llm = s.Llm with { ApiKey = TokenCrypto.Unprotect(s.Llm.ApiKey!) } }; }
+            catch { s = s with { Llm = s.Llm with { ApiKey = null } }; }
         }
         return s;
     }

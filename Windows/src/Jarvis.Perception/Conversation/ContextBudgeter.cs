@@ -67,7 +67,11 @@ public sealed class ContextBudgeter : IContextBudgeter
 
         var compact = context with
         {
-            ForegroundWindowTitle = Truncate(context.ForegroundWindowTitle, 240),
+            // Sensitive titles (password managers, incognito, banking, etc.) are
+            // suppressed entirely before they leave the device (#32).
+            ForegroundWindowTitle = IsSensitiveTitle(context.ForegroundWindowTitle)
+                ? null
+                : Truncate(context.ForegroundWindowTitle, 240),
             SelectedText = selection,
             ClipboardSummary = clipboard,
             RecentOcrSummary = ocr,
@@ -78,4 +82,23 @@ public sealed class ContextBudgeter : IContextBudgeter
 
     private static string? Truncate(string? s, int max) =>
         string.IsNullOrEmpty(s) ? s : s.Length <= max ? s : s[..max] + "…";
+
+    // Mirrors AppUsageTracker.SensitivePatterns — keep in sync (#32).
+    private static readonly string[] SensitivePatterns =
+    [
+        "incognito", "private browsing", " - inprivate",
+        "password", "bank", "paypal", "1password", "bitwarden", "keepass",
+        "login", "sign in", "sign-in", "signin",
+        "checkout", "payment", "billing", "card",
+        "health", "medical", "insurance",
+        "tax",
+    ];
+
+    private static bool IsSensitiveTitle(string? title)
+    {
+        if (string.IsNullOrEmpty(title)) return false;
+        foreach (var pattern in SensitivePatterns)
+            if (title.Contains(pattern, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 }
