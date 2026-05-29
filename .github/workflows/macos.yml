@@ -19,7 +19,9 @@ concurrency:
 jobs:
   build:
     name: generate + build
-    runs-on: macos-14
+    # macos-15 ships Xcode 16, which can read the Xcode project format (77)
+    # that current XcodeGen emits. macos-14 (Xcode 15.4) rejects it.
+    runs-on: macos-15
     timeout-minutes: 60
     defaults:
       run:
