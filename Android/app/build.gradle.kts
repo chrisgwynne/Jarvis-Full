@@ -97,6 +97,10 @@ android {
 
     buildFeatures {
         compose = true
+        // Generates com.jarvis.assistant.BuildConfig (VERSION_NAME/CODE, DEBUG).
+        // AGP 8+/9 no longer generates it by default; AboutHelpSettingsScreen +
+        // CrashReportBuilder reference it, and the diagnostic bundle needs it.
+        buildConfig = true
     }
 
     packaging {
