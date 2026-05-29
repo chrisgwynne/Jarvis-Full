@@ -208,15 +208,10 @@ public partial class App : System.Windows.Application
         _memoryBridge.Attach();
 
         // P7 — wire the orchestration + fallback coordinators (they self-subscribe to
-        // bridge events; resolving them is enough to start them).
+        // bridge events; resolving them is enough to start them). Orchestration → TTS
+        // handlers are wired below, once the TTS service is resolved (#39 WIN-5).
         var orchestration = _services.GetRequiredService<IRemoteOrchestrationCoordinator>();
         orchestration.Attach();
-        // WIN-5: surface Mac orchestration frames as user-visible actions (#39).
-        orchestration.SpeakRequested  += (_, text) => _ = tts.SpeakAsync(text);
-        orchestration.SilenceRequested += (_, _)   => _ = tts.StopAsync();
-        orchestration.ProactiveReceived += (_, notice) =>
-            diagnostics.Record(DiagnosticLevel.Info, "proactive.notify", notice.Title ?? "notice",
-                new Dictionary<string, object?> { ["source"] = notice.Source, ["text"] = notice.Body });
         _ = _services.GetRequiredService<IDistributedFallbackCoordinator>();
         var conversation = _services.GetRequiredService<IDistributedConversationCoordinator>();
         diagnostics.Record(DiagnosticLevel.Info, "conversation.session", "resumed",
@@ -233,6 +228,12 @@ public partial class App : System.Windows.Application
         _partialCoord = _services.GetRequiredService<IPartialTranscriptCoordinator>();
         _partialCoord.Attach(stt);
         var tts = _services.GetRequiredService<ILocalTtsService>();
+        // WIN-5: surface Mac orchestration frames as user-visible actions (#39).
+        orchestration.SpeakRequested   += (_, text) => _ = tts.SpeakAsync(text);
+        orchestration.SilenceRequested += (_, _)    => _ = tts.StopAsync();
+        orchestration.ProactiveReceived += (_, notice) =>
+            diagnostics.Record(DiagnosticLevel.Info, "proactive.notify", notice.Title ?? "notice",
+                new Dictionary<string, object?> { ["source"] = notice.Source, ["text"] = notice.Body });
         _interruptCoord = _services.GetRequiredService<IPlaybackInterruptionCoordinator>();
         _interruptCoord.Attach(stt, tts);
         _interruptCoord.Interrupted += (_, _) =>
