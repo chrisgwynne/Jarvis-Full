@@ -9,43 +9,39 @@ import org.junit.Test
 /**
  * Contract tests for the Settings home visibility model.
  *
- * The Settings home is required to show:
- *   - Exactly 10 user-facing categories in normal mode (developerOnly = false).
- *   - One additional "Developer Diagnostics" row when Developer Mode is on.
+ * Following the 2026 connector-client simplification (see
+ * docs/SIMPLIFY_ANDROID_UX.md) the Settings home shows ONLY the
+ * appliance-essential set in normal mode (developerOnly = false):
+ *   - Mac connection, Voice, Permissions, Notifications, Troubleshooting, About.
+ * One additional "Developer Diagnostics" row appears when Developer Mode is on.
  *
- * Anything else MUST be developerOnly so it does not appear on the home
- * screen.  This test fails fast on any new top-level row sneaking in or any
- * legacy raw-config / diagnostic row being inadvertently un-hidden.
- *
- * It also asserts that the legacy hub categories (`PhoneControl`,
- * `CameraVision`, `Privacy`, `Proactivity`) — which were deleted as part
- * of the Settings cleanup — are not in the enum at all.
+ * Everything brain-owned (model/provider/persona/memory/conversation
+ * behaviour) and every diagnostic / legacy raw-config screen MUST be
+ * developerOnly so it does not appear on the home screen.  This test fails
+ * fast on any new top-level row sneaking in or any hidden row being
+ * inadvertently un-hidden.
  */
 class SettingsCategoryVisibilityTest {
 
-    /** The exact 10 user-facing categories surfaced at the Settings home. */
+    /** The exact user-facing categories surfaced at the Settings home. */
     private val expectedUserFacing = setOf(
-        SettingsCategory.Voice,
-        SettingsCategory.Conversation,
-        SettingsCategory.Messaging,
-        SettingsCategory.Advanced,            // "AI Provider"
-        SettingsCategory.AmbientIntelligence,
-        SettingsCategory.Memory,
-        SettingsCategory.TrustAutonomy,
-        SettingsCategory.Vision,
         SettingsCategory.MacIntegration,
+        SettingsCategory.Voice,
+        SettingsCategory.Permissions,
+        SettingsCategory.Notifications,
+        SettingsCategory.Troubleshooting,
         SettingsCategory.AboutHelp,
     )
 
     @Test
-    fun `normal mode shows exactly the 10 user-facing categories`() {
+    fun `normal mode shows exactly the user-facing categories`() {
         val visible = SettingsCategory.entries.filter { !it.developerOnly }.toSet()
         assertEquals(
             "Top-level visible categories drifted from the contract. " +
                 "Add new top-level entries deliberately, or set developerOnly = true.",
             expectedUserFacing, visible,
         )
-        assertEquals(10, visible.size)
+        assertEquals(6, visible.size)
     }
 
     /**

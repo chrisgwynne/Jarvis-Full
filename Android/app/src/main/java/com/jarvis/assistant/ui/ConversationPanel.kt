@@ -1,107 +1,118 @@
 package com.jarvis.assistant.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.jarvis.assistant.memory.db.entity.ConversationTurn
+import com.jarvis.assistant.ui.theme.JarvisTokens
+import com.jarvis.assistant.ui.theme.jarvisExtras
 
-private val BubbleUser       = Color(0xFF072340)   // user bubble — deep navy-blue
-private val BubbleAssistant  = Color(0xFF0D1628)   // assistant bubble — surface navy
-private val TextCyan         = Color(0xFF3FA7FF)   // blueprint blue accent
-private val TextPurple       = Color(0xFFCE93D8)   // speaking / assistant highlight
-private val TextBody         = Color(0xFFCCDAE8)   // body text — subtle blue tint
-private val PanelBg          = Color(0xFF060B14)   // matches main BgDeep
-private val ChipBg           = Color(0xFF0E1C33)   // expand/collapse chip
-private val ChipText         = Color(0xFF4A6080)   // faint chip label
-
+/**
+ * Conversation transcript — a premium, theme-aware chat surface.
+ *
+ *  - A tappable summary header (latest line + expand chevron) sits in a soft
+ *    rounded card.
+ *  - Expanding reveals the recent turns as chat bubbles: the user on the
+ *    right (primary-tinted), Jarvis on the left (surface card).
+ *  - Empty state reads as a calm prompt rather than a debug placeholder.
+ */
 @Composable
 fun ConversationPanel(
     turns: List<ConversationTurn>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val extras = MaterialTheme.jarvisExtras
     var expanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // Auto-scroll to bottom when new turns arrive
     val turnCount = turns.size
-    LaunchedEffect(turnCount) {
-        if (expanded && turnCount > 0) {
-            listState.animateScrollToItem(turnCount - 1)
-        }
+    LaunchedEffect(turnCount, expanded) {
+        if (expanded && turnCount > 0) listState.animateScrollToItem(turnCount - 1)
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
-
-        // ── Collapse/expand chip ──────────────────────────────────────────────
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(JarvisTokens.Shape.card)
+            .background(extras.surfaceRaised)
+            .border(1.dp, extras.divider, JarvisTokens.Shape.card),
+    ) {
+        // ── Summary header ────────────────────────────────────────────────
         val latest = turns.lastOrNull()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(ChipBg)
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .clickable(enabled = turns.isNotEmpty()) { expanded = !expanded }
+                .padding(horizontal = JarvisTokens.Space.lg, vertical = JarvisTokens.Space.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(JarvisTokens.Space.md),
         ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Chat,
+                contentDescription = null,
+                tint = scheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
             Text(
-                text = if (latest != null)
-                    latest.content.take(60) + if (latest.content.length > 60) "…" else ""
-                else
-                    "No conversation yet",
-                color = ChipText,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
+                text = when {
+                    latest != null -> latest.content.take(70) + if (latest.content.length > 70) "…" else ""
+                    else           -> "No conversation yet — press to talk or say “Jarvis”"
+                },
+                color = if (latest != null) scheme.onSurface else scheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
             )
-            Text(
-                text = if (expanded) "▲" else "▼",
-                color = ChipText,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 8.dp)
-            )
+            if (turns.isNotEmpty()) {
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Collapse conversation" else "Expand conversation",
+                    tint = extras.textMuted,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
 
-        // ── Expandable conversation list ──────────────────────────────────────
+        // ── Expandable transcript ─────────────────────────────────────────
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(),
-            exit  = shrinkVertically()
+            enter = expandVertically(tween(JarvisTokens.Motion.medium)),
+            exit = shrinkVertically(tween(JarvisTokens.Motion.medium)),
         ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 280.dp)
-                    .background(PanelBg)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .heightIn(max = 300.dp)
+                    .padding(horizontal = JarvisTokens.Space.md, vertical = JarvisTokens.Space.sm),
+                verticalArrangement = Arrangement.spacedBy(JarvisTokens.Space.sm),
             ) {
-                items(turns, key = { it.id }) { turn ->
-                    TurnBubble(turn)
-                }
+                items(turns, key = { it.id }) { turn -> TurnBubble(turn) }
             }
         }
     }
@@ -109,46 +120,40 @@ fun ConversationPanel(
 
 @Composable
 private fun TurnBubble(turn: ConversationTurn) {
+    val scheme = MaterialTheme.colorScheme
+    val extras = MaterialTheme.jarvisExtras
     val isUser = turn.role == "user"
+
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 260.dp)
+                .widthIn(max = 280.dp)
                 .clip(
                     RoundedCornerShape(
-                        topStart = 12.dp,
-                        topEnd   = 12.dp,
-                        bottomStart = if (isUser) 12.dp else 2.dp,
-                        bottomEnd   = if (isUser) 2.dp else 12.dp
+                        topStart = JarvisTokens.Radius.lg,
+                        topEnd = JarvisTokens.Radius.lg,
+                        bottomStart = if (isUser) JarvisTokens.Radius.lg else JarvisTokens.Radius.xs,
+                        bottomEnd = if (isUser) JarvisTokens.Radius.xs else JarvisTokens.Radius.lg,
                     )
                 )
-                .background(if (isUser) BubbleUser else BubbleAssistant)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .background(if (isUser) scheme.primaryContainer else scheme.surfaceVariant)
+                .padding(horizontal = JarvisTokens.Space.md, vertical = JarvisTokens.Space.sm),
         ) {
             Text(
-                text       = if (isUser) "You" else "Jarvis",
-                color      = if (isUser) TextCyan else TextPurple,
-                fontSize   = 9.sp,
+                text = if (isUser) "You" else "Jarvis",
+                color = if (isUser) scheme.onPrimaryContainer else extras.accentPurple,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.sp
             )
-            Spacer(Modifier.height(2.dp))
-            // Render inline Markdown — assistant replies frequently use **bold**
-            // and `code` fragments; rendering them as raw asterisks/backticks
-            // looked tonally off and added visual noise.  User turns never
-            // contain Markdown (they're STT transcripts) so this is a no-op
-            // for them.
+            Spacer(Modifier.height(JarvisTokens.Space.xxs))
             Text(
-                text       = if (isUser) androidx.compose.ui.text.AnnotatedString(turn.content)
-                             else renderMarkdownInline(turn.content, codeColor = TextCyan),
-                color      = TextBody,
-                fontSize   = 12.sp,
-                lineHeight = 17.sp,
-                fontFamily = FontFamily.Monospace,
+                text = if (isUser) androidx.compose.ui.text.AnnotatedString(turn.content)
+                       else renderMarkdownInline(turn.content, codeColor = scheme.primary),
+                color = if (isUser) scheme.onPrimaryContainer else scheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
     }
