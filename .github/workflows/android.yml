@@ -60,8 +60,9 @@ jobs:
             echo "### ❌ Android CI failed";
             echo "Commit \`$GITHUB_SHA\` · [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)";
             echo '';
+            echo 'Unique error lines:';
             echo '```';
-            tail -n 200 "$RUNNER_TEMP/ci.log" 2>/dev/null || echo "(no log captured before failure)";
+            grep -iE "(: error|error:|error CS| error |FAILED|FAILURE|Exception|Unresolved reference|cannot find|could not|Unable to|not found)" "$RUNNER_TEMP/ci.log" 2>/dev/null | awk '!seen[$0]++' | head -n 60 || echo "(no error lines matched; see run)";
             echo '```';
           } > "$RUNNER_TEMP/comment.md"
           gh api -X POST "repos/$GITHUB_REPOSITORY/issues/8/comments" -F "body=@$RUNNER_TEMP/comment.md" || true
