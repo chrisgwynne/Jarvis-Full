@@ -6,8 +6,8 @@ import com.jarvis.assistant.core.state.JarvisState
 import com.jarvis.assistant.core.state.JarvisStateMachine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -20,6 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -151,11 +152,11 @@ class CallCoordinatorTest {
     fun `caller hangs up during listen window — speaks call ended and recovers`() = runTest(testDispatcher) {
         whenever(resolver.resolve(any())).thenReturn(knownContact("Alice"))
 
-        // speech capture returns empty (never resolved before call ends)
-        val speechDeferred = kotlinx.coroutines.CompletableDeferred<String>()
-        whenever(speechCapture.listen()).thenAnswer {
-            runBlocking { speechDeferred.await() }
-        }
+        // listen() never returns a transcript here — it must SUSPEND (not block a
+        // thread) until the coordinator cancels it when the call ends, so cancellation
+        // propagates under runTest. A thread-blocking mock (runBlocking on a
+        // never-completed deferred) deadlocks the whole unit-test suite.
+        whenever(speechCapture.listen()).doSuspendableAnswer { awaitCancellation() }
 
         val coordinator = buildCoordinator(this)
         val event = CallEvent.IncomingRinging(fakeCallInfo())
