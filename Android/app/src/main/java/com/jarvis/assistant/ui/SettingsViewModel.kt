@@ -123,6 +123,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             db.memoryDao().deleteAll()
             db.memoryFactDao().deleteAll()
             clearLocationData()
+            // #30: audio recordings are user data — wipe them on reset too.
+            com.jarvis.assistant.audio.recording.RecordingFileStore.clearAll(getApplication())
         }
     }
 

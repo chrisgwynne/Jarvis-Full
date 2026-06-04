@@ -119,12 +119,32 @@ class AudioRecordingTool(
     // ── Handlers ─────────────────────────────────────────────────────────────
 
     private suspend fun handleStart(): ToolResult = withContext(Dispatchers.IO) {
+        // #30: bound retention — drop recordings older than the default window
+        // before starting a new one, so audio never accumulates indefinitely.
+        val pruned = RecordingFileStore.pruneOlderThan(context)
+        if (pruned > 0) Log.d(TAG, "Pruned $pruned expired recording(s)")
+
         when (val result = recordingManager.start()) {
-            is RecordingResult.Started          -> ToolResult.Success("Recording started.")
+            is RecordingResult.Started          -> ToolResult.Success(startedMessage())
             is RecordingResult.AlreadyRecording -> ToolResult.Failure("Already recording.")
             is RecordingResult.Failure          ->
                 ToolResult.Failure("Couldn't start recording. ${result.reason.take(60)}")
             else -> ToolResult.Failure("Unexpected recording state.")
+        }
+    }
+
+    /**
+     * #30: speak a one-time disclosure the first time the user records, so
+     * recording is never silent/undisclosed. Persisted so it's said only once.
+     */
+    private fun startedMessage(): String {
+        val store = com.jarvis.assistant.util.SettingsStore(context)
+        return if (!store.recordingDisclosureShown) {
+            store.recordingDisclosureShown = true
+            "Recording. I'll keep this on the device, auto-delete it after a week, " +
+                "and you can wipe recordings any time from settings."
+        } else {
+            "Recording started."
         }
     }
 

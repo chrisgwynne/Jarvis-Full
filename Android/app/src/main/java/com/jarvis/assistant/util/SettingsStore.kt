@@ -104,6 +104,7 @@ class SettingsStore(context: Context) {
 
         // ── App lock (Phase 4b) ───────────────────────────────────────────────
         const val KEY_APP_LOCK_ENABLED    = "app_lock_enabled"
+        const val KEY_RECORDING_DISCLOSURE_SHOWN = "recording_disclosure_shown"
         const val KEY_APP_LOCK_BIOMETRIC  = "app_lock_biometric_enabled"
         const val KEY_APP_LOCK_PIN_HASH   = "app_lock_pin_hash"
         const val KEY_APP_LOCK_PIN_SALT   = "app_lock_pin_salt"
@@ -1083,6 +1084,11 @@ class SettingsStore(context: Context) {
     var appLockEnabled: Boolean
         get() = prefs.getBoolean(KEY_APP_LOCK_ENABLED, false)
         set(v) = prefs.edit().putBoolean(KEY_APP_LOCK_ENABLED, v).apply()
+
+    /** #30: whether the one-time audio-recording disclosure has been spoken. */
+    var recordingDisclosureShown: Boolean
+        get() = prefs.getBoolean(KEY_RECORDING_DISCLOSURE_SHOWN, false)
+        set(v) = prefs.edit().putBoolean(KEY_RECORDING_DISCLOSURE_SHOWN, v).apply()
 
     var appLockBiometricEnabled: Boolean
         get() = prefs.getBoolean(KEY_APP_LOCK_BIOMETRIC, false)
