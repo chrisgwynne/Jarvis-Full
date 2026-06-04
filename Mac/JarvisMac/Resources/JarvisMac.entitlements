@@ -2,7 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+	  App sandbox stays OFF: the app shells out to launchctl / lsof / ps to
+	  manage the daemon LaunchAgent and drives other apps via AppleScript,
+	  none of which is permissible under the sandbox. Distribution is via
+	  Developer ID + notarization (hardened runtime), NOT the Mac App Store,
+	  so the sandbox is not required.
+	-->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+
+	<!-- TCC-gated device access under the hardened runtime. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+
+	<!-- Drive other apps via Apple Events (AppleScript automation). -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- Local gateway: outbound (daemon health) + inbound (Android pairing). -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
 </dict>
 </plist>

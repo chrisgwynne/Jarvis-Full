@@ -1,0 +1,9 @@
+# Build prerequisites for the Jarvis macOS app.
+#
+# Pinned tooling is installed via Mint (see Mintfile) so versions are exact.
+# This Brewfile only provides Mint itself + optional convenience tools.
+#
+#   brew bundle --file=Brewfile
+#
+brew "mint"        # runs the pinned XcodeGen from Mintfile
+brew "blueutil"    # optional: Bluetooth toggle support (see B10)

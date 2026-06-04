@@ -14,7 +14,7 @@ locally or via Apple Speech, routed through a phrase matcher + intent router, ex
 
 **Repo:** `/Users/chris/Desktop/jarvis`  
 **Scheme:** `JarvisMac`  
-**Build tool:** `/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme JarvisMac -configuration Debug build`  
+**Build:** `make build` (regenerates the project via pinned XcodeGen first). `make test` runs both unit bundles. Full setup + release/notarization steps are in **`BUILD.md`** — read it before touching signing, schemes, or `project.yml`.  
 **Language:** Swift 5.9+, SwiftUI, no Combine (uses `@Observable`)  
 **Target OS:** macOS 13 Ventura minimum  
 **Last sprint commit:** Sprint P9 — Entity Memory + Cross-Device Reference Resolution

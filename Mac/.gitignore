@@ -23,7 +23,8 @@ xcuserdata/
 .swiftpm/
 Packages/
 Package.pins
-Package.resolved
+# The committed top-level Mac/Package.resolved IS tracked (reproducible deps).
+# The copy generated inside the .xcodeproj is already ignored via *.xcodeproj/ above.
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 
 ## macOS

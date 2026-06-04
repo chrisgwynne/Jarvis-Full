@@ -14,7 +14,9 @@ settings:
     DEAD_CODE_STRIPPING: YES
     CLANG_ENABLE_MODULES: YES
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
-    ENABLE_HARDENED_RUNTIME: NO
+    # Hardened runtime is REQUIRED for Developer ID notarization. It works with
+    # ad-hoc ("-") signing for local Debug builds too, so it is enabled globally.
+    ENABLE_HARDENED_RUNTIME: YES
     # Phase-2: search path for the optional sherpa-onnx xcframework drop.
     # Pointing Xcode at an empty Vendor/ is harmless until you install
     # the framework.
@@ -30,7 +32,9 @@ settings:
 packages:
   onnxruntime-swift-package-manager:
     url: https://github.com/microsoft/onnxruntime-swift-package-manager.git
-    from: "1.16.0"
+    # Exact pin (not `from:`) so a clean checkout resolves deterministically.
+    # Bump deliberately + re-run `make resolve` to refresh the committed Package.resolved.
+    exactVersion: "1.16.0"
 # Uncomment to enable offline wake-word STT:
 #   whisper:
 #     url: https://github.com/ggerganov/whisper.cpp
@@ -56,6 +60,8 @@ targets:
         CFBundleShortVersionString: "0.2.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "14.0"
+        # Menubar (accessory) app — no Dock icon, no default window.
+        LSUIElement: true
         NSHighResolutionCapable: true
         NSMicrophoneUsageDescription: "Jarvis listens for your voice commands."
         NSCameraUsageDescription: "Jarvis uses the webcam for vision features."
@@ -67,18 +73,36 @@ targets:
       path: JarvisMac/Resources/JarvisMac.entitlements
       properties:
         com.apple.security.app-sandbox: false
+    configFiles:
+      # Release signing (Developer ID + team) lives in Signing.xcconfig so the
+      # team id is never hard-coded. Fill it in on the signing machine / CI.
+      Release: Signing.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.mac.JarvisMac
         PRODUCT_NAME: JarvisMac
-        CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
-        DEVELOPMENT_TEAM: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: YES
+      configs:
+        # Local development: ad-hoc sign, no team required.
+        Debug:
+          CODE_SIGN_STYLE: Automatic
+          CODE_SIGN_IDENTITY: "-"
+          DEVELOPMENT_TEAM: ""
+        # Release values are supplied by Signing.xcconfig (CODE_SIGN_IDENTITY,
+        # DEVELOPMENT_TEAM, CODE_SIGN_STYLE). Hardened runtime is on globally.
     dependencies:
       - package: onnxruntime-swift-package-manager
         product: onnxruntime
+      # Copy the daemon executable into JarvisMac.app/Contents/MacOS so a
+      # shipped (notarized) build can locate it via forAuxiliaryExecutable.
+      # `link: false` — it is a standalone helper tool, not linked into the app.
+      # It must be signed + notarized alongside the app.
+      - target: JarvisBrainDaemon
+        link: false
+        copy:
+          destination: executables
+          codeSign: true
     # Phase-2 optional drop-ins. Uncomment as you install them — the Swift
     # code is gated by `#if canImport(...)` so the project builds without
     # them.
@@ -117,3 +141,40 @@ targets:
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
     dependencies: []
+
+  # Host-based unit tests for the app. Hosted on JarvisMac so the 63
+  # JarvisMacTests files can `@testable import JarvisMac` against the real
+  # sources. The app guards its bootstrap under XCTest (see JarvisMacApp)
+  # so launching the host for tests does not hang.
+  JarvisMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: JarvisMacTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.mac.tests
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/JarvisMac.app/Contents/MacOS/JarvisMac"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: JarvisMac
+
+# Schemes — wire both test bundles into the JarvisMac scheme so
+# `xcodebuild test -scheme JarvisMac` runs the app + daemon suites.
+schemes:
+  JarvisMac:
+    build:
+      targets:
+        JarvisMac: all
+        JarvisBrainDaemon: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - JarvisMacTests
+        - JarvisBrainDaemonTests

@@ -1,0 +1,15 @@
+// Release signing configuration for JarvisMac (Developer ID / notarization).
+//
+// Fill these in on the signing machine or in CI (e.g. via `xcodebuild`
+// build settings overrides). Left blank here so the repo carries no
+// account-specific values; a blank team only affects Release signing —
+// local `make build` (Debug) ad-hoc signs without a team.
+//
+// Required for a notarizable build:
+//   DEVELOPMENT_TEAM      = ABCDE12345              // your 10-char Team ID
+//   CODE_SIGN_IDENTITY    = Developer ID Application // automatic-by-name lookup
+//   CODE_SIGN_STYLE       = Manual
+
+DEVELOPMENT_TEAM =
+CODE_SIGN_IDENTITY = Developer ID Application
+CODE_SIGN_STYLE = Manual

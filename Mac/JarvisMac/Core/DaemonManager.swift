@@ -71,11 +71,16 @@ final class DaemonManager: ObservableObject {
     }
 
     var daemonBinaryURL: URL {
-        // In development builds, JarvisBrainDaemon is a standalone executable
-        // that sits alongside JarvisMac.app in the same DerivedData Debug/ folder.
-        // It is NOT embedded inside the app bundle.
+        // Release / notarized: the daemon is embedded in the app bundle and
+        // copied next to the app executable (Contents/MacOS/JarvisBrainDaemon).
+        // `forAuxiliaryExecutable` resolves exactly that location.
+        if let bundled = Bundle.main.url(forAuxiliaryExecutable: "JarvisBrainDaemon") {
+            return bundled
+        }
+        // Debug (DerivedData): the tool target builds as a sibling of
+        // JarvisMac.app in the same Products/Debug folder.
         // .app → parent (Debug/) → JarvisBrainDaemon
-        Bundle.main.bundleURL
+        return Bundle.main.bundleURL
             .deletingLastPathComponent()
             .appendingPathComponent("JarvisBrainDaemon")
     }

@@ -101,6 +101,9 @@ private final class OfflineQueueForTest {
     private let lock = NSLock()
     private(set) var drainedCount: Int = 0
 
+    // Kept in lockstep with the real DaemonOfflineQueue sets. The parity
+    // guard test (testReplaySafeTypesParityWithRealSource /
+    // testReplayUnsafeTypesParityWithRealSource) fails if these drift.
     static let replaySafeTypes: Set<String> = [
         "transcript.final",
         "execution.result",
@@ -108,9 +111,19 @@ private final class OfflineQueueForTest {
         "command.result",
         "error.report",
         "android.event",
+        "remote.action.result",
+        "file.transfer.created",
+        "comm.event.received",
+        "comm.action.result",
+        "notification.forward",
+        "handoff.request",
+        "handoff.result",
+        "context.update",
     ]
     static let replayUnsafeTypes: Set<String> = [
         "execution.request",
+        "remote.action.request",
+        "file.transfer.result",
         "orchestrate.speak",
         "orchestrate.silent",
         "reply.final",
@@ -119,6 +132,9 @@ private final class OfflineQueueForTest {
         "transcript.partial",
         "proactive.notify",
         "heartbeat", "heartbeat.android", "ping", "pong",
+        "clipboard.update",
+        "comm.action.execute",
+        "comm.action.request",
     ]
 
     init(maxDepth: Int = 50, maxAgeSeconds: TimeInterval = 120) {
@@ -356,6 +372,50 @@ final class DaemonOfflineQueueTests: XCTestCase {
         }
         XCTAssertEqual(q.depth, 3,
                        "Replay-safe types must all be queued — depth must equal 3")
+    }
+
+    // MARK: - Drift guards (the daemon target is an executable and cannot be
+    // @testable import-ed, so the inline replica above is parity-checked
+    // against the real source text instead).
+
+    /// Extracts the string-literal members of a `static let <name>: Set<String> = [ ... ]`
+    /// declaration from Swift source text.
+    private func extractStringSet(named name: String, from source: String) -> Set<String>? {
+        guard let declRange = source.range(of: "\(name): Set<String> = [") else { return nil }
+        let afterOpen = source[declRange.upperBound...]
+        guard let close = afterOpen.firstIndex(of: "]") else { return nil }
+        let body = afterOpen[afterOpen.startIndex..<close]
+        let matches = body.matches(of: /"([^"]+)"/)
+        let values = matches.map { String($0.1) }
+        return values.isEmpty ? nil : Set(values)
+    }
+
+    private func realQueueSource() -> String? {
+        let url = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent()           // JarvisBrainDaemonTests/
+            .deletingLastPathComponent()           // Mac/
+            .appendingPathComponent("JarvisBrainDaemon/DaemonOfflineQueue.swift")
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    // 10. The inline replica's replaySafeTypes must match the real source.
+    func testReplaySafeTypesParityWithRealSource() throws {
+        let source = try XCTUnwrap(realQueueSource(),
+                                   "Could not read DaemonOfflineQueue.swift")
+        let real = try XCTUnwrap(extractStringSet(named: "replaySafeTypes", from: source),
+                                 "Could not parse replaySafeTypes from real source")
+        XCTAssertEqual(OfflineQueueForTest.replaySafeTypes, real,
+            "Inline replaySafeTypes has drifted from DaemonOfflineQueue — update the replica")
+    }
+
+    // 11. The inline replica's replayUnsafeTypes must match the real source.
+    func testReplayUnsafeTypesParityWithRealSource() throws {
+        let source = try XCTUnwrap(realQueueSource(),
+                                   "Could not read DaemonOfflineQueue.swift")
+        let real = try XCTUnwrap(extractStringSet(named: "replayUnsafeTypes", from: source),
+                                 "Could not parse replayUnsafeTypes from real source")
+        XCTAssertEqual(OfflineQueueForTest.replayUnsafeTypes, real,
+            "Inline replayUnsafeTypes has drifted from DaemonOfflineQueue — update the replica")
     }
 }
 
