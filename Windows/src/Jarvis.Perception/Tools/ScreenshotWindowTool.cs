@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -17,6 +18,9 @@ public sealed class ScreenshotWindowTool : IWindowsTool
     private static readonly string ScreenshotDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Jarvis", "Screenshots");
+
+    // WIN-9 (#32): keep only the most recent N screenshots on disk.
+    private const int MaxScreenshots = 20;
 
     private readonly Func<ToolsSettings> _settings;
 
@@ -70,6 +74,7 @@ public sealed class ScreenshotWindowTool : IWindowsTool
             var filePath = Path.Combine(ScreenshotDir, fileName);
 
             SaveAsPng(bitmapSource, filePath);
+            PruneOldScreenshots();   // WIN-9 (#32): bound on-disk screenshot retention
 
             return Task.FromResult(Ok($"Screenshot saved: {fileName}", filePath));
         }
@@ -77,6 +82,24 @@ public sealed class ScreenshotWindowTool : IWindowsTool
         {
             return Task.FromResult(Fail($"Screenshot failed: {ex.GetType().Name} — {ex.Message}"));
         }
+    }
+
+    /// <summary>WIN-9 (#32): delete oldest screenshots beyond <see cref="MaxScreenshots"/>.</summary>
+    private static void PruneOldScreenshots()
+    {
+        try
+        {
+            var files = Directory.GetFiles(ScreenshotDir, "jarvis-*.png");
+            if (files.Length <= MaxScreenshots) return;
+            var stale = files
+                .OrderByDescending(p => File.GetLastWriteTimeUtc(p))
+                .Skip(MaxScreenshots);
+            foreach (var path in stale)
+            {
+                try { File.Delete(path); } catch { /* best-effort */ }
+            }
+        }
+        catch { /* pruning is best-effort; never fail a capture over it */ }
     }
 
     private static BitmapSource CaptureScreenRegion(int x, int y, int width, int height)

@@ -1096,7 +1096,9 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<ISpeechRecognitionProvider>(),
             () => sp.GetRequiredService<IJarvisSettingsStore>().Current.Sidecar,
             sp.GetService<IDiagnostics>()));
-        services.AddSingleton<IReplyLogger, JsonlReplyLogger>();
+        // WIN-9 (#32): inject the redactor so the reply log is redacted on disk.
+        services.AddSingleton<IReplyLogger>(sp => new Jarvis.Settings.JsonlReplyLogger(
+            null, sp.GetRequiredService<IRedactor>()));
         services.AddSingleton<ILocalTtsService>(sp =>
         {
             var inner = new Jarvis.App.Sidecar.WinRtTtsService(

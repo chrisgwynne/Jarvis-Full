@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Jarvis.Core.Conversation;
 using Jarvis.Core.Logging;
 
 namespace Jarvis.Settings;
@@ -25,11 +26,15 @@ public sealed class JsonlReplyLogger : IReplyLogger
     private readonly int _maxBytes = 4 * 1024 * 1024;
     private readonly int _maxEntries = 2_000;
     private List<ReplyLogEntry>? _cache;
+    // WIN-9 (#32): redact PII/secrets from the spoken text before it is
+    // persisted. Null → no redaction (used by some tests).
+    private readonly IRedactor? _redactor;
 
     public JsonlReplyLogger() : this(null) { }
 
-    public JsonlReplyLogger(string? filePath)
+    public JsonlReplyLogger(string? filePath, IRedactor? redactor = null)
     {
+        _redactor = redactor;
         if (filePath is not null)
         {
             _filePath = filePath;
@@ -54,13 +59,16 @@ public sealed class JsonlReplyLogger : IReplyLogger
         bool editableFlag = true)
     {
         if (string.IsNullOrWhiteSpace(spokenText)) return;
+        // WIN-9 (#32): redact before persisting so the on-disk log never
+        // carries raw secrets/PII from the spoken text.
+        var loggedText = _redactor?.Redact(spokenText).Cleaned ?? spokenText;
         var entry = new ReplyLogEntry(
             Id: Guid.NewGuid(),
             Timestamp: DateTimeOffset.UtcNow,
             Source: source,
             Intent: intent,
             ResponseKey: responseKey,
-            SpokenText: spokenText,
+            SpokenText: loggedText,
             Device: "windows",
             EditableFlag: editableFlag);
         _ = Task.Run(() => WriteAsync(entry));
