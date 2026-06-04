@@ -13,7 +13,9 @@ import org.junit.Test
  * docs/SIMPLIFY_ANDROID_UX.md) the Settings home shows ONLY the
  * appliance-essential set in normal mode (developerOnly = false):
  *   - Mac connection, Voice, Permissions, Notifications, Troubleshooting, About.
- * One additional "Developer Diagnostics" row appears when Developer Mode is on.
+ * Developer Mode reveals NOTHING additional (#74): engineering/diagnostics
+ * destinations were removed from the nav graph entirely, not merely gated, so
+ * the visible set is identical with Developer Mode on or off.
  *
  * Everything brain-owned (model/provider/persona/memory/conversation
  * behaviour) and every diagnostic / legacy raw-config screen MUST be
@@ -47,23 +49,23 @@ class SettingsCategoryVisibilityTest {
     /**
      * Mirror of the visibility filter in
      * [com.jarvis.assistant.ui.settings.SettingsRootScreen] — kept in lock-step
-     * here so the contract is testable without spinning up Compose.
+     * here so the contract is testable without spinning up Compose. The real
+     * filter is an unconditional `!developerOnly`; Developer Mode does not add
+     * any row (#74).
      */
-    private fun homeRows(devMode: Boolean): Set<SettingsCategory> =
-        SettingsCategory.entries.filter { cat ->
-            !cat.developerOnly || (devMode && cat == SettingsCategory.DeveloperDiagnostics)
-        }.toSet()
+    private fun homeRows(@Suppress("UNUSED_PARAMETER") devMode: Boolean): Set<SettingsCategory> =
+        SettingsCategory.entries.filter { !it.developerOnly }.toSet()
 
     @Test
-    fun `dev mode adds exactly the Developer Diagnostics row, nothing else`() {
+    fun `dev mode reveals nothing additional`() {
         val normal = homeRows(devMode = false)
         val dev    = homeRows(devMode = true)
         assertEquals(expectedUserFacing, normal)
-        assertEquals(expectedUserFacing + SettingsCategory.DeveloperDiagnostics, dev)
-        // Crucially: turning dev mode on must NOT add any of the per-topic
-        // diagnostic / legacy raw-config rows to the home screen.
-        val homeOnlyAddedInDev = dev - normal
-        assertEquals(setOf(SettingsCategory.DeveloperDiagnostics), homeOnlyAddedInDev)
+        // #74: turning Developer Mode on must NOT surface ANY extra row — not
+        // the per-topic diagnostics, the legacy raw-config screens, nor the
+        // (now graph-absent) Developer Diagnostics hub.
+        assertEquals(normal, dev)
+        assertTrue("Developer Mode must add no rows", (dev - normal).isEmpty())
     }
 
     @Test
