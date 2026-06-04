@@ -92,14 +92,27 @@ class MicInputProfiler(
 
     /** Classify the active input path. */
     fun current(): MicProfile {
+        val btConnected = bluetoothScoManager.isHeadsetConnected || hasBluetoothAudioDevice()
         val profile = when {
-            bluetoothScoManager.isHeadsetConnected -> MicProfile.BLUETOOTH_HEADSET
+            btConnected -> MicProfile.BLUETOOTH_HEADSET
             @Suppress("DEPRECATION") audioManager.isWiredHeadsetOn -> MicProfile.WIRED_HEADSET
             else -> MicProfile.PHONE_MIC
         }
         Log.d(TAG, "[AUDIO_INPUT_MODE] profile=$profile " +
-            "btConnected=${bluetoothScoManager.isHeadsetConnected} " +
+            "btConnected=$btConnected " +
             "wired=${@Suppress("DEPRECATION") audioManager.isWiredHeadsetOn}")
         return profile
     }
+
+    /**
+     * #21: permission-free Bluetooth-audio detection. `BluetoothScoManager`
+     * needs BLUETOOTH_CONNECT (Android 12+) and returns false silently without
+     * it, so headphones under-trigger barge-in. `AudioManager.getDevices` needs
+     * no permission and surfaces an attached SCO/A2DP route directly.
+     */
+    private fun hasBluetoothAudioDevice(): Boolean =
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        }
 }
