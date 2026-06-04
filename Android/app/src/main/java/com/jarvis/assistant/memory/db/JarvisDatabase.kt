@@ -3,6 +3,7 @@ package com.jarvis.assistant.memory.db
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
+import com.jarvis.assistant.BuildConfig
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -700,12 +701,16 @@ abstract class JarvisDatabase : RoomDatabase() {
                                    MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
                                    MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                                    MIGRATION_18_19)
-                    // Dev safety net: if the DB version is ahead of any known
-                    // migration start (e.g. working-tree install with a future
-                    // version) Room wipes and recreates rather than crashing.
-                    // dropAllTables=true ensures a genuinely clean slate — no
-                    // orphaned columns or ghost tables from the old schema.
-                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    // #46: destructive fallback is a DEBUG-ONLY dev safety net.
+                    // In release it must NEVER silently drop all tables (that
+                    // wipes the user's memories/conversations on any schema
+                    // drift). Release builds without a matching migration fail
+                    // loudly instead — fix-forward beats silent data loss.
+                    .apply {
+                        if (BuildConfig.DEBUG) {
+                            fallbackToDestructiveMigration(dropAllTables = true)
+                        }
+                    }
                     // WAL journal mode lets readers and a single writer run
                     // concurrently — important here because JarvisRuntime has
                     // many overlapping writers (memory, knowledge, telemetry,
