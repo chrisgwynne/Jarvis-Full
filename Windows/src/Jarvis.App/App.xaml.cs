@@ -212,6 +212,9 @@ public partial class App : System.Windows.Application
         var orchestration = _services.GetRequiredService<IRemoteOrchestrationCoordinator>();
         orchestration.Attach();
         // WIN-5: surface Mac orchestration frames as user-visible actions (#39).
+        // NB: resolve TTS BEFORE wiring these handlers — referencing it after its
+        // later declaration was a use-before-declaration compile error.
+        var tts = _services.GetRequiredService<ILocalTtsService>();
         orchestration.SpeakRequested  += (_, text) => _ = tts.SpeakAsync(text);
         orchestration.SilenceRequested += (_, _)   => _ = tts.StopAsync();
         orchestration.ProactiveReceived += (_, notice) =>
@@ -232,7 +235,7 @@ public partial class App : System.Windows.Application
         var stt = _services.GetRequiredService<ISpeechRecognitionProvider>();
         _partialCoord = _services.GetRequiredService<IPartialTranscriptCoordinator>();
         _partialCoord.Attach(stt);
-        var tts = _services.GetRequiredService<ILocalTtsService>();
+        // `tts` is resolved earlier (before the orchestration handlers are wired).
         _interruptCoord = _services.GetRequiredService<IPlaybackInterruptionCoordinator>();
         _interruptCoord.Attach(stt, tts);
         _interruptCoord.Interrupted += (_, _) =>
