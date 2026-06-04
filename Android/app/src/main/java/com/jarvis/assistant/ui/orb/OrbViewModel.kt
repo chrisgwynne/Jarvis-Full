@@ -39,7 +39,9 @@ class OrbViewModel : ViewModel() {
             delay(33L)
             tMs += 33L
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
+        // #40: stop the 30 fps amplitude loop when no UI is subscribed (e.g.
+        // screen off / app backgrounded) instead of computing forever.
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
 
     // ── Internal ──────────────────────────────────────────────────────────────
 

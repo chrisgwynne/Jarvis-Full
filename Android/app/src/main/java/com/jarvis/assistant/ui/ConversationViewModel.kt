@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.jarvis.assistant.memory.db.JarvisDatabase
 import com.jarvis.assistant.memory.db.entity.ConversationTurn
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,21 +19,20 @@ class ConversationViewModel(app: Application) : AndroidViewModel(app) {
     private val _turns = MutableStateFlow<List<ConversationTurn>>(emptyList())
     val turns: StateFlow<List<ConversationTurn>> = _turns.asStateFlow()
 
-    private var polling = false
+    // #40: reactive collection of a Room Flow — updates on write instead of a
+    // 1.5s busy-poll. (Method names kept so MainScreen's call sites are stable.)
+    private var collectJob: Job? = null
 
     fun startPolling() {
-        if (polling) return
-        polling = true
-        viewModelScope.launch(Dispatchers.IO) {
-            while (polling) {
-                _turns.value = dao.getRecentTurns(60)
-                delay(1_500)
-            }
+        if (collectJob != null) return
+        collectJob = viewModelScope.launch(Dispatchers.IO) {
+            dao.observeRecentTurns(60).collect { _turns.value = it }
         }
     }
 
     fun stopPolling() {
-        polling = false
+        collectJob?.cancel()
+        collectJob = null
     }
 
     fun refresh() {
@@ -44,6 +43,6 @@ class ConversationViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         super.onCleared()
-        polling = false
+        stopPolling()
     }
 }

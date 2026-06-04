@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.jarvis.assistant.memory.db.entity.ConversationSession
 import com.jarvis.assistant.memory.db.entity.ConversationTurn
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ConversationDao {
@@ -35,6 +36,14 @@ interface ConversationDao {
 
     @Query("SELECT * FROM conversation_turns ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentTurns(limit: Int): List<ConversationTurn>
+
+    /**
+     * Reactive variant of [getRecentTurns] (#40). Room re-emits whenever
+     * conversation_turns changes, so the UI updates on write instead of
+     * polling every 1.5s.
+     */
+    @Query("SELECT * FROM conversation_turns ORDER BY timestamp DESC LIMIT :limit")
+    fun observeRecentTurns(limit: Int): Flow<List<ConversationTurn>>
 
     /** Delete all turns from sessions older than [before]. */
     @Query("""
