@@ -21,7 +21,10 @@ class SavedLocationsStore(context: Context) {
 
     companion object {
         private const val TAG         = "SavedLocationsStore"
-        private const val PREFS_NAME  = "jarvis_saved_locations"
+        // #31: encrypted store (new file name); legacy plaintext file is
+        // migrated into it once, then deleted.
+        private const val PREFS_NAME    = "jarvis_saved_locations_enc"
+        private const val LEGACY_PREFS  = "jarvis_saved_locations"
 
         // Well-known label constants — match these in [HomeTool] and settings UI.
         const val LABEL_HOME = "home"
@@ -34,7 +37,9 @@ class SavedLocationsStore(context: Context) {
     }
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        com.jarvis.assistant.util.EncryptedPrefs.create(context, PREFS_NAME).also {
+            com.jarvis.assistant.util.EncryptedPrefs.migrateFromPlaintext(context, LEGACY_PREFS, it)
+        }
 
     // ── Generic save / get ────────────────────────────────────────────────────
 
@@ -114,6 +119,12 @@ class SavedLocationsStore(context: Context) {
     fun allLabels(): List<String> = prefs.all.keys
         .filter { it.startsWith("addr_") }
         .map { it.removePrefix("addr_") }
+
+    /** Wipe all saved places (covered by the app-wide data reset, #31). */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+        Log.d(TAG, "[SAVED_PLACES_CLEARED]")
+    }
 }
 
 /** A user-defined named place. */

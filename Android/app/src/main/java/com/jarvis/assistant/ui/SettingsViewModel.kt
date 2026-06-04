@@ -113,12 +113,25 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Memory management ──────────────────────────────────────────────────────
 
-    /** Wipe all memory_entries rows (summaries, preferences, facts, tasks). */
+    /**
+     * Wipe all memory_entries rows (summaries, preferences, facts, tasks) AND
+     * the user's location data (#31: saved places, learned dwell clusters, and
+     * the last geofence transition were previously not covered by any reset).
+     */
     fun clearAllMemories() {
         viewModelScope.launch(Dispatchers.IO) {
             db.memoryDao().deleteAll()
             db.memoryFactDao().deleteAll()
+            clearLocationData()
         }
+    }
+
+    /** Wipe all persisted location data (saved places + learned clusters). */
+    fun clearLocationData() {
+        val app = getApplication<Application>()
+        com.jarvis.assistant.location.SavedLocationsStore(app).clearAll()
+        com.jarvis.assistant.location.PlaceLearner(app).clearAll()
+        com.jarvis.assistant.location.SavedPlaceTransitionStore(app).clearAll()
     }
 
     /** Wipe conversation_turns + conversation_sessions only (raw dialogue history). */

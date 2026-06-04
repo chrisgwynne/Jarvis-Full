@@ -74,7 +74,10 @@ object MessagePipeline {
 
         // Shared contact lookup, bounded.
         Log.d(TAG, "[MSG_CONTACT_LOOKUP_START] name=\"$name\"")
-        val contact = withTimeoutOrNull(500L) {
+        // #27: 500 ms was too tight for an uncached full-table fuzzy scan on a
+        // large address book, so known contacts were missed. 1.5 s gives the
+        // scan time to complete. (A cached ContactLookup is the longer-term fix.)
+        val contact = withTimeoutOrNull(1_500L) {
             withContext(Dispatchers.IO) { contacts.find(name) }
         }
         val lookupElapsed = android.os.SystemClock.elapsedRealtime() - tStart

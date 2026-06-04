@@ -28,8 +28,12 @@ class PlaceLearner(
     private val minVisitsForKnown: Int = 3
 ) {
 
+    // #31: learned location clusters are sensitive — encrypt at rest and
+    // migrate any legacy plaintext file once.
     private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        com.jarvis.assistant.util.EncryptedPrefs.create(context, PREFS_NAME).also {
+            com.jarvis.assistant.util.EncryptedPrefs.migrateFromPlaintext(context, LEGACY_PREFS, it)
+        }
 
     private data class Fix(val lat: Double, val lon: Double, val atMs: Long)
 
@@ -162,7 +166,8 @@ class PlaceLearner(
     }
 
     companion object {
-        private const val PREFS_NAME = "jarvis_place_learner"
+        private const val PREFS_NAME   = "jarvis_place_learner_enc"
+        private const val LEGACY_PREFS = "jarvis_place_learner"
         private const val KEY_PLACES = "known_places"
         private const val FIELD_SEP = "|"
         private const val RECORD_SEP = "\n"

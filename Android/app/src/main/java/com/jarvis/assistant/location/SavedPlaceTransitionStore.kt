@@ -17,7 +17,9 @@ class SavedPlaceTransitionStore(context: Context) {
 
     companion object {
         private const val TAG          = "SavedPlaceTransition"
-        private const val PREFS_NAME   = "jarvis_saved_place_transitions"
+        // #31: encrypted store (new name); legacy plaintext file migrated once.
+        private const val PREFS_NAME   = "jarvis_saved_place_transitions_enc"
+        private const val LEGACY_PREFS = "jarvis_saved_place_transitions"
         private const val KEY_LABEL    = "last_label"
         private const val KEY_KIND     = "last_kind"     // "enter" / "exit"
         private const val KEY_AT       = "last_at"
@@ -26,7 +28,9 @@ class SavedPlaceTransitionStore(context: Context) {
     }
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        com.jarvis.assistant.util.EncryptedPrefs.create(context, PREFS_NAME).also {
+            com.jarvis.assistant.util.EncryptedPrefs.migrateFromPlaintext(context, LEGACY_PREFS, it)
+        }
 
     /** Record the most recent transition.  Overwrites any prior record. */
     fun record(label: String, kind: Kind, lat: Double, lon: Double, atMs: Long = System.currentTimeMillis()) {
@@ -67,6 +71,11 @@ class SavedPlaceTransitionStore(context: Context) {
             lon   = prefs.getFloat(KEY_LON, 0f).toDouble(),
             atMs  = prefs.getLong(KEY_AT, 0L),
         )
+    }
+
+    /** Wipe the stored transition (covered by the app-wide data reset, #31). */
+    fun clearAll() {
+        prefs.edit().clear().apply()
     }
 
     enum class Kind { ENTER, EXIT }
