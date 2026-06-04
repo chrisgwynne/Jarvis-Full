@@ -99,7 +99,10 @@ fun SettingsScreen(
                 vm                  = vm,
                 onBack              = popToRoot,
                 onClose             = onBack,
-                onOpenDiagnostics   = { settingsNav.navigate(SettingsCategory.DeveloperDiagnostics.route) },
+                // #74: no diagnostics link from the Mac connection screen — the
+                // Developer Diagnostics hub is gone from the graph; users fix
+                // problems via Troubleshooting instead.
+                onOpenDiagnostics   = null,
                 onOpenHomeAssistant = { settingsNav.navigate(SettingsCategory.HomeAssistant.route) },
                 onOpenCalendar      = { settingsNav.navigate(SettingsCategory.Calendar.route) },
                 onOpenTodoist       = { settingsNav.navigate(SettingsCategory.Todoist.route) },
@@ -125,15 +128,6 @@ fun SettingsScreen(
                 onClose             = onBack,
                 onOpenPermissions   = { settingsNav.navigate(SettingsCategory.Permissions.route) },
                 onOpenMacConnection = { settingsNav.navigate(SettingsCategory.MacIntegration.route) },
-            )
-        }
-
-        // ── Developer Diagnostics (consolidated, dev-only entry point) ────
-        composable(SettingsCategory.DeveloperDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.DeveloperDiagnosticsScreen(
-                onBack          = popToRoot,
-                onClose         = onBack,
-                onOpenCategory  = { settingsNav.navigate(it.route) },
             )
         }
 
@@ -207,58 +201,12 @@ fun SettingsScreen(
             )
         }
 
-        // ── Per-topic diagnostic screens (reached from
-        //    DeveloperDiagnostics, never from the root) ────────────────────
-        composable(SettingsCategory.ConnectionDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.ConnectionDiagnosticsScreen(
-                vm = vm, onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.LocalDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.LocalDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.VoiceDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.VoiceDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.VisionDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.VisionDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.AppControlDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.AppControlDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.SessionDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.SessionDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.TrustDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.TrustDiagnosticsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.MacBrainDiagnostics.route) {
-            com.jarvis.assistant.ui.settings.screens.MacBrainDiagnosticsScreen(
-                vm = vm, onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.SpeechLatency.route) {
-            com.jarvis.assistant.ui.settings.screens.SpeechLatencyScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
-        composable(SettingsCategory.ExperimentalFlags.route) {
-            com.jarvis.assistant.ui.settings.screens.ExperimentalFlagsSettingsScreen(
-                onBack = popToRoot, onClose = onBack
-            )
-        }
+        // #74: per-topic diagnostics, the Developer Diagnostics hub, and the
+        // Experimental Flags screen are intentionally NOT registered in the nav
+        // graph. They are unreachable from normal navigation and Developer Mode.
+        // The instrumentation classes (ListenerDiagnostics, LocalRouteDiagnostics,
+        // MacBrainDiagnosticsSnapshot, …) remain compiled and emitting; the
+        // Troubleshooting screen surfaces what users actually need.
 
         // ── Legacy raw-config screens (removed — route stubs kept for deep-link compat) ─────────
         composable(SettingsCategory.BrainGateway.route) {
