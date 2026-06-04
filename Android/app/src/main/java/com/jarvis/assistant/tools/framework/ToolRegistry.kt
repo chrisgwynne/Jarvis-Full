@@ -449,6 +449,9 @@ class ToolRegistry constructor(
                     add(MacCameraViewerTool(context, settings))
                     // Camera + vision tools (before OpenApp to avoid misrouting)
                     add(CameraCaptureTool(context, cameraCapture))
+                    // #57: live front-camera "mirror" (open a viewfinder, no capture).
+                    // Registered before OpenApp so "see my face" doesn't misroute.
+                    add(com.jarvis.assistant.tools.device.LiveCameraTool(context))
                     // ViewMediaTool + ShareMediaTool — discoverable via
                     // "show me the selfie", "share that photo".  Must
                     // come AFTER CameraCaptureTool so a fresh capture
