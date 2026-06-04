@@ -36,8 +36,9 @@ import kotlinx.coroutines.launch
  *
  * ## Lifecycle
  *   Started by [JarvisOverlayService.startIfPermitted] when SYSTEM_ALERT_WINDOW
- *   is granted.  Stopped via [stop] when Jarvis shuts down.  Uses START_STICKY
- *   so it recovers from process kills automatically.
+ *   is granted.  Stopped via [stop] when Jarvis shuts down.  Uses
+ *   START_NOT_STICKY — it is not a foreground service, so it is re-started
+ *   explicitly by JarvisService rather than auto-recovered with a null intent.
  *
  * ## Window management
  *   A single [ComposeView] is added to [WindowManager] with WRAP_CONTENT dimensions
@@ -114,7 +115,11 @@ class JarvisOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         Log.d(TAG, "created")
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    // #35: START_NOT_STICKY — this overlay service does NOT call startForeground,
+    // so a sticky auto-restart with a null intent would be recreated by the
+    // system expecting a foreground promotion that never comes (crash on A8+).
+    // It is restarted explicitly by JarvisService when overlays are needed.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
 
     override fun onDestroy() {
         // 1. Cancel coroutines first — no new attach / detach work after this point.

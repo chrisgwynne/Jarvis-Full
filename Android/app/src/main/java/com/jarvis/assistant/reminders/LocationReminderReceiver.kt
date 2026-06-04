@@ -106,7 +106,10 @@ class LocationReminderReceiver : BroadcastReceiver() {
             context.startForegroundService(serviceIntent)
             Log.d(TAG, "Dispatched LOCATION_REMINDER to JarvisService for: ${reminder.label}")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start JarvisService for location reminder: ${e.message}", e)
+            // #35: FGS start denied (A12+ background restriction) — fall back to
+            // the high-priority notification rather than dropping the reminder.
+            Log.e(TAG, "Failed to start JarvisService for location reminder: ${e.message} — posting notification", e)
+            postNotification(context, reminder)
         }
     }
 
