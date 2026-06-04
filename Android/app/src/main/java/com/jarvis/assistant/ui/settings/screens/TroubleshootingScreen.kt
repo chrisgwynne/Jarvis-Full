@@ -57,9 +57,9 @@ import androidx.compose.runtime.collectAsState
  * Five guided entries: Connection problem, Microphone problem, Permission
  * problem, Command failed, and Export diagnostic bundle.  Each expands to a
  * short, plain-language explanation and a single safe action.  Where a real
- * handler exists it is called (re-pair, open Permissions); otherwise the CTA
- * is a clearly-safe placeholder (the diagnostic-bundle export is stubbed until
- * `DiagnosticBundleBuilder` lands — see the deferred issue).
+ * handler exists it is called (re-pair, open Permissions, export the sanitised
+ * diagnostic bundle via `DiagnosticBundleBuilder`); a missing handler falls back
+ * to a clearly-safe placeholder.
  */
 @Composable
 internal fun TroubleshootingScreen(

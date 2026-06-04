@@ -20,6 +20,12 @@
         name="jarvis_recordings"
         path="recordings/" />
 
+    <!-- #71: sanitised diagnostic bundles written by DiagnosticBundleBuilder
+         to cacheDir/diagnostics/, shared from the Troubleshooting screen. -->
+    <cache-path
+        name="jarvis_diagnostics"
+        path="diagnostics/" />
+
     <!-- Camera output written by CameraFileStore.createImageFile to
          filesDir/pictures/.  Required so ViewMediaTool / ShareMediaTool
          can hand the captured JPEG to Gallery / Photos via FileProvider

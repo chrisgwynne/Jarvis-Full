@@ -48,6 +48,7 @@ fun SettingsScreen(
 ) {
     val settingsNav = rememberNavController()
     val popToRoot: () -> Unit = { settingsNav.popBackStack() }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     NavHost(
         navController = settingsNav,
@@ -128,6 +129,7 @@ fun SettingsScreen(
                 onClose             = onBack,
                 onOpenPermissions   = { settingsNav.navigate(SettingsCategory.Permissions.route) },
                 onOpenMacConnection = { settingsNav.navigate(SettingsCategory.MacIntegration.route) },
+                onExportBundle      = { shareDiagnosticBundle(context) },   // #71
             )
         }
 
@@ -227,5 +229,30 @@ fun SettingsScreen(
                 vm = vm, onBack = popToRoot, onClose = onBack
             )
         }
+    }
+}
+
+/**
+ * #71: build the sanitised diagnostic bundle and hand it to a share sheet via
+ * the existing FileProvider. No content/PII — see [DiagnosticBundleBuilder].
+ */
+private fun shareDiagnosticBundle(context: android.content.Context) {
+    runCatching {
+        val file = com.jarvis.assistant.diagnostics.DiagnosticBundleBuilder.writeToCache(context)
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Jarvis diagnostic bundle")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(
+            android.content.Intent.createChooser(send, "Share diagnostics")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }.onFailure {
+        android.util.Log.w("SettingsScreen", "diagnostic bundle export failed: ${it.message}")
     }
 }
