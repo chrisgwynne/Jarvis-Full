@@ -1,6 +1,7 @@
 package com.jarvis.assistant.session
 
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.session.context.ContextBundle
 
 private const val TAG = "TaskContinuationEngine"

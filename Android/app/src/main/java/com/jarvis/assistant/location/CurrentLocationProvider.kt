@@ -7,6 +7,7 @@ import android.location.Geocoder
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.jarvis.assistant.BuildConfig
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority

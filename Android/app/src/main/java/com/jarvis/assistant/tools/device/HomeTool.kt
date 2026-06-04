@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.location.CurrentLocationProvider
 import com.jarvis.assistant.location.SavedLocationsStore
 import com.jarvis.assistant.maps.DirectionsCoordinator

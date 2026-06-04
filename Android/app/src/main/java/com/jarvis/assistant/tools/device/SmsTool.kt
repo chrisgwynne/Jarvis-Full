@@ -3,6 +3,7 @@ package com.jarvis.assistant.tools.device
 import android.Manifest
 import android.content.Context
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.tools.ContactLookup
 import com.jarvis.assistant.tools.framework.Tool
 import com.jarvis.assistant.tools.framework.ToolInput

@@ -14,6 +14,7 @@ object OrbStateMapper {
         is JarvisState.WakeDetected      -> OrbVisualState.Activating
         is JarvisState.Listening         -> OrbVisualState.Listening()
         is JarvisState.Interrupted       -> OrbVisualState.Interrupted
+        is JarvisState.AwaitingRemoteReply -> OrbVisualState.Processing()
         is JarvisState.Thinking          -> OrbVisualState.Processing()
         is JarvisState.ToolRunning       -> OrbVisualState.Processing(state.toolName)
         is JarvisState.Speaking          -> OrbVisualState.Speaking()

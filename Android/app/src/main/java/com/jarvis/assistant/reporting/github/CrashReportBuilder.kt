@@ -3,6 +3,7 @@ package com.jarvis.assistant.reporting.github
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.jarvis.assistant.BuildConfig
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.text.SimpleDateFormat

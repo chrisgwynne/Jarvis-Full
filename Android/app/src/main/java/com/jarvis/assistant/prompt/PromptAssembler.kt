@@ -424,7 +424,7 @@ State time and date confidently. Never disclaim real-time access or knowledge cu
 
     fun buildSimple(): String {
         val ctx = contextEngine.build()
-        return buildSystemPrompt(contextEngine.toPromptFragment(ctx), "", emptyList())
+        return buildSystemPrompt(contextEngine.toPromptFragment(ctx), "", emptyList(), null)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

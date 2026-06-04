@@ -61,7 +61,6 @@ class JarvisReplyLogger private constructor(context: Context) {
     private val logFile: File
     private val maxBytes = 4 * 1024 * 1024L   // 4 MB cap
     private val maxEntries = 2_000
-
     private var cache: MutableList<ReplyLogEntry>? = null
 
     init {

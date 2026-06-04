@@ -3,6 +3,7 @@ package com.jarvis.assistant.location
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 
 /**
  * SavedLocationsStore — user-defined named places persisted to SharedPreferences.

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.call.CallResolver
 import com.jarvis.assistant.call.IncomingCallNumberCache
 import com.jarvis.assistant.call.ResolutionConfidence
