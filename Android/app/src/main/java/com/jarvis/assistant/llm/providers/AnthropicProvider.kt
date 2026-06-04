@@ -136,22 +136,20 @@ class AnthropicProvider(private val apiKey: String, private val maxTokens: Int =
         val toolBlocks = parsed.content
             ?.filter { it.type == "tool_use" && !it.name.isNullOrBlank() }
             ?: emptyList()
+        // #51: read the text block alongside the tool blocks — don't discard it
+        // when tools are present.
+        val sayText = parsed.content?.firstOrNull { it.type == "text" }?.text?.trim() ?: ""
+        val calls = toolBlocks.map { tb ->
+            val argsJson = NetworkClient.gson.toJson(tb.input ?: emptyMap<String, Any>())
+            LlmResult.ToolCall(toolName = tb.name!!, argsJson = argsJson)
+        }
         return when {
-            toolBlocks.size > 1 -> {
-                LlmResult.MultiToolCall(toolBlocks.map { tb ->
-                    val argsJson = NetworkClient.gson.toJson(tb.input ?: emptyMap<String, Any>())
-                    LlmResult.ToolCall(toolName = tb.name!!, argsJson = argsJson)
-                })
-            }
-            toolBlocks.size == 1 -> {
-                val tb = toolBlocks.first()
-                val argsJson = NetworkClient.gson.toJson(tb.input ?: emptyMap<String, Any>())
-                LlmResult.ToolCall(toolName = tb.name!!, argsJson = argsJson)
-            }
-            else -> {
-                val text = parsed.content?.firstOrNull { it.type == "text" }?.text?.trim() ?: ""
-                LlmResult.Text(text)
-            }
+            // Text AND tools in the same turn → carry both (empathy + action).
+            calls.isNotEmpty() && sayText.isNotEmpty() ->
+                LlmResult.Composite(say = sayText, calls = calls)
+            calls.size > 1  -> LlmResult.MultiToolCall(calls)
+            calls.size == 1 -> calls.first()
+            else            -> LlmResult.Text(sayText)
         }
     }
 

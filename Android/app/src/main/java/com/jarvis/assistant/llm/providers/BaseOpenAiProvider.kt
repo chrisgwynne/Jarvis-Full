@@ -101,17 +101,18 @@ abstract class BaseOpenAiProvider(
         val choice       = parsed.choices?.firstOrNull()
 
         val toolCalls = choice?.message?.tool_calls
+        // #51: keep the assistant's text content even when tool_calls are present.
+        val sayText = choice?.message?.content?.trim() ?: ""
+        val calls = toolCalls?.map { tc ->
+            LlmResult.ToolCall(toolName = tc.function.name, argsJson = tc.function.arguments)
+        } ?: emptyList()
         return when {
-            toolCalls != null && toolCalls.size > 1 -> {
-                LlmResult.MultiToolCall(toolCalls.map { tc ->
-                    LlmResult.ToolCall(toolName = tc.function.name, argsJson = tc.function.arguments)
-                })
-            }
-            toolCalls?.firstOrNull() != null -> {
-                val tc = toolCalls.first()
-                LlmResult.ToolCall(toolName = tc.function.name, argsJson = tc.function.arguments)
-            }
-            else -> LlmResult.Text(choice?.message?.content?.trim() ?: "")
+            // Text AND tools in the same turn → carry both (empathy + action).
+            calls.isNotEmpty() && sayText.isNotEmpty() ->
+                LlmResult.Composite(say = sayText, calls = calls)
+            calls.size > 1  -> LlmResult.MultiToolCall(calls)
+            calls.size == 1 -> calls.first()
+            else            -> LlmResult.Text(sayText)
         }
     }
 

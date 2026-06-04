@@ -4824,6 +4824,53 @@ class JarvisRuntime(
                             }
                         }
 
+                        fcResult is LlmResult.Composite -> {
+                            // #51 conversation-first: speak the empathetic/text part
+                            // immediately, THEN run the action(s) — the "empathy +
+                            // action" turn. Actions still go through the dispatcher's
+                            // confirmation gate (#26).
+                            hopsUsed++
+                            val say = fcResult.say.trim()
+                            if (say.isNotBlank()) {
+                                llmRouter.conversationStore.addMessage("assistant", say)
+                                speakAndRecord(say)
+                            }
+                            var needConfirm = false
+                            for (tc in fcResult.calls) {
+                                val tool = toolRegistry.findByName(tc.toolName) ?: continue
+                                @Suppress("UNCHECKED_CAST")
+                                val argsMap = try {
+                                    (NetworkClient.gson.fromJson(tc.argsJson, Map::class.java) as Map<*, *>)
+                                        .entries.associate { (k, v) -> k.toString() to v.toString() }
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Malformed tool args for ${tc.toolName}: ${e.message}")
+                                    emptyMap()
+                                }
+                                val d = toolDispatcher.dispatch(
+                                    tool, ToolInput(transcript, argsMap), sessionSpeaker, transcript,
+                                    confidenceTier = com.jarvis.assistant.audio.stt
+                                        .TranscriptCorrector.ConfidenceTier.HIGH,
+                                )
+                                when (d) {
+                                    is ToolDispatcher.DispatchResult.NeedsConfirmation -> {
+                                        llmRouter.conversationStore.addMessage("assistant", d.prompt)
+                                        speakAndRecord(d.prompt)
+                                        needConfirm = true
+                                    }
+                                    is ToolDispatcher.DispatchResult.Done ->
+                                        if (d.spokenFeedback.isNotBlank()) speakAndRecord(d.spokenFeedback)
+                                    is ToolDispatcher.DispatchResult.Failed ->
+                                        if (d.message.isNotBlank()) speakAndRecord(d.message)
+                                    is ToolDispatcher.DispatchResult.Denied ->
+                                        if (d.message.isNotBlank()) speakAndRecord(d.message)
+                                    else -> Unit
+                                }
+                                if (needConfirm) break
+                            }
+                            fcHandled = true
+                            break
+                        }
+
                         else -> break
                     }
                 }

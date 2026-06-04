@@ -30,6 +30,13 @@ sealed class LlmResult {
     data class ToolCall(val toolName: String, val argsJson: String) : LlmResult()
     /** The model wants to call multiple tools in parallel. */
     data class MultiToolCall(val calls: List<ToolCall>) : LlmResult()
+    /**
+     * #51 (conversation-first): the model returned BOTH a spoken reply and one
+     * or more tool calls in the same turn (the "empathy + action" shape).
+     * Providers must surface the text block alongside the tool blocks instead
+     * of discarding it. [say] is the spoken text; [calls] is the 1..n tool calls.
+     */
+    data class Composite(val say: String, val calls: List<ToolCall>) : LlmResult()
 }
 
 /**
