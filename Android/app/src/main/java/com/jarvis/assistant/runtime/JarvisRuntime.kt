@@ -359,6 +359,10 @@ class JarvisRuntime(
     // fired" inside a generic catch (CancellationException).  Reset before
     // every new response stream.
     private val bargeInFired = java.util.concurrent.atomic.AtomicBoolean(false)
+    // #22: first-token keep-alive — if the model hasn't produced a token within
+    // this window, speak one short cue so a slow response isn't dead air.
+    private val FIRST_TOKEN_KEEPALIVE_MS = 3_000L
+    private val FIRST_TOKEN_KEEPALIVE_TEXT = "One moment."
     // Instrumentation facade over ToolRegistry — emits the [ROUTE_*] logs
     // the spec asks for at every routing inflection.
     private val localFirstRouter by lazy {
@@ -4829,7 +4833,27 @@ class JarvisRuntime(
             val fullResponse    = StringBuilder()
             var speakingStarted = false
 
+            // #22: reset the barge-in flag before each new stream so a stale
+            // "true" from a previous turn can't be mistaken for an interruption.
+            bargeInFired.set(false)
+
+            // #22: first-token watchdog. If the model is slow to produce its
+            // first token the turn is otherwise dead air; surface ONE short
+            // audible "still working" cue. Cancelled the instant a token lands,
+            // and in `finally` so a barge-in cancellation can't leak it.
+            val firstTokenArrived = java.util.concurrent.atomic.AtomicBoolean(false)
+            val firstTokenWatch = scope.launch {
+                kotlinx.coroutines.delay(FIRST_TOKEN_KEEPALIVE_MS)
+                if (!firstTokenArrived.get() && settings.voiceResponse && !bargeInFired.get()) {
+                    Log.d(TAG, "[FIRST_TOKEN_SLOW] surfacing keep-alive cue")
+                    tts.speak(FIRST_TOKEN_KEEPALIVE_TEXT)
+                }
+            }
+
+            try {
             llmRouter.streamWithMessages(messages).collect { sentence ->
+                // First token landed — cancel the slow-response keep-alive.
+                if (firstTokenArrived.compareAndSet(false, true)) firstTokenWatch.cancel()
                 fullResponse.append(sentence).append(" ")
 
                 // Transition to Speaking + start barge-in detector on first sentence
@@ -4862,6 +4886,11 @@ class JarvisRuntime(
                 if (settings.voiceResponse && stillSpeaking) {
                     tts.speak(sentence)
                 }
+            }
+            } finally {
+                // Always stop the watchdog — including on a barge-in cancellation,
+                // so it can never fire its keep-alive after the stream ended.
+                firstTokenWatch.cancel()
             }
 
             if (settings.voiceResponse && speakingStarted) {
