@@ -242,26 +242,31 @@ class JarvisApp : Application() {
         featureFlagStore = com.jarvis.assistant.voice.FeatureFlagStore(this).also {
             it.loadAtStartup()
         }
+        // #43: one shared SettingsStore for all repositories. Each instance opens
+        // EncryptedSharedPreferences (Keystore + crypto init); constructing ~9 of
+        // them against the same file on the main thread was a cold-start cost.
+        // They all read/write the same file, so sharing is safe.
+        val appSettings = com.jarvis.assistant.util.SettingsStore(this)
         // Same lifecycle for the Proactivity repository — a SettingsStore
         // open + an immutable snapshot.  The Settings UI binds against its
         // StateFlow, the runtime constructs a ProactivityGate against the
         // same instance, so reads stay coherent.
         proactivitySettings = com.jarvis.assistant.proactive.settings
             .ProactivitySettingsRepository(
-                com.jarvis.assistant.util.SettingsStore(this)
+                appSettings
             )
         // Todoist repository wired to the same SettingsStore.  Cheap —
         // EncryptedSharedPreferences open is amortised across all repos.
         todoistSettings = com.jarvis.assistant.todoist.TodoistSettingsRepository(
-            com.jarvis.assistant.util.SettingsStore(this)
+            appSettings
         )
         scheduledReminderSettings = com.jarvis.assistant.proactive.scheduled
             .ScheduledReminderSettingsRepository(
-                com.jarvis.assistant.util.SettingsStore(this)
+                appSettings
             )
         personalitySettings = com.jarvis.assistant.personality
             .PersonalitySettingsRepository(
-                com.jarvis.assistant.util.SettingsStore(this)
+                appSettings
             )
         personalityLoader = com.jarvis.assistant.personality
             .PersonalityProfileLoader(this)
@@ -270,7 +275,7 @@ class JarvisApp : Application() {
         Thread { personalityLoader.load() }.start()
         wearablesSettings = com.jarvis.assistant.wearables.meta
             .WearablesSettingsRepository(
-                com.jarvis.assistant.util.SettingsStore(this)
+                appSettings
             )
         metaWearables = com.jarvis.assistant.wearables.meta
             .MetaWearablesManager(
@@ -278,7 +283,7 @@ class JarvisApp : Application() {
                 settingsProvider = { wearablesSettings.snapshot() },
             )
         ambientSettings = com.jarvis.assistant.ambient.AmbientSettingsRepository(
-            com.jarvis.assistant.util.SettingsStore(this)
+            appSettings
         )
         // ambientEmitter is created by JarvisRuntime.initialize() and assigned
         // back here via JarvisApp.ambientEmitter = ... so it is always live by
@@ -293,7 +298,7 @@ class JarvisApp : Application() {
         recentProactiveContextStore = com.jarvis.assistant.session.context.RecentProactiveContextStore()
         sessionStateEngine          = com.jarvis.assistant.session.SessionStateEngine()
         autonomySettingsRepo = com.jarvis.assistant.trust.AutonomySettingsRepository(
-            com.jarvis.assistant.util.SettingsStore(this)
+            appSettings
         )
         learnedTrustStore = com.jarvis.assistant.trust.LearnedTrustStore(this)
         autonomyEngine    = com.jarvis.assistant.trust.AutonomyEngine(
@@ -305,7 +310,7 @@ class JarvisApp : Application() {
         // user actively triggers it from Settings > Voice Diagnostics.
         // Until then, isReady() returns false and TtsEngine uses the
         // existing Android system TTS path unchanged.
-        val macBrainStore = com.jarvis.assistant.util.SettingsStore(this)
+        val macBrainStore = appSettings
         val macBrainSettingsRepo = com.jarvis.assistant.remote.brain.MacBrainSettingsRepository(macBrainStore)
         macBrainConnectionManager = com.jarvis.assistant.remote.brain.MacBrainConnectionManager(
             context      = this,
@@ -318,20 +323,23 @@ class JarvisApp : Application() {
         // Note: a local SettingsStore instance is used here intentionally — it
         // shares the same EncryptedSharedPreferences file as all other stores but
         // avoids coupling this init site to any specific repository.
-        val overlaySettingsStore = com.jarvis.assistant.util.SettingsStore(this)
+        val overlaySettingsStore = appSettings
         com.jarvis.assistant.overlay.OverlayPolicy.configure(
             overlaysEnabled  = { overlaySettingsStore.overlaysEnabled },
             haAlertsEnabled  = { proactivitySettings.snapshot().homeAssistantAlertsEnabled },
             bridgeModeActive = { false },
         )
 
-        piperVoiceManager = com.jarvis.assistant.voice.piper.PiperVoiceManager(this).also {
-            // Install the production phonemiser at boot.  SherpaPiperPhonemizer
-            // uses the pure-Kotlin G2P pipeline which is bundled with the APK.
-            it.installPhonemizer(
+        piperVoiceManager = com.jarvis.assistant.voice.piper.PiperVoiceManager(this)
+        // #43: install the production phonemiser OFF the main thread — building
+        // the pure-Kotlin G2P pipeline (SherpaPiperPhonemizer) touches bundled
+        // assets and was synchronous in onCreate. TTS uses the Android system
+        // voice until Piper reports ready, so deferring this is safe.
+        Thread {
+            piperVoiceManager.installPhonemizer(
                 com.jarvis.assistant.voice.piper.SherpaPiperPhonemizer(this)
             )
-        }
+        }.start()
 
         // Federation manager — disabled by default; start/stop owned by JarvisService.
         // Config is intentionally minimal here: host + auth come from a future
