@@ -4641,27 +4641,77 @@ class JarvisRuntime(
                             }
 
                             val callList = fcResult.calls
-                            val feedbacks = coroutineScope {
-                                callList.map { tc ->
-                                    async<String?>(Dispatchers.IO) {
-                                        val tool = toolRegistry.findByName(tc.toolName) ?: return@async null
-                                        @Suppress("UNCHECKED_CAST")
-                                        val argsMap = try {
-                                            (NetworkClient.gson.fromJson(tc.argsJson, Map::class.java) as Map<*, *>)
-                                                .entries.associate { (k, v) -> k.toString() to v.toString() }
-                                        } catch (e: Exception) {
-                                            Log.w(TAG, "Malformed tool args for ${tc.toolName}: ${e.message}")
-                                            emptyMap()
-                                        }
-                                        val result = toolRegistry.execute(context, tool, ToolInput(transcript, argsMap))
-                                        val fb = when (result) {
-                                            is ToolResult.Success -> result.spokenFeedback
-                                            is ToolResult.Failure -> result.spokenFeedback
-                                            else -> null
-                                        }
-                                        fb?.let { "[${tool.name}]: $it" }
+
+                            // #26: if any call in the batch is an irreversible
+                            // (non-LOW risk) tool, it must NOT auto-run in parallel.
+                            // Route the batch sequentially through the dispatcher so
+                            // the risky step hits the confirmation gate.
+                            val anyRisky = callList.any {
+                                (toolRegistry.findByName(it.toolName)?.riskClass
+                                    ?: com.jarvis.assistant.tools.framework.RiskClass.LOW) !=
+                                    com.jarvis.assistant.tools.framework.RiskClass.LOW
+                            }
+
+                            val feedbacks: List<String> = if (anyRisky) {
+                                val acc = mutableListOf<String>()
+                                var needConfirm = false
+                                for (tc in callList) {
+                                    val tool = toolRegistry.findByName(tc.toolName) ?: continue
+                                    @Suppress("UNCHECKED_CAST")
+                                    val argsMap = try {
+                                        (NetworkClient.gson.fromJson(tc.argsJson, Map::class.java) as Map<*, *>)
+                                            .entries.associate { (k, v) -> k.toString() to v.toString() }
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "Malformed tool args for ${tc.toolName}: ${e.message}")
+                                        emptyMap()
                                     }
-                                }.awaitAll().filterNotNull()
+                                    val d = toolDispatcher.dispatch(
+                                        tool, ToolInput(transcript, argsMap), sessionSpeaker, transcript,
+                                        confidenceTier = com.jarvis.assistant.audio.stt
+                                            .TranscriptCorrector.ConfidenceTier.HIGH,
+                                    )
+                                    when (d) {
+                                        is ToolDispatcher.DispatchResult.NeedsConfirmation -> {
+                                            llmRouter.conversationStore.addMessage("assistant", d.prompt)
+                                            speakAndRecord(d.prompt)
+                                            fcHandled = true
+                                            needConfirm = true
+                                        }
+                                        is ToolDispatcher.DispatchResult.Done ->
+                                            if (d.spokenFeedback.isNotBlank()) acc.add("[${tool.name}]: ${d.spokenFeedback}")
+                                        is ToolDispatcher.DispatchResult.Failed ->
+                                            if (d.message.isNotBlank()) acc.add("[${tool.name}]: ${d.message}")
+                                        is ToolDispatcher.DispatchResult.Denied ->
+                                            if (d.message.isNotBlank()) acc.add("[${tool.name}]: ${d.message}")
+                                        else -> Unit
+                                    }
+                                    if (needConfirm) break  // stop the batch; await user confirmation
+                                }
+                                if (needConfirm) break       // exit the agentic chain loop
+                                acc
+                            } else {
+                                coroutineScope {
+                                    callList.map { tc ->
+                                        async<String?>(Dispatchers.IO) {
+                                            val tool = toolRegistry.findByName(tc.toolName) ?: return@async null
+                                            @Suppress("UNCHECKED_CAST")
+                                            val argsMap = try {
+                                                (NetworkClient.gson.fromJson(tc.argsJson, Map::class.java) as Map<*, *>)
+                                                    .entries.associate { (k, v) -> k.toString() to v.toString() }
+                                            } catch (e: Exception) {
+                                                Log.w(TAG, "Malformed tool args for ${tc.toolName}: ${e.message}")
+                                                emptyMap()
+                                            }
+                                            val result = toolRegistry.execute(context, tool, ToolInput(transcript, argsMap))
+                                            val fb = when (result) {
+                                                is ToolResult.Success -> result.spokenFeedback
+                                                is ToolResult.Failure -> result.spokenFeedback
+                                                else -> null
+                                            }
+                                            fb?.let { "[${tool.name}]: $it" }
+                                        }
+                                    }.awaitAll().filterNotNull()
+                                }
                             }
 
                             if (feedbacks.isEmpty() || hopsUsed >= MAX_TOOL_HOPS) {
@@ -4690,25 +4740,62 @@ class JarvisRuntime(
                                 emptyMap()
                             }
 
-                            val result = toolRegistry.execute(context, tool, ToolInput(transcript, argsMap))
-                            val feedback = when (result) {
-                                is ToolResult.Success -> result.spokenFeedback
-                                is ToolResult.Failure -> result.spokenFeedback
-                                else -> null
-                            }
-
-                            if (feedback == null || result is ToolResult.Failure || hopsUsed >= MAX_TOOL_HOPS) {
-                                // Failure or chain cap — deliver raw feedback and stop
-                                if (feedback != null) {
-                                    llmRouter.conversationStore.addMessage("assistant", feedback)
-                                    speakAndRecord(feedback)
+                            // #26: route LLM-invoked tools through the dispatcher so
+                            // irreversible actions (call/SMS/WhatsApp) hit the same
+                            // confirmation gate as the deterministic path instead of
+                            // executing unconfirmed via toolRegistry.execute().
+                            val dispatch = toolDispatcher.dispatch(
+                                tool,
+                                ToolInput(transcript, argsMap),
+                                sessionSpeaker,
+                                transcript,
+                                confidenceTier = com.jarvis.assistant.audio.stt
+                                    .TranscriptCorrector.ConfidenceTier.HIGH,
+                            )
+                            when (dispatch) {
+                                is ToolDispatcher.DispatchResult.NeedsConfirmation -> {
+                                    Log.d(TAG, "[CONFIRMATION_LISTEN_STARTED] tool=${dispatch.toolName} " +
+                                        "pending=${dispatch.pendingId} (via LLM tool-call)")
+                                    llmRouter.conversationStore.addMessage("assistant", dispatch.prompt)
+                                    speakAndRecord(dispatch.prompt)
                                     fcHandled = true
+                                    break
                                 }
-                                break
+                                is ToolDispatcher.DispatchResult.Denied -> {
+                                    llmRouter.conversationStore.addMessage("assistant", dispatch.message)
+                                    speakAndRecord(dispatch.message)
+                                    fcHandled = true
+                                    break
+                                }
+                                is ToolDispatcher.DispatchResult.Failed -> {
+                                    if (dispatch.message.isNotBlank()) {
+                                        llmRouter.conversationStore.addMessage("assistant", dispatch.message)
+                                        speakAndRecord(dispatch.message)
+                                        fcHandled = true
+                                    }
+                                    break
+                                }
+                                is ToolDispatcher.DispatchResult.Done -> {
+                                    val feedback = dispatch.spokenFeedback
+                                    if (feedback.isBlank() || hopsUsed >= MAX_TOOL_HOPS) {
+                                        if (feedback.isNotBlank()) {
+                                            llmRouter.conversationStore.addMessage("assistant", feedback)
+                                            speakAndRecord(feedback)
+                                            fcHandled = true
+                                        }
+                                        break
+                                    }
+                                    // Inject tool result so the LLM can chain or wrap up.
+                                    chainMessages.add(Message("assistant", "[${tool.name}]: $feedback"))
+                                }
+                                is ToolDispatcher.DispatchResult.SilentExit,
+                                is ToolDispatcher.DispatchResult.AugmentedLlm,
+                                is ToolDispatcher.DispatchResult.LlmFollowUp -> {
+                                    // Tool handled it silently / wants LLM wrap-up — end
+                                    // the agentic chain and let the streaming path follow.
+                                    break
+                                }
                             }
-
-                            // Inject tool result so the LLM can decide to chain or wrap up
-                            chainMessages.add(Message("assistant", "[${tool.name}]: $feedback"))
                         }
 
                         else -> break
