@@ -1552,6 +1552,16 @@ class JarvisRuntime(
                 }
                 VocabularyBiaser.setRuntimeVocab(contacts = contactNames, apps = appLabels)
                 Log.d(TAG, "[STT_VOCAB_LOADED] contacts=${contactNames.size} apps=${appLabels.size}")
+                // #23: also refresh HA rooms/devices here (was startup-only).
+                try {
+                    val base  = settings.haBaseUrl
+                    val token = settings.haApiToken
+                    val haClient = if (base.isBlank() || token.isBlank()) null
+                        else com.jarvis.assistant.tools.smart.HomeAssistantClient(base, token)
+                    com.jarvis.assistant.audio.stt.HomeAssistantVocabRefresher.refresh(haClient)
+                } catch (e: Exception) {
+                    Log.w(TAG, "HA vocab refresh (promote) failed: ${e.message}")
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "STT vocab population failed: ${e.message}")
             }

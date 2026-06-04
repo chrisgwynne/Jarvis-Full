@@ -433,6 +433,17 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 HomeAssistantClient(store.haBaseUrl, store.haApiToken).testConnection()
             } catch (_: Exception) { false }
             _haConnectionStatus.value = if (ok) "Connected" else "Unreachable — check URL and token"
+            if (ok) {
+                // #23: as soon as HA creds verify, pull rooms/devices into the
+                // STT vocab biaser so entity names are recognised without an
+                // app restart.
+                launch(Dispatchers.IO) {
+                    try {
+                        com.jarvis.assistant.audio.stt.HomeAssistantVocabRefresher.refresh(
+                            HomeAssistantClient(store.haBaseUrl, store.haApiToken))
+                    } catch (_: Exception) { }
+                }
+            }
         }
     }
 
