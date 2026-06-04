@@ -54,6 +54,12 @@ class LookAtThisIntentHandler(
     override val name            = "look_at_this"
     override val description     = "Analyses the current screen and remembers what's on it"
     override val requiresNetwork = true   // the vision call hits the LLM provider
+    // #28: screen capture itself is device-local, so the tool must stay
+    // reachable offline rather than being silently dropped at match() time.
+    // When there's no connection the capture still succeeds and execute()
+    // returns a graceful "need a connection to analyse" rather than a
+    // silent no-match.
+    override val isLocalFallback = true
     override val requiredPermissions: List<String> = emptyList()
 
     override fun schema() = ToolSchema(
@@ -118,7 +124,12 @@ class LookAtThisIntentHandler(
             is VisionScreenAnalyzer.Result.Success -> r.analysis
             is VisionScreenAnalyzer.Result.Failure -> {
                 Log.w(TAG, "Analyze failed: ${r.reason}")
-                return ToolResult.Failure("I got the screenshot but couldn't read it.")
+                // The capture is local but the analysis needs the vision
+                // provider — offline (or a provider error) lands here. Give a
+                // connection-aware reply instead of a silent failure (#28).
+                return ToolResult.Failure(
+                    "I grabbed your screen but need a connection to analyse it."
+                )
             }
         }
 
