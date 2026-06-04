@@ -120,10 +120,13 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             if (!isRunning) {
                 JarvisService.start(context)
             } else when (visualState) {
+                // Active turn — calm cancel.
                 is OrbVisualState.Listening,
-                is OrbVisualState.WakeListening,
                 is OrbVisualState.Speaking,
                 is OrbVisualState.Processing -> JarvisService.silence(context)
+                // Idle / passively waiting for the wake word — open the mic
+                // (press-to-talk). WakeListening must NOT fall into silence(),
+                // or an idle tap is a no-op.
                 else -> JarvisService.manualTrigger(context)
             }
         },

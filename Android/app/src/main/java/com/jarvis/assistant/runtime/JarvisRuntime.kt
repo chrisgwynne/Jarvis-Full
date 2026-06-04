@@ -395,7 +395,12 @@ class JarvisRuntime(
     private val audioManager =
         context.getSystemService(android.media.AudioManager::class.java)
     private val bargeIn        = BargeInDetector(
-        onBargeIn = { voicePipeline.handleBargeIn() },
+        // #20: point at the runtime's own handler — it snapshots the LIVE
+        // streaming buffers (currentSpokenSoFar/PendingTail) and sets the
+        // `lastInterrupted` that the conversation loop actually reads. The old
+        // voicePipeline.handleBargeIn() wrote a separate, always-empty buffer
+        // on an object whose streamAndSpeak is still a stub, so resume was dead.
+        onBargeIn = { handleBargeIn() },
         // #21: profile-aware thresholds (close headset vs loudspeaker bleed) +
         // an echo guard that only keeps monitoring while TTS is genuinely
         // playing.  Both are lambdas evaluated at start()/loop time, so the

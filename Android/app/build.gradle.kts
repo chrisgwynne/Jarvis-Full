@@ -32,7 +32,12 @@ android {
         // an optional separate module, this can drop back to 26 for
         // the core APK.
         minSdk = 29
-        targetSdk = 34
+        // targetSdk tracks compileSdk (35). Play requires targetSdk >= 35 for
+        // updates; running below it hid Android 15 behaviour (FGS timeouts,
+        // edge-to-edge enforcement, exact-alarm changes) behind compat mode.
+        // Bumped 34 -> 35 2026-06-04. Re-validate FGS start ladder + insets on
+        // an API-35 device.
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
 
