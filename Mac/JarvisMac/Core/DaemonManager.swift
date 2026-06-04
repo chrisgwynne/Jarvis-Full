@@ -61,6 +61,10 @@ final class DaemonManager: ObservableObject {
     @Published var daemonUptimeSeconds: Double = 0
     @Published var portOwner: PortOwnerInfo = PortOwnerInfo(pid: nil, processName: nil, owner: .nobody)
     @Published var lastLaunchctlError: String = ""
+    /// MAC-4 (#34): when true, the installed daemon is launched with
+    /// JARVIS_DAEMON_BIND_LOCAL=1 so it binds to loopback only. Synced from the
+    /// `brainServerBindLocalOnly` preference; takes effect on (re)install.
+    @Published var bindLocalOnly: Bool = false
 
     private let plistLabel = "com.jarvis.brain"
     private var pollTimer: Timer?
@@ -299,6 +303,11 @@ final class DaemonManager: ObservableObject {
             <array>
                 <string>\(binaryPath)</string>
             </array>
+            <key>EnvironmentVariables</key>
+            <dict>
+                <key>JARVIS_DAEMON_BIND_LOCAL</key>
+                <string>\(bindLocalOnly ? "1" : "0")</string>
+            </dict>
             <key>RunAtLoad</key>
             <true/>
             <key>KeepAlive</key>

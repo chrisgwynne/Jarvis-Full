@@ -5696,6 +5696,9 @@ final class JarvisController {
             port: prefs.current.brainServerPort,
             bindLocalOnly: prefs.current.brainServerBindLocalOnly
         )
+        // MAC-4 (#34): mirror the setting to the daemon so a (re)install launches
+        // it bound to loopback only when requested.
+        DaemonManager.shared.bindLocalOnly = prefs.current.brainServerBindLocalOnly
         brainServer = server
     }
 
