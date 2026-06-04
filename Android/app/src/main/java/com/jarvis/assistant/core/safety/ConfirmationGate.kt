@@ -91,6 +91,17 @@ class ConfirmationGate(
      * verb), the pending is also dropped as implicitly declined so the
      * user doesn't get stuck in a confirmation they've moved on from.
      */
+    /**
+     * Non-destructive check for an outstanding (non-expired) confirmation.
+     * #18: the Mac-brain relay consults this so a pending "are you sure?" is
+     * consumed locally instead of being forwarded to the brain.
+     */
+    fun hasPending(): Boolean {
+        val now = nowMs()
+        expireStale(now)
+        return pendings.values.any { it.expiresAtMs > now }
+    }
+
     fun consume(utterance: String): Verdict {
         val now = nowMs()
         expireStale(now)

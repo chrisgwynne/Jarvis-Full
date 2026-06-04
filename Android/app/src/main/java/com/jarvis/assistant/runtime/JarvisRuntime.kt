@@ -2441,10 +2441,32 @@ class JarvisRuntime(
                     // When connected to the Mac brain daemon, forward the transcript
                     // there and block STT until reply.final arrives.
                     // handleRemoteReply() will call speakAndRecord() then restart wake.
-                    if (com.jarvis.assistant.remote.brain.MacBrainConnectionManager.sharedStatus.value ==
-                            com.jarvis.assistant.remote.brain.MacBrainStatus.Connected
-                        && transcript.isNotBlank()
-                    ) {
+                    //
+                    // #18: local-first when paired. Do NOT relay (keep the turn
+                    // local) when the utterance is something the phone must handle
+                    // itself:
+                    //   • a pending confirmation ("yes"/"no") — relaying it orphans
+                    //     the local pending and the confirmation never resolves;
+                    //   • a phone-capable intent (call/SMS/WhatsApp/navigation) —
+                    //     the Mac can't drive the phone's radio/dialer;
+                    //   • an allowlisted instant local command (volume, flashlight,
+                    //     time…) — relaying adds latency and fails offline.
+                    val macConnected = com.jarvis.assistant.remote.brain
+                        .MacBrainConnectionManager.sharedStatus.value ==
+                        com.jarvis.assistant.remote.brain.MacBrainStatus.Connected
+                    val mustHandleLocally = macConnected && transcript.isNotBlank() && (
+                        confirmationGate.hasPending() ||
+                        com.jarvis.assistant.voice.routing.PhoneCapableIntents
+                            .looksPhoneCapable(transcript) ||
+                        instantCommandRouter.route(transcript, contextEngine.isOnline())
+                            is com.jarvis.assistant.voice.routing
+                                .InstantCommandRouter.InstantRouteResult.Match
+                    )
+                    if (mustHandleLocally) {
+                        Log.d(TAG, "[MAC_RELAY_SKIPPED] local-first: handling on-device " +
+                            "(pending/phone-capable/instant) despite Mac connected")
+                    }
+                    if (macConnected && transcript.isNotBlank() && !mustHandleLocally) {
                         val routeId = java.util.UUID.randomUUID().toString()
                         pendingRemoteRouteId = routeId
                         com.jarvis.assistant.reliability.ListenerDiagnostics.pendingRemoteRouteId = routeId
