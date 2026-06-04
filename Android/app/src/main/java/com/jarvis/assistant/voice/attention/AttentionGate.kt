@@ -1,6 +1,7 @@
 package com.jarvis.assistant.voice.attention
 
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.modes.JarvisMode
 import com.jarvis.assistant.voice.VoiceFeatureFlags
 
@@ -54,6 +55,10 @@ class AttentionGate {
 
     companion object {
         private const val TAG = "AttentionGate"
+
+        /** #29: log the full transcript only in debug; length-only in release. */
+        private fun redact(s: String): String =
+            if (BuildConfig.DEBUG) "\"$s\"" else "[${s.length} chars]"
 
         /**
          * NORMAL-mode ACCEPT bar.  Retuned much lower so command-like
@@ -111,13 +116,13 @@ class AttentionGate {
         }
 
         val t = signals.transcript.trim()
-        Log.d(TAG, "[ATTENTION_TRANSCRIPT_RECEIVED] \"$t\" stt_conf=${signals.sttConfidence} " +
+        Log.d(TAG, "[ATTENTION_TRANSCRIPT_RECEIVED] ${redact(t)} stt_conf=${signals.sttConfidence} " +
             "mode=${signals.mode} active_window=${isInActiveWindow(signals.nowMs)} " +
             "tts_active=${signals.isTtsActive} call=${signals.isInCall}")
 
         // ── Hard short-circuits (always IGNORE, regardless of score) ─────────
         if (signals.looksLikeNotificationText) {
-            Log.d(TAG, "[ATTENTION_REJECTED_NOTIFICATION_TEXT] \"$t\"")
+            Log.d(TAG, "[ATTENTION_REJECTED_NOTIFICATION_TEXT] ${redact(t)}")
             return AttentionDecision.Ignore(
                 target = ConversationTarget.BACKGROUND,
                 reason = "notification_text",
@@ -126,7 +131,7 @@ class AttentionGate {
         }
 
         if (isTtsEcho(t, signals.lastTtsText)) {
-            Log.d(TAG, "[ATTENTION_REJECTED_TTS_ECHO] \"$t\"")
+            Log.d(TAG, "[ATTENTION_REJECTED_TTS_ECHO] ${redact(t)}")
             return AttentionDecision.Ignore(
                 target = ConversationTarget.BACKGROUND,
                 reason = "tts_echo",
@@ -135,7 +140,7 @@ class AttentionGate {
         }
 
         if (signals.isInCall) {
-            Log.d(TAG, "[ATTENTION_IGNORED_BACKGROUND] phone_call_active \"$t\"")
+            Log.d(TAG, "[ATTENTION_IGNORED_BACKGROUND] phone_call_active ${redact(t)}")
             return AttentionDecision.Ignore(
                 target = ConversationTarget.HUMAN,
                 reason = "phone_call_active",
@@ -145,7 +150,7 @@ class AttentionGate {
 
         // ── Hard short-circuits (always ACCEPT) ──────────────────────────────
         if (containsWakeWord(t)) {
-            Log.d(TAG, "[ATTENTION_ACCEPTED] explicit_wake_word \"$t\"")
+            Log.d(TAG, "[ATTENTION_ACCEPTED] explicit_wake_word ${redact(t)}")
             return AttentionDecision.Accept(
                 target = ConversationTarget.JARVIS,
                 reason = "explicit_wake_word",
@@ -154,7 +159,7 @@ class AttentionGate {
         }
 
         if (signals.isTtsActive && isBargeInPhrase(t)) {
-            Log.d(TAG, "[ATTENTION_ACCEPTED] barge_in_phrase \"$t\"")
+            Log.d(TAG, "[ATTENTION_ACCEPTED] barge_in_phrase ${redact(t)}")
             return AttentionDecision.Accept(
                 target = ConversationTarget.JARVIS,
                 reason = "barge_in_phrase",
@@ -167,7 +172,7 @@ class AttentionGate {
         // timer for…", etc.), the user's intent is unambiguous — accept without
         // forcing them to wait for a confirmation prompt.
         if (matchesCommandPattern(t)) {
-            Log.d(TAG, "[ATTENTION_ACCEPTED_COMMAND_PATTERN] \"$t\"")
+            Log.d(TAG, "[ATTENTION_ACCEPTED_COMMAND_PATTERN] ${redact(t)}")
             return AttentionDecision.Accept(
                 target = ConversationTarget.JARVIS,
                 reason = "command_pattern_short_circuit",
@@ -180,7 +185,7 @@ class AttentionGate {
         // confirm.  This used to score +1.2 and was often the difference
         // between ACCEPT and Ask; bypassing the score entirely is safer.
         if (signals.localCommandMatch) {
-            Log.d(TAG, "[ATTENTION_ACCEPTED_TOOL_MATCH] tool=${signals.localCommandToolName} \"$t\"")
+            Log.d(TAG, "[ATTENTION_ACCEPTED_TOOL_MATCH] tool=${signals.localCommandToolName} ${redact(t)}")
             return AttentionDecision.Accept(
                 target = ConversationTarget.JARVIS,
                 reason = "local_tool_match(${signals.localCommandToolName})",
@@ -277,17 +282,17 @@ class AttentionGate {
                 inWindow -> "[ATTENTION_ACCEPTED_ACTIVE_WINDOW]"
                 else     -> "[ATTENTION_ACCEPTED]"
             }
-            Log.d(TAG, "$reasonTag score=${"%.2f".format(score)} bar=$acceptBar \"$text\"")
+            Log.d(TAG, "$reasonTag score=${"%.2f".format(score)} bar=$acceptBar ${redact(text)}")
             return AttentionDecision.Accept(ConversationTarget.JARVIS, reason, score)
         }
 
         if (HumanConversationPatterns.strongMatch(text)) {
-            Log.d(TAG, "[ATTENTION_IGNORED_HUMAN] \"$text\" score=${"%.2f".format(score)}")
+            Log.d(TAG, "[ATTENTION_IGNORED_HUMAN] ${redact(text)} score=${"%.2f".format(score)}")
             return AttentionDecision.Ignore(ConversationTarget.HUMAN, reason, score)
         }
 
         if (score <= IGNORE_THRESHOLD) {
-            Log.d(TAG, "[ATTENTION_IGNORED_BACKGROUND] score=${"%.2f".format(score)} \"$text\"")
+            Log.d(TAG, "[ATTENTION_IGNORED_BACKGROUND] score=${"%.2f".format(score)} ${redact(text)}")
             return AttentionDecision.Ignore(ConversationTarget.HUMAN, reason, score)
         }
 
@@ -301,11 +306,11 @@ class AttentionGate {
 
         return if (askEligible) {
             Log.d(TAG, "[ATTENTION_ASK_TRUE_AMBIGUITY] score=${"%.2f".format(score)} " +
-                "tokens=$tokenCount window=$inWindow recent=$recentlySpoken \"$text\"")
+                "tokens=$tokenCount window=$inWindow recent=$recentlySpoken ${redact(text)}")
             AttentionDecision.AskIfForMe(ConversationTarget.UNKNOWN, reason, score)
         } else {
             Log.d(TAG, "[ATTENTION_IGNORED_BACKGROUND] score=${"%.2f".format(score)} " +
-                "no_momentum tokens=$tokenCount \"$text\"")
+                "no_momentum tokens=$tokenCount ${redact(text)}")
             AttentionDecision.Ignore(ConversationTarget.UNKNOWN, reason, score)
         }
     }

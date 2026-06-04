@@ -3,6 +3,7 @@ package com.jarvis.assistant.tools.device
 import android.Manifest
 import android.content.Context
 import android.util.Log
+import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.audio.recording.AudioRecordingManager
 import com.jarvis.assistant.audio.recording.RecordingFileStore
 import com.jarvis.assistant.audio.recording.RecordingResult
@@ -163,7 +164,12 @@ class AudioRecordingTool(
 
         return try {
             val transcript = withContext(Dispatchers.IO) { transcriber.transcribe(file) }
-            Log.d(TAG, "Transcript (${transcript.length} chars): ${transcript.take(80)}…")
+            // #29: never log transcript content in release builds.
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Transcript (${transcript.length} chars): ${transcript.take(80)}…")
+            } else {
+                Log.d(TAG, "Transcript (${transcript.length} chars)")
+            }
 
             if (summarize) {
                 // Feed the full transcript to the LLM as the new query.
