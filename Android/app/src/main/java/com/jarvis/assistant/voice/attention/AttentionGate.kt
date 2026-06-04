@@ -286,6 +286,17 @@ class AttentionGate {
             return AttentionDecision.Accept(ConversationTarget.JARVIS, reason, score)
         }
 
+        // #56 conversation-first: in an ACTIVE session, conversation is the
+        // default. The hard signals (notification text, TTS echo, phone-call
+        // audio) already short-circuited to Ignore before scoring; anything
+        // still here inside the active window is genuine conversation — accept
+        // it and let the response composer decide, rather than dropping a
+        // reflective, command-less utterance ("it's been one of those weeks").
+        if (inWindow) {
+            Log.d(TAG, "[ATTENTION_ACCEPTED_IN_SESSION] score=${"%.2f".format(score)} ${redact(text)}")
+            return AttentionDecision.Accept(ConversationTarget.JARVIS, reason, score)
+        }
+
         if (HumanConversationPatterns.strongMatch(text)) {
             Log.d(TAG, "[ATTENTION_IGNORED_HUMAN] ${redact(text)} score=${"%.2f".format(score)}")
             return AttentionDecision.Ignore(ConversationTarget.HUMAN, reason, score)
