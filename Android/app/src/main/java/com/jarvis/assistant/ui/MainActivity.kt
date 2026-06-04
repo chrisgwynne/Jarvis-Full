@@ -91,21 +91,33 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val permissionState = rememberMultiplePermissionsState(runtimePermissions)
+                // #42: gate the app on CORE permissions only (mic + notifications)
+                // so a declined optional permission (SMS/Call/Contacts/Location)
+                // no longer blocks the entire app. The optional ones are still
+                // offered on "Continue"; features that need them check at use time.
+                val corePermissions = buildList {
+                    add(Manifest.permission.RECORD_AUDIO)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+                val coreState = rememberMultiplePermissionsState(corePermissions)
+                val fullState = rememberMultiplePermissionsState(runtimePermissions)
 
                 // Battery optimisation dialog state
                 var showBatteryDialog by remember { mutableStateOf(false) }
 
-                // Once all runtime permissions granted, check battery optimisation
-                LaunchedEffect(permissionState.allPermissionsGranted) {
-                    if (permissionState.allPermissionsGranted) {
+                // Once core permissions are granted, the app is usable.
+                LaunchedEffect(coreState.allPermissionsGranted) {
+                    if (coreState.allPermissionsGranted) {
                         showBatteryDialog = !isBatteryOptimisationIgnored()
                     }
                 }
 
-                if (!permissionState.allPermissionsGranted) {
+                if (!coreState.allPermissionsGranted) {
                     PermissionRationaleScreen(
-                        onRequest = { permissionState.launchMultiplePermissionRequest() }
+                        onRequest = { fullState.launchMultiplePermissionRequest() },
+                        onOpenSettings = { openAppSettings() },
                     )
                 } else {
                     // All permissions granted — show app
@@ -156,6 +168,16 @@ class MainActivity : ComponentActivity() {
         }
         startActivity(intent)
     }
+
+    /** #42: deep-link to this app's settings so a permanently-denied permission
+     *  can be re-granted (the runtime dialog no longer appears once "Don't ask
+     *  again" was chosen). */
+    private fun openAppSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivity(intent)
+    }
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -177,7 +199,10 @@ private fun AppNavHost() {
 // ── Permission rationale screen ────────────────────────────────────────────────
 
 @Composable
-private fun PermissionRationaleScreen(onRequest: () -> Unit) {
+private fun PermissionRationaleScreen(
+    onRequest: () -> Unit,
+    onOpenSettings: () -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
@@ -235,6 +260,14 @@ private fun PermissionRationaleScreen(onRequest: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            // #42: if a permission was permanently denied ("Don't ask again"),
+            // the system dialog won't reappear — give a direct path to Settings.
+            androidx.compose.material3.TextButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                Text("Already denied? Open Settings")
+            }
         }
     }
 }
