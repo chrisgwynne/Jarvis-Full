@@ -21,25 +21,29 @@ enum DaemonRoutes {
 // Each layer is independent so the UI can show exactly where the failure is.
 
 enum BrainConnectionStatus: Equatable {
-    case notConfigured                          // no URL set
-    case connecting                             // first attempt
-    case connected                              // WS open, pings succeeding
-    case reconnecting(attempt: Int, delaySecs: Int) // dropped, retrying
-    case offline(reason: String)               // cannot reach daemon at all
-    case wrongURL(detail: String)              // DNS/TCP failure
+    case notConfigured                               // no URL set
+    case connecting                                  // first attempt
+    case connected                                   // WS open, pings succeeding
+    case reconnecting(attempt: Int, delaySecs: Int)  // dropped, retrying
+    case offline(reason: String)                     // cannot reach daemon at all
+    case wrongURL(detail: String)                    // DNS/TCP failure
     case incompatible(expected: String, got: String) // version mismatch
-    case databaseDegraded                      // WS connected, brain DB unhealthy
+    case databaseDegraded                            // WS connected, brain DB unhealthy
+    /// A daemon is running on the port but it is an older build that requires auth.
+    /// Reconnecting endlessly is pointless — the daemon must be replaced first.
+    case staleDaemon(detail: String)
 
     var shortLabel: String {
         switch self {
-        case .notConfigured:             return "Not configured"
-        case .connecting:                return "Connecting…"
-        case .connected:                 return "Connected"
-        case .reconnecting(let a, let d):return "Reconnecting… (attempt \(a), wait \(d)s)"
-        case .offline(let r):            return "Offline — \(r)"
-        case .wrongURL(let d):           return "Wrong URL — \(d)"
-        case .incompatible(let e, let g):return "Incompatible (expected \(e), got \(g))"
-        case .databaseDegraded:          return "Connected — Brain database degraded"
+        case .notConfigured:              return "Not configured"
+        case .connecting:                 return "Connecting…"
+        case .connected:                  return "Connected"
+        case .reconnecting(let a, let d): return "Reconnecting… (attempt \(a), wait \(d)s)"
+        case .offline(let r):             return "Offline — \(r)"
+        case .wrongURL(let d):            return "Wrong URL — \(d)"
+        case .incompatible(let e, let g): return "Incompatible (expected \(e), got \(g))"
+        case .databaseDegraded:           return "Connected — Brain database degraded"
+        case .staleDaemon(let d):         return "Stale daemon — \(d)"
         }
     }
 
@@ -54,6 +58,13 @@ enum BrainConnectionStatus: Equatable {
         case .offline, .wrongURL, .incompatible, .notConfigured: return true
         default: return false
         }
+    }
+
+    /// When true, reconnection retries are permanently stopped until the user acts.
+    /// (Retrying against a stale auth daemon would never succeed.)
+    var isTerminal: Bool {
+        if case .staleDaemon = self { return true }
+        return false
     }
 }
 
@@ -227,6 +238,14 @@ final class DaemonAppBridge: ObservableObject {
         connection?.cancel(with: .normalClosure, reason: nil)
         connection = nil
         isConnected = false
+
+        // If diagnostics already identified a terminal failure (e.g. stale daemon),
+        // do not retry — the user must take action first.
+        if connectionStatus.isTerminal {
+            logger.info("[BrainConnection] terminal failure — reconnect suppressed (status=\(self.connectionStatus.shortLabel))")
+            return
+        }
+
         reconnectTask?.cancel()
         reconnectAttempts += 1
 
@@ -448,55 +467,105 @@ final class DaemonAppBridge: ObservableObject {
 
     // MARK: - Handshake diagnostics
 
-    /// Called when the WS upgrade fails with -1011.  Fetches /health and /routes to narrow
-    /// down why the server rejected the WebSocket upgrade, then logs a probableCause tag.
+    /// Called when the WS upgrade fails with -1011.
+    /// Fetches /health, /version, and /routes to produce a definitive diagnosis.
+    /// Fixes the `probableCause` mapping and stops retrying when a stale daemon is detected.
     private func logHandshakeDiagnostics() async {
         guard !configuredBaseURL.isEmpty else { return }
         let base = configuredBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: ["/"])
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 3
+        let diagSession = URLSession(configuration: cfg)
 
+        logger.info("[BrainStartup] step=health")
         // ── /health ───────────────────────────────────────────────────────────
         var healthStatus = "unknown"
         if let healthURL = URL(string: "\(base)\(DaemonRoutes.health)"),
-           let (_, hRes) = try? await URLSession.shared.data(from: healthURL),
+           let (_, hRes) = try? await diagSession.data(from: healthURL),
            let http = hRes as? HTTPURLResponse {
             healthStatus = "\(http.statusCode)"
         }
         logger.info("[BrainConnection] health status=\(healthStatus)")
+        logger.info("[BrainStartup] step=health result=\(healthStatus)")
 
+        logger.info("[BrainStartup] step=version")
+        // ── /version — check authMode to detect stale daemon ─────────────────
+        var versionStatus = "unknown"
+        var runningAuthMode = "unknown"
+        var versionPID = -1
+        if let versionURL = URL(string: "\(base)/version"),
+           let (data, vRes) = try? await diagSession.data(from: versionURL),
+           let http = vRes as? HTTPURLResponse {
+            versionStatus = "\(http.statusCode)"
+            if http.statusCode == 200,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                runningAuthMode = json["authMode"] as? String ?? "missing"
+                versionPID      = json["pid"]      as? Int    ?? -1
+            }
+        }
+        logger.info("[BrainConnection] version status=\(versionStatus) authMode=\(runningAuthMode) pid=\(versionPID)")
+        logger.info("[BrainStartup] step=version result=\(versionStatus) authMode=\(runningAuthMode)")
+
+        logger.info("[BrainStartup] step=routes")
         // ── /routes ───────────────────────────────────────────────────────────
         var routesStatus = "unknown"
         var wsRouteListed = false
         var routesBody = ""
         if let routesURL = URL(string: "\(base)\(DaemonRoutes.routes)"),
-           let (data, rRes) = try? await URLSession.shared.data(from: routesURL),
+           let (data, rRes) = try? await diagSession.data(from: routesURL),
            let http = rRes as? HTTPURLResponse {
             routesStatus = "\(http.statusCode)"
             routesBody = String(data: data, encoding: .utf8) ?? ""
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if http.statusCode == 200,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 wsRouteListed = (json["websocket"] as? String) == DaemonRoutes.macWS
             }
         }
         logger.info("[BrainConnection] routes status=\(routesStatus)")
         if !routesBody.isEmpty { logger.info("[BrainConnection] routes body=\(routesBody)") }
+        logger.info("[BrainStartup] step=routes result=\(routesStatus) wsListed=\(wsRouteListed)")
 
-        let wsPath = configuredBaseURL.contains("ws://") || configuredBaseURL.contains("wss://")
-            ? configuredBaseURL
-            : (deriveWebSocketURL(from: configuredBaseURL)?.absoluteString ?? "?")
+        let wsPath = deriveWebSocketURL(from: configuredBaseURL)?.absoluteString ?? "?"
         logger.info("[BrainConnection] wsURL=\(wsPath)")
         logger.info("[BrainConnection] wsHandshake=failed")
+        logger.info("[BrainStartup] step=websocket result=failed")
 
+        // ── Cause mapping ─────────────────────────────────────────────────────
+        // 401 on /routes means auth middleware is intercepting — NOT route_missing.
+        // Distinguish between a stale old daemon (authMode missing) and a bug in
+        // the no-auth bypass logic (authMode present but auth still enforced).
         let cause: String
+        var isTerminalFailure = false
+
         if healthStatus == "unknown" || healthStatus.hasPrefix("0") {
             cause = "server_not_ready"
-        } else if routesStatus == "unknown" {
-            cause = "route_missing"
-        } else if !wsRouteListed {
+        } else if routesStatus == "401" {
+            if runningAuthMode == "no-auth" {
+                // Running daemon claims no-auth but /routes still returned 401.
+                // This is a bug in the no-auth bypass — should not happen.
+                cause = "auth_required_in_no_auth_mode"
+            } else {
+                // Old daemon without no-auth support — stale build.
+                cause = "stale_daemon_build"
+                isTerminalFailure = true
+            }
+        } else if routesStatus == "unknown" || !wsRouteListed {
             cause = "route_missing"
         } else {
             cause = "not_websocket"
         }
         logger.info("[BrainConnection] probableCause=\(cause)")
+        logger.info("[BrainStartup] brainReady=false cause=\(cause)")
+
+        if isTerminalFailure {
+            connectionStatus = .staleDaemon(
+                detail: "Old auth-requiring daemon on port. Restart daemon from Settings → Brain API."
+            )
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            logger.warning("[BrainConnection] stopping reconnect loop — stale daemon detected. Use Settings → Brain API → Restart Daemon.")
+        }
     }
 
     /// Smoke-test the daemon: /health → /routes → WebSocket connect → ping → pong.

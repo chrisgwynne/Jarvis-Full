@@ -131,6 +131,32 @@ final class DaemonManager: ObservableObject {
         runLaunchctl(["kickstart", "-k", "gui/\(uid)/\(plistLabel)"])
     }
 
+    /// Force-kills whatever process is currently bound to port 8765, then
+    /// kickstarts the LaunchAgent so the current daemon build takes over.
+    /// Used when a stale (old, auth-requiring) daemon is detected.
+    func replaceStaleAndRestart() {
+        // Kill the port owner directly
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        task.arguments = ["-i", ":8765", "-n", "-P", "-t"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        try? task.run()
+        task.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let pidStr = out.components(separatedBy: .newlines).first,
+           let pid = Int32(pidStr.trimmingCharacters(in: .whitespaces)), pid > 0 {
+            kill(pid, SIGTERM)
+        }
+        // Wait for port to free, then kickstart the LaunchAgent
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self else { return }
+            self.restart()
+        }
+    }
+
     // MARK: - Status polling
 
     func startPolling() {

@@ -33,6 +33,15 @@ final class BrainDaemonServer {
     let noAuthMode: Bool
 
 
+    // Build identity: binary modification date, resolved once at init.
+    // Changes on every new build, used by /version to detect stale instances.
+    private let buildTime: String = {
+        let execPath = ProcessInfo.processInfo.arguments[0]
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: execPath),
+              let date = attrs[.modificationDate] as? Date else { return "unknown" }
+        return ISO8601DateFormatter().string(from: date)
+    }()
+
     init() {
         if let envPort = ProcessInfo.processInfo.environment["JARVIS_DAEMON_PORT"],
            let p = Int(envPort), p > 0, p < 65536 {
@@ -50,14 +59,25 @@ final class BrainDaemonServer {
 
         DaemonDiagnostics.shared.port = port
         DaemonDiagnostics.shared.bindLocalOnly = bindLocalOnly
-        if noAuthMode {
-            serverLog.info("JarvisBrainDaemon: no-auth mode (private/local). Set JARVIS_DAEMON_REQUIRE_AUTH=1 to enforce tokens.")
-        }
     }
+
+    // Routes registered on this daemon — logged at startup and returned by /version.
+    private static let registeredRoutes = [
+        "/health", "/version", "/routes",
+        "/v1/mac/ws", "/v1/android/ws", "/v1/windows/ws", "/v2/ws",
+        "/v1/status", "/v1/diagnostics", "/v1/devices", "/v1/devices/presence"
+    ]
 
     // MARK: - Lifecycle
 
     func start() {
+        // Startup identity — lets observers confirm which build is running and whether auth is active.
+        let authMode = noAuthMode ? "no-auth" : "auth"
+        let pid = ProcessInfo.processInfo.processIdentifier
+        serverLog.info("[Daemon] buildTime=\(self.buildTime) authMode=\(authMode) pid=\(pid) port=\(self.port)")
+        for route in Self.registeredRoutes {
+            serverLog.info("[Daemon] registeredRoute=\(route)")
+        }
         serverLog.info("[Daemon] creating listener port=\(self.port) bindLocalOnly=\(self.bindLocalOnly)")
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else {
             serverLog.error("[Daemon] listener failed reason=invalid port \(self.port)")
@@ -255,9 +275,13 @@ final class BrainDaemonServer {
         // ── Version (no auth required) ───────────────────────────────────
         if path == "/version" {
             let dict: [String: Any] = [
+                "daemon": true,
                 "version": "1",
                 "protocolVersion": 1,
-                "daemon": true
+                "authMode": noAuthMode ? "no-auth" : "auth",
+                "buildTime": buildTime,
+                "pid": ProcessInfo.processInfo.processIdentifier,
+                "routes": Self.registeredRoutes
             ]
             send(conn, statusCode: 200, body: toJSON(dict))
             return

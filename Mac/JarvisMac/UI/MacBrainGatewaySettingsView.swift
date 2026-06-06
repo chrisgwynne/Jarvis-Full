@@ -49,7 +49,16 @@ struct MacBrainGatewaySettingsView: View {
                         .font(.system(.body, design: .monospaced))
                         .lineLimit(2)
                     Spacer()
-                    if !bridge.isConnected {
+                    if case .staleDaemon = bridge.connectionStatus {
+                        // Stale auth-requiring daemon — replacing it is the only fix.
+                        Button("Restart Daemon") {
+                            DaemonManager.shared.replaceStaleAndRestart()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                DaemonAppBridge.shared.resetAndReconnect()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent).tint(.orange)
+                    } else if !bridge.isConnected {
                         Button("Connect") {
                             DaemonAppBridge.shared.connect(
                                 baseURL: controller.prefs.current.daemonBaseURL)
