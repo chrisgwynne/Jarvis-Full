@@ -21,6 +21,15 @@ final class BrainDaemonServer {
 
     let port: Int
 
+    /// When true the listener binds to the loopback interface (127.0.0.1) only.
+    /// Controlled by `JARVIS_DAEMON_BIND_LOCAL` env var ("1"/"true"/"yes").
+    let bindLocalOnly: Bool
+
+    /// When true (the default for private/local use), ALL auth token checks are
+    /// skipped. Clients connect based on network access only.
+    /// Set `JARVIS_DAEMON_REQUIRE_AUTH=1` to enforce token auth.
+    let noAuthMode: Bool
+
     init() {
         if let envPort = ProcessInfo.processInfo.environment["JARVIS_DAEMON_PORT"],
            let p = Int(envPort), p > 0, p < 65536 {
@@ -28,24 +37,47 @@ final class BrainDaemonServer {
         } else {
             port = 8765
         }
+        let bindEnv = (ProcessInfo.processInfo.environment["JARVIS_DAEMON_BIND_LOCAL"] ?? "").lowercased()
+        bindLocalOnly = ["1", "true", "yes"].contains(bindEnv)
+
+        // Default: no auth required (private/local system).
+        // Override: JARVIS_DAEMON_REQUIRE_AUTH=1 to enforce token checks.
+        let authEnv = (ProcessInfo.processInfo.environment["JARVIS_DAEMON_REQUIRE_AUTH"] ?? "").lowercased()
+        noAuthMode = !["1", "true", "yes"].contains(authEnv)
+
         DaemonDiagnostics.shared.port = port
+        DaemonDiagnostics.shared.bindLocalOnly = bindLocalOnly
+        if noAuthMode {
+            serverLog.info("JarvisBrainDaemon: no-auth mode (private/local). Set JARVIS_DAEMON_REQUIRE_AUTH=1 to enforce tokens.")
+        }
     }
 
     // MARK: - Lifecycle
 
     func start() {
+        serverLog.info("[Daemon] creating listener port=\(self.port) bindLocalOnly=\(self.bindLocalOnly)")
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else {
-            serverLog.error("Invalid port \(self.port)")
+            serverLog.error("[Daemon] listener failed reason=invalid port \(self.port)")
             return
         }
         // Use explicit IPv4 so Tailscale traffic (100.x.x.x on utun interfaces) can reach us.
         // NWParameters.tcp defaults to IPv6 dual-stack, but macOS does NOT forward
         // IPv4 packets from Tailscale's utun interface to IPv6 dual-stack sockets.
-        let ipOptions = NWProtocolIP.Options()
-        ipOptions.version = .v4
         let params = NWParameters(tls: nil, tcp: NWProtocolTCP.Options())
-        params.defaultProtocolStack.internetProtocol = ipOptions
+        // NWProtocolIP.Options has no public initializer; configure the IP
+        // options that already exist on the parameters' default protocol stack.
+        if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ipOptions.version = .v4
+        }
         params.allowLocalEndpointReuse = true
+
+        // Loopback-only bind: pin the listener's local endpoint to 127.0.0.1 so
+        // the kernel refuses connections arriving on any other interface. Without
+        // this the listener accepts on all interfaces (incl. Wi-Fi / Tailscale).
+        if bindLocalOnly {
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: nwPort)
+            serverLog.info("Daemon binding to loopback only (127.0.0.1)")
+        }
 
         do {
             listener = try NWListener(using: params, on: nwPort)
@@ -58,12 +90,18 @@ final class BrainDaemonServer {
             guard let self else { return }
             switch state {
             case .ready:
+                self.serverLog.info("[Daemon] listener ready port=\(self.port)")
                 self.serverLog.info("JarvisBrainDaemon listening on port \(self.port)")
             case .failed(let err):
+                self.serverLog.error("[Daemon] listener failed reason=\(err.localizedDescription)")
                 self.serverLog.error("Listener failed: \(err.localizedDescription)")
                 self.listener = nil
+                // Exit with a non-zero code so launchctl marks the service failed and
+                // can respawn cleanly on the next kickstart, rather than leaving a zombie
+                // process that holds no port but claims to be running.
+                exit(1)
             case .cancelled:
-                self.serverLog.info("Listener cancelled")
+                self.serverLog.info("[Daemon] listener cancelled")
             default:
                 break
             }
@@ -211,125 +249,117 @@ final class BrainDaemonServer {
             return
         }
 
-        // ── Pair-completion endpoints (no prior auth — the code IS the credential) ──
-        // /v1/{platform}/pair/code requires the gateway token (Mac app generates it).
-        // /v1/{platform}/pair does NOT — the device is proving identity via the code.
-        let pairCompletionPaths: Set<String> = [
-            "/v1/android/pair", "/v1/windows/pair", "/v1/mac/pair"
-        ]
-        if method == "POST" && pairCompletionPaths.contains(path) {
-            // Route directly — completePairing validates the code internally.
-            handlePairCompletion(conn: conn, path: path, body: body)
+        // ── Version (no auth required) ───────────────────────────────────
+        if path == "/version" {
+            let dict: [String: Any] = [
+                "version": "1",
+                "protocolVersion": 1,
+                "daemon": true
+            ]
+            send(conn, statusCode: 200, body: toJSON(dict))
             return
         }
 
-        // ── Unified /v2/ws route (canonical for all platforms) ──────────────
-        if path == "/v2/ws" && headers["upgrade"]?.lowercased() == "websocket" {
+        // ── Routes manifest (no auth required) ──────────────────────────
+        // Exposes the authoritative path for every route this daemon serves.
+        // DaemonAppBridge calls /routes during diagnostics to verify the
+        // WebSocket path before reporting a probable cause for failures.
+        if path == "/routes" {
+            let manifest: [String: Any] = [
+                "health":           "/health",
+                "version":          "/version",
+                "routes":           "/routes",
+                "websocket":        "/v1/mac/ws",
+                "androidWebsocket": "/v1/android/ws",
+                "windowsWebsocket": "/v1/windows/ws",
+                "unifiedWebsocket": "/v2/ws",
+                "protocolVersion":  1
+            ]
+            send(conn, statusCode: 200, body: toJSON(manifest))
+            return
+        }
+
+        // ── Auth helper — skipped in no-auth mode (private/local default) ────
+        func checkAuth() -> Bool {
+            if noAuthMode { return true }
             let bearer = extractBearer(headers)
-            if !DaemonAuthStore.shared.isAuthorized(bearer) {
-                DaemonDiagnostics.shared.unauthorizedAttempts += 1
-                send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
+            if DaemonAuthStore.shared.isAuthorized(bearer) { return true }
+            DaemonDiagnostics.shared.unauthorizedAttempts += 1
+            send(conn, statusCode: 401, body: errorJSON("Unauthorized — set JARVIS_DAEMON_REQUIRE_AUTH=0 for local mode"))
+            return false
+        }
+
+        // ── Pairing (only when auth is enabled) ──────────────────────────
+        // In no-auth mode, clients connect directly — no pairing needed.
+        if !noAuthMode {
+            let pairCompletionPaths: Set<String> = ["/v1/android/pair", "/v1/windows/pair", "/v1/mac/pair"]
+            if method == "POST" && pairCompletionPaths.contains(path) {
+                handlePairCompletion(conn: conn, path: path, body: body)
                 return
             }
+        }
+
+        // ── WebSocket upgrade helpers ─────────────────────────────────────
+        func doWSUpgrade() -> String? {
             guard let clientKey = headers["sec-websocket-key"] else {
                 send(conn, statusCode: 400, body: errorJSON("Missing Sec-WebSocket-Key"))
-                return
+                return nil
             }
-            let acceptKey = computeWSAcceptKey(clientKey)
-            let upgradeResp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
-            conn.send(content: Data(upgradeResp.utf8), completion: .contentProcessed { _ in })
+            return computeWSAcceptKey(clientKey)
+        }
+        func sendUpgrade(_ key: String) {
+            let r = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(key)\r\n\r\n"
+            conn.send(content: Data(r.utf8), completion: .contentProcessed { _ in })
+        }
+
+        // ── Unified /v2/ws ────────────────────────────────────────────────
+        if path == "/v2/ws" && headers["upgrade"]?.lowercased() == "websocket" {
+            guard checkAuth(), let key = doWSUpgrade() else { return }
+            sendUpgrade(key)
             let platform = (headers["x-platform"] ?? "").lowercased() == "windows" ? "windows" : "android"
             if platform == "windows" {
                 DaemonDiagnostics.shared.connectedWindowsClients += 1
-                startWindowsWebSocketSession(conn: conn, platform: "windows", deviceId: extractDeviceId(headers) ?? UUID().uuidString)
+                startWindowsWebSocketSession(conn: conn, platform: "windows",
+                                             deviceId: extractDeviceId(headers) ?? UUID().uuidString)
             } else {
                 DaemonDiagnostics.shared.connectedAndroidClients += 1
-                startAndroidWebSocketSession(conn: conn, platform: platform, deviceId: extractDeviceId(headers) ?? UUID().uuidString)
+                startAndroidWebSocketSession(conn: conn, platform: platform,
+                                             deviceId: extractDeviceId(headers) ?? UUID().uuidString)
             }
             return
         }
 
-        // ── V1 WebSocket upgrade for Android ─────────────────────────────
+        // ── Android WebSocket ─────────────────────────────────────────────
         if path == "/v1/android/ws" && headers["upgrade"]?.lowercased() == "websocket" {
-            // SECURITY AUDITED Phase 2: auth checked BEFORE 101 upgrade response
-            let bearer = extractBearer(headers)
-            if !DaemonAuthStore.shared.isAuthorized(bearer) {
-                DaemonDiagnostics.shared.unauthorizedAttempts += 1
-                send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
-                return
-            }
-            guard let clientKey = headers["sec-websocket-key"] else {
-                send(conn, statusCode: 400, body: errorJSON("Missing Sec-WebSocket-Key"))
-                return
-            }
-            let acceptKey = computeWSAcceptKey(clientKey)
-            let upgradeResp = "HTTP/1.1 101 Switching Protocols\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
-            conn.send(content: Data(upgradeResp.utf8), completion: .contentProcessed { _ in })
+            guard checkAuth(), let key = doWSUpgrade() else { return }
+            sendUpgrade(key)
             DaemonDiagnostics.shared.connectedAndroidClients += 1
-            // Begin full WebSocket frame loop (Task 4: ping/pong, heartbeat, message dispatch)
             startAndroidWebSocketSession(conn: conn, platform: "android",
                                          deviceId: extractDeviceId(headers) ?? UUID().uuidString)
             return
         }
 
-        // ── V1 WebSocket upgrade for Windows ──────────────────────────────
+        // ── Windows WebSocket ─────────────────────────────────────────────
         if path == "/v1/windows/ws" && headers["upgrade"]?.lowercased() == "websocket" {
-            // SECURITY AUDITED Phase 2: auth checked BEFORE 101 upgrade response
-            let bearer = extractBearer(headers)
-            if !DaemonAuthStore.shared.isAuthorized(bearer) {
-                DaemonDiagnostics.shared.unauthorizedAttempts += 1
-                send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
-                return
-            }
-            guard let clientKey = headers["sec-websocket-key"] else {
-                send(conn, statusCode: 400, body: errorJSON("Missing Sec-WebSocket-Key"))
-                return
-            }
-            let acceptKey = computeWSAcceptKey(clientKey)
-            let upgradeResp = "HTTP/1.1 101 Switching Protocols\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
-            conn.send(content: Data(upgradeResp.utf8), completion: .contentProcessed { _ in })
+            guard checkAuth(), let key = doWSUpgrade() else { return }
+            sendUpgrade(key)
             DaemonDiagnostics.shared.connectedWindowsClients += 1
             startWindowsWebSocketSession(conn: conn, platform: "windows",
-                                          deviceId: extractDeviceId(headers) ?? UUID().uuidString)
+                                         deviceId: extractDeviceId(headers) ?? UUID().uuidString)
             return
         }
 
-        // ── V1 WebSocket upgrade for Mac app ──────────────────────────────
+        // ── Mac WebSocket ─────────────────────────────────────────────────
         if path == "/v1/mac/ws" && headers["upgrade"]?.lowercased() == "websocket" {
-            let bearer = extractBearer(headers)
-            if !DaemonAuthStore.shared.isAuthorized(bearer) {
-                DaemonDiagnostics.shared.unauthorizedAttempts += 1
-                send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
-                return
-            }
-            guard let clientKey = headers["sec-websocket-key"] else {
-                send(conn, statusCode: 400, body: errorJSON("Missing Sec-WebSocket-Key"))
-                return
-            }
-            let acceptKey = computeWSAcceptKey(clientKey)
-            let upgradeResp = "HTTP/1.1 101 Switching Protocols\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
-            conn.send(content: Data(upgradeResp.utf8), completion: .contentProcessed { _ in })
+            guard checkAuth(), let key = doWSUpgrade() else { return }
+            sendUpgrade(key)
             DaemonDiagnostics.shared.connectedMacClients += 1
             startMacWebSocketSession(conn: conn)
             return
         }
 
-        // ── All other routes require auth ────────────────────────────────
-        let bearer = extractBearer(headers)
-        if !DaemonAuthStore.shared.isAuthorized(bearer) {
-            DaemonDiagnostics.shared.unauthorizedAttempts += 1
-            send(conn, statusCode: 401, body: errorJSON("Unauthorized"))
-            return
-        }
+        // ── All other REST routes — check auth ────────────────────────────
+        guard checkAuth() else { return }
 
         // ── V1 routes ────────────────────────────────────────────────────
         switch (method, path) {
@@ -619,9 +649,13 @@ final class BrainDaemonServer {
                     guard let (result, consumed) = Self.parseNextWebSocketFrame(buf) else { break }
                     buf = Array(buf[consumed...])
 
+                    // Resolve the stable paired-device identity from the
+                    // per-connection client UUID. `recordSeen` keys on deviceId,
+                    // so passing the random clientId here would silently no-op.
+                    let resolvedDeviceId = DaemonMessageRouter.shared.deviceId(forClientId: clientId) ?? clientId
                     switch result {
                     case .text(let text):
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                         self.wrapAndRoute(rawJSON: text, fromClientId: clientId, platform: platform)
                         self.dispatchAndroidMessage(text: text, clientId: clientId, conn: conn, platform: platform)
                     case .close:
@@ -631,9 +665,9 @@ final class BrainDaemonServer {
                     case .ping:
                         let pongFrame = Data([0x8A, 0x00])
                         conn.send(content: pongFrame, completion: .contentProcessed { _ in })
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                     case .pong:
-                        DaemonAuthStore.shared.recordSeen(deviceId: clientId)
+                        DaemonAuthStore.shared.recordSeen(deviceId: resolvedDeviceId)
                         if let sentAt = self.lastPingSentAt.removeValue(forKey: clientId) {
                             let rttMs = Date().timeIntervalSince(sentAt) * 1000.0
                             DaemonDiagnostics.shared.websocketRttMs = rttMs
