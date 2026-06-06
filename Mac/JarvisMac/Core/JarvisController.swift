@@ -142,6 +142,12 @@ final class JarvisController {
     /// follow-up commands without re-saying "Jarvis".
     private var conversationalArmed = false
     private var conversationalArmTask: Task<Void, Never>?
+    /// Number of consecutive STT sessions that ended with no real speech.
+    /// Resets to 0 on any session with a real transcript. When this hits
+    /// the threshold the conversational loop stops and returns to passive wake
+    /// so Jarvis doesn't spin STT sessions forever when nobody is speaking.
+    private var consecutiveNoSpeechCount = 0
+    private let consecutiveNoSpeechLimit = 2
     /// Set synchronously in speak() so that the post-loop can detect a pending
     /// TTS utterance without racing against the async isSpeakingStream observer.
     /// Checked with a 500ms window: if speak() was called <0.5s ago, TTS is
@@ -152,6 +158,11 @@ final class JarvisController {
     // Prevents rapid wake→STT→fail→restart loops. Cleared automatically on
     // successful speech or when the user explicitly re-enables listening.
     private var permanentSpeechFailureActive = false
+    // Timestamp when the controller was created — used to suppress spurious
+    // disableListening() calls that fire within the first 30 s of app life.
+    // Using init() time (not bootstrap completion) so the guard is active
+    // before bootstrap runs and bootstrapCompletedAt would still be nil.
+    private let controllerInitTime: Date = Date()
 
     // Conversational pending-question state.
     // Set when Jarvis asks the user something and needs a follow-up reply.
@@ -164,6 +175,8 @@ final class JarvisController {
 
     // SystemBus subscription — pauses STT when an audio-bearing overlay opens
     private var audioOverlayToken: SystemBus.SubscriptionToken?
+    // SystemBus subscription — cleans up media state when a news overlay is closed from any path
+    private var newsOverlayClosedToken: SystemBus.SubscriptionToken?
 
     // Screen watch
     private var screenWatchTask: Task<Void, Never>?
@@ -385,6 +398,9 @@ final class JarvisController {
         let whisper: WhisperSpeechRecognizer? = prefs.current.whisperModelPath
             .map { WhisperSpeechRecognizer(modelPath: $0) }
         self.appleRecognizer = apple
+        apple.onAudioLevel = { [weak state] level in
+            state?.sttInputLevel = level
+        }
         self.whisperRecognizer = whisper
         if prefs.current.speechEngine == .whisper, let whisper {
             self.recognizer = whisper
@@ -551,6 +567,7 @@ final class JarvisController {
 
         // Screen awareness
         let capture = ScreenCaptureService()
+        capture.appState = state
         self.screenCapture = capture
         self.screenAwareness = ScreenAwarenessService(capture: capture, vision: visionAnalyzer)
 
@@ -617,6 +634,10 @@ final class JarvisController {
         healthMonitor = hm
         hm.start()
 
+        // SelfMonitor — extended stability watchdog with CPU, thread, idle enforcement.
+        SelfMonitor.shared.controller = self
+        SelfMonitor.shared.start()
+
         breadcrumb.write(subsystem: "app", action: "bootstrap_start",
                          detail: "emergencySafeMode=\(prefs.current.emergencySafeMode)")
 
@@ -637,6 +658,13 @@ final class JarvisController {
             }
             state.statusStripVisible = prefs.current.statusStripVisible
             state.safeMode = true   // force visual safeMode indicator in emergency
+
+            // Explicitly mark listening as disabled so the UI shows the correct
+            // blocked state rather than a fake "listening enabled" indicator.
+            state.listeningEnabled = false
+            state.phase = .muted
+            Log.app.info("[SafeMode] microphone/listener blocked — emergency safe mode active")
+
             syncPersonality()
             syncLLMMode()
             syncOperatingMode()
@@ -1087,6 +1115,10 @@ final class JarvisController {
         conversation.persistentConversationEnabled = { [weak self] in self?.prefs.current.persistentConversationEnabled ?? true }
         Task { try? await conversation.start() }
 
+        // Wire AppState into RuntimeCoordinator so health-check callbacks can
+        // surface brain-degraded status (e.g. "No database connection") to the UI.
+        RuntimeCoordinator.shared.appState = state
+
         // Register subsystems + mark RuntimeCoordinator ready — see RuntimeBootstrapper.swift
         RuntimeBootstrapper.registerAndMarkReady(
             appState: state,
@@ -1352,6 +1384,17 @@ final class JarvisController {
             self.state.log("conv", .info, "audio_overlay_opened kind=\(event.overlayKind) — returning to passive wake")
         }
 
+        // When a news overlay is closed from ANY path (voice command, UI X button, programmatic),
+        // ensure media playback state is exited and news UI state is reset. exitMediaPlayback()
+        // is idempotent so double-calls from .hideNews are safe.
+        newsOverlayClosedToken = SystemBus.shared.subscribe(OverlayClosedEvent.self) { @MainActor [weak self] event in
+            guard let self, event.overlayKind == OverlayKind.news.rawValue else { return }
+            self.state.newsLivePlayerVisible = false
+            self.state.newsOverlayMode = .headlines
+            self.exitMediaPlayback()
+            Log.app.info("[NewsWatch] stop requested overlayKind=news source=overlayClosedEvent")
+        }
+
         // Mac Brain HTTP server + Camera streaming
         cameraService.frameStore  = cameraFrameStore
         cameraService.diagnostics = cameraDiagnostics
@@ -1471,7 +1514,15 @@ final class JarvisController {
         DaemonAppBridge.shared.onClipboardUpdate = { text in
             HandoffCoordinator.shared.receiveClipboard(text)
         }
-        DaemonAppBridge.shared.connect()
+        // Connect to the Brain daemon using the configured URL.
+        // No auth token required by default (private/local mode).
+        let daemonURL = prefs.current.daemonBaseURL
+        if prefs.current.daemonEnabled && !daemonURL.isEmpty {
+            Log.app.info("[startup] brain daemon: connecting to \(daemonURL)")
+            DaemonAppBridge.shared.connect(baseURL: daemonURL)
+        } else {
+            Log.app.info("[startup] brain daemon: disabled or no URL configured")
+        }
         RemoteActionExecutor.shared.wire(to: DaemonAppBridge.shared)
 
         androidToolOrchestrator.onDirectSend = { [weak self] envelope in
@@ -1494,9 +1545,20 @@ final class JarvisController {
         }
 
         state.log("app", .info, "Jarvis bootstrap complete")
+        // End the startup phase — optional Keychain reads are now permitted.
+        // Must be called BEFORE startupReport() so blocked counts are final.
+        KeychainService.shared.endStartupPhase()
         Log.app.info("[startup] keychain final: \(KeychainService.shared.startupReport(), privacy: .public)")
+        Log.app.info("[startup] screen recording permission: \(self.state.screenPermissionGranted ? "granted" : "denied", privacy: .public)")
+        Log.app.info("[startup] mic device: \(self.state.activeMicrophoneName ?? "none", privacy: .public)")
+        Log.app.info("[startup] wake word: \(self.state.wakeWordStatus.label, privacy: .public)")
         breadcrumb.write(subsystem: "app", action: "bootstrap_complete")
         context.setPhase(state.phase)
+
+        // Guarantee we always open in listening mode regardless of what happened during init.
+        if !state.listeningEnabled {
+            enableListening(announce: false)
+        }
     }
 
     /// Registers the bundled documentation contributors with the shared
@@ -1649,13 +1711,65 @@ final class JarvisController {
         wakeObserverTask?.cancel()
         wakeWord.stop()
 
+        // ── Startup audit ──────────────────────────────────────────────────────
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        let speechStatus = SFSpeechRecognizer.authorizationStatus()
+        let selectedMic  = audioDevices.resolvePreferred()?.localizedName ?? "none"
+        Log.app.info("[StartupAudio] microphonePermission=\(micStatus.rawValue)")
+        Log.app.info("[StartupAudio] speechPermission=\(speechStatus.rawValue)")
+        Log.app.info("[StartupAudio] selectedMic=\(selectedMic)")
+
+        guard !prefs.current.emergencySafeMode else {
+            Log.app.info("[SafeMode] microphone/listener blocked — wake word skipped (emergency safe mode)")
+            Log.app.info("[StartupAudio] passiveReady=false uiState=safeMode")
+            wakeWord = NoopWakeWord()
+            state.wakeWordStatus = .unavailable("Safe Mode")
+            state.listeningEnabled = false
+            state.phase = .muted
+            return wireTriggers()
+        }
+
         let settings = prefs.current.wakeWord
 
         guard settings.enabled else {
+            Log.app.info("[StartupAudio] passiveReady=false uiState=disabled")
             wakeWord = NoopWakeWord()
             state.wakeWordStatus = .unavailable("Disabled")
             return wireTriggers()
         }
+
+        // ── Permission gates — request if not yet determined ───────────────────
+        // requestMicAccess() awaits the system prompt if status is .notDetermined
+        // so the engine never starts against a pending-prompt or denied mic.
+        if micStatus != .authorized {
+            Log.app.info("[StartupAudio] microphonePermission not authorized — requesting")
+            let granted = await requestMicAccess()
+            Log.app.info("[StartupAudio] microphonePermission=\(granted ? "authorized" : "denied")")
+            if !granted {
+                Log.app.warning("[StartupAudio] passiveReady=false uiState=micPermissionDenied")
+                wakeWord = NoopWakeWord()
+                state.wakeWordStatus = .failed("Microphone permission denied — grant access in System Settings → Privacy & Security → Microphone")
+                state.microphoneStatus = .denied
+                return wireTriggers()
+            }
+            state.microphoneStatus = .ready
+        }
+
+        if speechStatus != .authorized {
+            Log.app.info("[StartupAudio] speechPermission not authorized — requesting")
+            let granted = await appleRecognizer.requestAuthorization()
+            Log.app.info("[StartupAudio] speechPermission=\(granted ? "authorized" : "denied")")
+            if !granted {
+                Log.app.warning("[StartupAudio] passiveReady=false uiState=speechPermissionDenied")
+                wakeWord = NoopWakeWord()
+                state.wakeWordStatus = .failed("Speech recognition permission denied — grant access in System Settings → Privacy & Security → Speech Recognition")
+                state.speechStatus = .denied
+                return wireTriggers()
+            }
+            state.speechStatus = .ready
+        }
+
+        Log.app.info("[StartupAudio] startingPassiveWake")
 
         // 1. Try sherpa-onnx if a model directory is configured.
         if let modelDir = settings.modelIdentifier {
@@ -1672,7 +1786,8 @@ final class JarvisController {
                 try sherpa.start()
                 wakeWord = sherpa
                 state.wakeWordStatus = .ready
-                Log.app.info("wake word: sherpa armed (model: \(modelDir))")
+                Log.app.info("[StartupAudio] engineRunning=true wakeRecognizerActive=true (sherpa model=\(modelDir))")
+                scheduleStartupBufferVerification()
                 return wireTriggers()
             } catch {
                 state.log("wake", .warn, "sherpa wake word failed: \(error.localizedDescription) — falling back to Apple")
@@ -1683,19 +1798,58 @@ final class JarvisController {
         let apple = AppleWakeWordService { [weak self] msg in
             Task { @MainActor in self?.state.log("wake", .info, msg) }
         }
+        apple.onAudioLevel = { [weak self] level in
+            self?.state.micInputLevel = level
+        }
         do {
             try apple.configure(settings)
             try apple.start()
             wakeWord = apple
             state.wakeWordStatus = .ready
-            Log.app.info("wake word: Apple always-listening armed")
+            Log.app.info("[StartupAudio] engineRunning=true wakeRecognizerActive=true (apple)")
+            scheduleStartupBufferVerification()
         } catch {
             wakeWord = NoopWakeWord()
             state.wakeWordStatus = .failed(error.localizedDescription)
+            Log.app.warning("[StartupAudio] passiveReady=false uiState=listenerFailed")
             state.log("wake", .warn, "apple wake word failed: \(error.localizedDescription)")
         }
 
         wireTriggers()
+    }
+
+    /// One-shot 4-second startup verification: confirm audio buffers arrive
+    /// after the wake-word engine arms. The grace period seeded in
+    /// AppleWakeWordService.start() (lastAudioBufferTime = Date()) expires after
+    /// 3 s, so checking at 4 s distinguishes real audio from the seed value.
+    private func scheduleStartupBufferVerification() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let self else { return }
+            guard !Task.isCancelled else { return }
+
+            let healthCheckable = self.wakeWord as? WakeWordHealthCheckable
+            let tapOK = healthCheckable?.isReceivingAudioBuffers ?? true // non-checkable engines assumed ok
+            Log.app.info("[StartupAudio] tapInstalled=true firstBufferReceived=\(tapOK)")
+            Log.app.info("[StartupAudio] passiveReady=\(tapOK) uiState=\(String(describing: self.state.phase))")
+
+            if !tapOK, self.wakeWord.isRunning, !self.state.isListening {
+                Log.app.warning("[StartupAudio] no audio buffers after 4s — restarting wake listener")
+                self.state.wakeWordStatus = .failed("Listener offline — restarting")
+                // Force a clean session restart on the existing service
+                do {
+                    self.wakeWord.stop()
+                    try self.wakeWord.start()
+                    self.state.isWakeArmed = true
+                    self.state.wakeWordStatus = .ready
+                    self.state.phase = .wakeListening
+                    Log.app.info("[StartupAudio] passiveReady=true uiState=wakeListening (restarted)")
+                } catch {
+                    self.state.wakeWordStatus = .failed("Listener offline: \(error.localizedDescription)")
+                    Log.app.warning("[StartupAudio] passiveReady=false uiState=listenerFailed — \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     private func wireTriggers() {
@@ -1730,7 +1884,7 @@ final class JarvisController {
             state.isWakeArmed = true
             state.wakeWordStatus = .ready
             state.phase = .wakeListening
-            Log.app.info("wake word: restarted (passive)")
+            Log.app.info("[WakeWord] passive resumed after STT")
         } catch {
             state.wakeWordStatus = .failed(error.localizedDescription)
             state.log("wake", .warn, "wake word restart failed: \(error.localizedDescription)")
@@ -1759,10 +1913,18 @@ final class JarvisController {
                 guard !self.permanentSpeechFailureActive else { continue }
 
                 // NoopWakeWord is the silent fallback when both Sherpa and Apple
-                // wake word failed. Don't try to restart it — it can never hear
-                // anything and would falsely appear healthy after start().
-                guard !(self.wakeWord is NoopWakeWord) else {
-                    self.state.wakeWordStatus = .failed("No wake-word engine available")
+                // wake word failed. If permissions have since been granted, attempt
+                // a full rebuild — the user may have approved mic/speech after launch.
+                if self.wakeWord is NoopWakeWord {
+                    let micOK     = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                    let speechOK  = SFSpeechRecognizer.authorizationStatus() == .authorized
+                    if micOK && speechOK && self.prefs.current.wakeWord.enabled {
+                        self.state.log("wake", .info,
+                            "watchdog: permissions now granted — rebuilding wake word engine")
+                        await self.rebuildWakeWord()
+                    } else {
+                        self.state.wakeWordStatus = .failed("No wake-word engine available")
+                    }
                     continue
                 }
 
@@ -1779,6 +1941,25 @@ final class JarvisController {
                     } catch {
                         self.state.log("wake", .warn,
                             "watchdog: wake word restart failed — \(error.localizedDescription)")
+                    }
+                } else if let hc = self.wakeWord as? WakeWordHealthCheckable,
+                          !hc.isReceivingAudioBuffers {
+                    // Engine claims to be running but no audio buffers have arrived —
+                    // silent HAL stall or device route change. Force a restart.
+                    self.state.log("wake", .warn,
+                        "watchdog: engine running but no audio buffers — force-restarting")
+                    self.wakeWord.stop()
+                    do {
+                        try self.wakeWord.start()
+                        self.state.isWakeArmed = true
+                        self.state.wakeWordStatus = .ready
+                        self.state.log("wake", .info,
+                            "watchdog: wake word buffer-stall restart succeeded")
+                    } catch {
+                        self.state.wakeWordStatus = .failed("No audio buffers — check mic in System Settings")
+                        self.state.isWakeArmed = false
+                        self.state.log("wake", .warn,
+                            "watchdog: buffer-stall restart failed — \(error.localizedDescription)")
                     }
                 }
             }
@@ -1826,7 +2007,17 @@ final class JarvisController {
 
     /// Explicit user-initiated stop. After this, no wake-word listening
     /// and no STT until `enableListening()` is called.
-    func disableListening(announce: Bool = true) {
+    /// - Parameter fromUI: Pass `true` when triggered by a direct UI tap (bypasses
+    ///   the startup suppression window so the mute button always works).
+    func disableListening(announce: Bool = true, fromUI: Bool = false) {
+        // Suppress voice-triggered mutes within the first 30 s of app life.
+        // The wake-word STT can pick up system sounds or Piper's own TTS playback
+        // and route "go quiet" / "sleep" here before the user says anything.
+        // UI taps bypass this so the mute button always works immediately.
+        if !fromUI, Date().timeIntervalSince(controllerInitTime) < 30 {
+            Log.app.info("[disableListening] suppressed — within 30 s startup window")
+            return
+        }
         state.log("audio", .info, "listening_disabled — user-initiated mute")
         state.listeningEnabled = false
         conversationalSessionActive = false
@@ -1850,6 +2041,11 @@ final class JarvisController {
 
     /// Resume passive wake listening after a user-initiated mute.
     func enableListening(announce: Bool = true) {
+        if prefs.current.emergencySafeMode {
+            Log.app.info("[SafeMode] microphone/listener blocked — listening request ignored (emergency safe mode)")
+            showToast("Safe Mode: listening disabled", icon: "lock.shield.fill")
+            return
+        }
         state.log("audio", .info, "listening_enabled — user-initiated resume")
         state.listeningEnabled = true
         state.lastError = nil
@@ -1880,24 +2076,19 @@ final class JarvisController {
         }
     }
 
-    /// Watchdog kick: if wake should be running but isn't, restart it.
-    /// Called from the 1 s periodic tick. Idempotent and rate-limited
-    /// implicitly via `restartWakeWordIfNeeded`'s guards.
+    /// Watchdog kick: if wake should be running but isn't — or is running but
+    /// not receiving audio buffers — restart it. Called from the 1 s tick.
+    /// Idempotent; rate-limited implicitly via `restartWakeWordIfNeeded` guards.
     func wakeWatchdogTick() {
         guard state.listeningEnabled else { return }
         guard prefs.current.wakeWord.enabled else { return }
         guard !state.isListening else { return }
         guard !state.isSpeaking else { return }
         // While in permanent-failure backoff the scheduled retry task handles
-        // the re-arm — the 1 s watchdog must not race against that window.
+        // re-arming — the 1 s watchdog must not race against that window.
         guard !permanentSpeechFailureActive else { return }
 
         // ── Conversational session watchdog ───────────────────────────────────
-        // If the 10-minute armed window is still active but we somehow ended up
-        // in passive-wake state with no STT running (race between endConversational-
-        // Session's async restart Task and returnToPassiveWake), restart STT here
-        // rather than restarting wake word.  Only fires when wake is NOT running
-        // (i.e. we're in a brief gap, not during normal passive-wake-word state).
         if conversationalArmed,
            prefs.current.conversationalFollowUpEnabled,
            prefs.current.persistentConversationEnabled,
@@ -1909,6 +2100,59 @@ final class JarvisController {
                 "conv_watchdog — armed+passive-wake gap, restart #\(state.conversationalRestarts)")
             startConversationalListening()
             return
+        }
+
+        // ── Buffer-health check ────────────────────────────────────────────────
+        // `isRunning == true` is necessary but NOT sufficient for a healthy wake
+        // listener. The AVAudioEngine can stall silently after a CoreAudio route
+        // change, device disconnect, or App Nap throttle — isRunning stays true
+        // but no buffers arrive and wake word will never fire.
+        //
+        // Only run this check while wake is supposed to be in passive-listen mode.
+        if wakeWord.isRunning,
+           let checkable = wakeWord as? WakeWordHealthCheckable {
+            let receiving = checkable.isReceivingAudioBuffers
+            let lastBufAge: String
+            if let t = checkable.lastAudioBufferTime {
+                lastBufAge = String(format: "%.1f", Date().timeIntervalSince(t)) + "s"
+            } else {
+                lastBufAge = "never"
+            }
+            Log.audio.debug("""
+                [WakeWordHealth] mode=passive \
+                engineRunning=\(self.wakeWord.isRunning) \
+                tapInstalled=\(receiving) \
+                lastBufferAge=\(lastBufAge)
+                """)
+
+            if !receiving {
+                state.log("wake", .warn,
+                    "[WakeWordHealth] unhealthy reason=no_recent_audio_buffers lastBufferAge=\(lastBufAge)")
+                Log.audio.warning(
+                    "[WakeWordHealth] unhealthy reason=no_recent_audio_buffers lastBufferAge=\(lastBufAge) — forcing restart")
+                wakeWord.stop()
+                state.isWakeArmed = false
+                state.wakeWatchdogRestarts += 1
+                state.lastWatchdogRecoveryAt = Date()
+                state.lastWatchdogReason = "no_recent_audio_buffers"
+                state.pushLifecycleEvent(from: state.listeningActualState.displayName,
+                                         to: "restarting",
+                                         reason: "watchdog:no_recent_audio_buffers")
+                Log.audio.info("[WakeWordHealth] restarting passive listener")
+                restartWakeWordIfNeeded()
+                if wakeWord.isRunning {
+                    Log.audio.info("[WakeWordHealth] restart successful")
+                    state.log("wake", .info, "[WakeWordHealth] restart successful")
+                } else {
+                    Log.audio.error("[WakeWordHealth] restart failed — UI state corrected passive→listenerOffline")
+                    state.log("wake", .error, "[WakeWordHealth] restart failed reason=engine_refused_start")
+                    state.phase = .error
+                    state.isWakeArmed = false
+                    state.lastError = "Listener offline — mic may have disconnected"
+                    state.wakeWordStatus = .failed("No audio buffers — check mic in System Settings")
+                }
+                return
+            }
         }
 
         guard !wakeWord.isRunning else { return }
@@ -1967,6 +2211,7 @@ final class JarvisController {
         conversationalArmed = true
         conversationalSessionActive = true
         state.conversationalArmedDiag = true
+        consecutiveNoSpeechCount = 0   // fresh wake event resets the silence streak
         // Also arm the ConversationRuntime so it can publish events + own its timer.
         conversation.arm()
         conversationalArmTask?.cancel()
@@ -2026,6 +2271,9 @@ final class JarvisController {
         conversationalTimeoutTask?.cancel()
         conversationalTimeoutTask = nil
 
+        // Notify SelfMonitor: no active conversation — start idle clock.
+        SelfMonitor.shared.noteConversationEnded()
+
         if permanent {
             conversationalSessionActive = false
             state.persistentSessionActive = false
@@ -2060,6 +2308,19 @@ final class JarvisController {
             return
         }
 
+        // Stop restarting if nobody has spoken in N consecutive sessions.
+        if consecutiveNoSpeechCount >= consecutiveNoSpeechLimit {
+            consecutiveNoSpeechCount = 0
+            conversationalArmed = false
+            state.conversationalArmedDiag = false
+            conversationalSessionActive = false
+            state.persistentSessionActive = false
+            state.log("conv", .info,
+                "[STTStartRequest] skipped reason=consecutive_no_speech streak=\(consecutiveNoSpeechLimit) — ending session, returning to passive wake")
+            returnToPassiveWake(reason: .stateTransition)
+            return
+        }
+
         state.conversationalRestarts += 1
         state.persistentSessionActive = true
         state.log("conv", .info,
@@ -2082,6 +2343,8 @@ final class JarvisController {
         latency.mark(.wakeDetect)
         state.lastWakeEvent = event
         state.recentWakeScores.append(event.confidence)
+        SelfMonitor.shared.recordWakeWordTrigger()
+        SelfMonitor.shared.recordUserInteraction()
         // Begin execution trace — correlationID threads through transcript → intent → TTS.
         let corrID = ExecutionTracer.shared.begin(label: "wake:\(event.keyword)")
         ExecutionTracer.shared.addStep("wake_detected",
@@ -2127,15 +2390,15 @@ final class JarvisController {
         conversationalTimeoutTask?.cancel()
 
         // Settle delay: AppleWakeWordService has already torn down its
-        // AVAudioEngine on the main queue, but CoreAudio's HAL needs a few
-        // tens of ms to fully release the input device before STT's engine
-        // can grab it without producing zero-byte buffers. Without this
-        // delay, SFSpeechRecognitionTask hits "no audio" errors within
-        // ~100 ms and the listening session dies before the user can speak.
+        // AVAudioEngine on the main queue, but CoreAudio's HAL needs time to
+        // fully release the input device — especially with Bluetooth mics —
+        // before STT's engine can claim it cleanly. 150 ms covers the typical
+        // Bluetooth HAL hand-off (60 ms was insufficient for AIRHUG devices).
+        state.log("audio", .info, "[WakeWord] suspending passive capture before STT")
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 60_000_000) // 60 ms
+            try? await Task.sleep(nanoseconds: 150_000_000) // 150 ms
             guard let self else { return }
-            self.state.log("audio", .info, "post-wake settle complete — starting STT")
+            self.state.log("audio", .info, "[AudioSession] route stable — starting STT isListening=\(self.state.isListening) wakeRunning=\(self.wakeWord.isRunning) micHealthy=\(self.state.microphoneStatus.isHealthy) auth=\(SFSpeechRecognizer.authorizationStatus().rawValue)")
             // Arm the 10-minute conversational window starting from this wake.
             self.armConversationalMode()
             self.startListening(reason: .wakeWord)
@@ -2275,7 +2538,7 @@ final class JarvisController {
                         continuingSession: ListeningSession? = nil) {
         guard !state.isListening else {
             state.log("audio", .info,
-                "startListening ignored — already listening (session=\(activeSession?.shortID ?? "-"))")
+                "[WakeWord] STT blocked reason=already_listening session=\(activeSession?.shortID ?? "-")")
             return
         }
         let usingWhisper = (prefs.current.speechEngine == .whisper && whisperRecognizer != nil)
@@ -2286,12 +2549,12 @@ final class JarvisController {
                 state.speechStatus = .ready
             }
             if liveAuth != .authorized {
-                state.log("audio", .warn, "Cannot start listening — speech not authorized (status: \(liveAuth.rawValue))")
+                state.log("audio", .warn, "[WakeWord] STT blocked reason=not_authorized status=\(liveAuth.rawValue)")
                 return
             }
         }
         guard state.microphoneStatus.isHealthy else {
-            state.log("audio", .warn, "Cannot start listening — microphone not ready")
+            state.log("audio", .warn, "[WakeWord] STT blocked reason=mic_not_ready status=\(state.microphoneStatus)")
             return
         }
         if state.isSpeaking { tts.stop() }
@@ -2321,6 +2584,8 @@ final class JarvisController {
         state.listeningActualState = .activelyListening
         state.pushLifecycleEvent(from: prevActual, to: "activelyListening",
                                  reason: reason.rawValue)
+        state.log("audio", .info,
+            "[STTStartRequest] source=\(reason.rawValue) session=\(session.shortID) attempt=\(attempt) noSpeechStreak=\(consecutiveNoSpeechCount)")
         state.log("audio", .info,
             "startListening session=\(session.shortID) reason=\(reason.rawValue) attempt=\(attempt) min_remaining_ms=\(state.listeningMinRemainingMs)")
         SystemBus.shared.publish(ListeningStartedEvent(reason: reason.rawValue,
@@ -2391,6 +2656,9 @@ final class JarvisController {
             state.micRoutingStatus = .ready
             state.log("audio", .info,
                 "stt_engine_started session=\(session.shortID) mic_uid=\(audioDevices.preferredUID ?? "default") mic_name=\(routedName ?? "?")")
+            if reason == .wakeWord {
+                state.log("audio", .info, "[WakeWord] activation complete — STT live session=\(session.shortID)")
+            }
 
             let sessionSnapshot = session
 
@@ -2575,8 +2843,14 @@ final class JarvisController {
                 }
 
                 let gotRealContent = sessionSnapshot.hasReceivedNonEmptyFinal
+                // Update no-speech streak: reset on real speech, increment on silence.
+                if gotRealContent {
+                    self.consecutiveNoSpeechCount = 0
+                } else if isCurrent && !wasCancelled {
+                    self.consecutiveNoSpeechCount += 1
+                }
                 self.state.log("audio", .info,
-                    "stt_stream_end session=\(sessionSnapshot.shortID) current=\(isCurrent) cancelled=\(wasCancelled) real_final=\(gotRealContent) protected=\(withinProtected) audio_buf=\(sessionSnapshot.hasReceivedAudioBuffer) partials=\(sessionSnapshot.hasReceivedPartialTranscript) last_stop=\(sessionSnapshot.lastStopReason.rawValue) restarts=\(sessionSnapshot.restartCount)")
+                    "stt_stream_end session=\(sessionSnapshot.shortID) current=\(isCurrent) cancelled=\(wasCancelled) real_final=\(gotRealContent) protected=\(withinProtected) audio_buf=\(sessionSnapshot.hasReceivedAudioBuffer) partials=\(sessionSnapshot.hasReceivedPartialTranscript) last_stop=\(sessionSnapshot.lastStopReason.rawValue) restarts=\(sessionSnapshot.restartCount) noSpeechStreak=\(self.consecutiveNoSpeechCount)")
 
                 // Restart within protected window if:
                 // - we are still the current session,
@@ -2633,17 +2907,27 @@ final class JarvisController {
                        self.prefs.current.persistentConversationEnabled,
                        self.state.listeningEnabled {
                         // Non-TTS command finished (overlay, clipboard, etc.) —
-                        // restart STT immediately to keep the session alive.
-                        self.state.conversationalRestarts += 1
-                        self.state.persistentSessionActive = true
-                        self.state.log("conv", .info,
-                            "post-command STT restart (armed, no TTS) #\(self.state.conversationalRestarts)")
-                        Task { @MainActor [weak self] in
-                            try? await Task.sleep(nanoseconds: 150_000_000) // 150ms settle
-                            guard let self,
-                                  self.conversationalArmed,
-                                  !self.state.isListening else { return }
-                            self.startConversationalListening()
+                        // restart STT to keep the session alive, unless we have
+                        // hit the consecutive-no-speech limit (nobody is speaking).
+                        if self.consecutiveNoSpeechCount >= self.consecutiveNoSpeechLimit {
+                            self.state.log("conv", .info,
+                                "[STTStartRequest] skipped reason=consecutive_no_speech streak=\(self.consecutiveNoSpeechCount) — returning to passive wake")
+                            self.consecutiveNoSpeechCount = 0
+                            self.conversationalArmed = false
+                            self.state.conversationalArmedDiag = false
+                            self.returnToPassiveWake(reason: .stateTransition)
+                        } else {
+                            self.state.conversationalRestarts += 1
+                            self.state.persistentSessionActive = true
+                            self.state.log("conv", .info,
+                                "post-command STT restart (armed, no TTS) #\(self.state.conversationalRestarts)")
+                            Task { @MainActor [weak self] in
+                                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms settle
+                                guard let self,
+                                      self.conversationalArmed,
+                                      !self.state.isListening else { return }
+                                self.startConversationalListening()
+                            }
                         }
                     } else {
                         self.returnToPassiveWake(
@@ -2660,6 +2944,9 @@ final class JarvisController {
             session.lastStopReason = .recognizerError
             state.log("speech", .error,
                 "stt_engine_start_failed session=\(session.shortID) attempt=\(session.restartCount) error=\(msg)")
+            if reason == .wakeWord {
+                state.log("audio", .error, "[WakeWord] STT blocked reason=engine_start_failed error=\(msg)")
+            }
 
             if Date() < session.minimumListenUntil && !session.isCancelled {
                 // Brief backoff, then retry within protected window.
@@ -2742,6 +3029,9 @@ final class JarvisController {
             // No-op: empty or whitespace-only transcript — do not record, speak, or route.
             return
         }
+
+        // Tell SelfMonitor the user is active — resets idle clock.
+        SelfMonitor.shared.recordUserInteraction()
 
         // === Media suppression gate ===
         // When live media is playing (watch/video mode), do NOT route commands
@@ -2985,13 +3275,63 @@ final class JarvisController {
             return mappedIntent
         }()
 
+        // === Step 2.6: Intent pre-classifier ===
+        // Log intent confidence BEFORE EntityFirstResolver so log ordering matches
+        // the conceptual pipeline order (intent first, then entity resolution).
+        // Conversational phrases (farewell, gratitude) must never reach
+        // EntityFirstResolver — their surface forms can fuzzy-match entity names
+        // via Jaro-Winkler (e.g. "goodbye" → Google, score=0.72).
+        let conversationalPhraseSet: Set<String> = [
+            "goodbye", "bye", "see you", "see ya", "good night", "goodnight", "night",
+            "bye jarvis", "goodbye jarvis", "good night jarvis",
+            "thanks", "thank you", "thank you very much", "thanks a lot", "cheers",
+            "much appreciated", "thanks jarvis", "thank you jarvis",
+            "good morning", "morning", "morning jarvis",
+            "cancel", "never mind", "stop"
+        ]
+        let isConversationalPhrase = conversationalPhraseSet.contains(normalized)
+
+        if let pi = phraseIntent {
+            // Phrase store already classified this — log it before entity resolution
+            let label: String
+            switch pi {
+            case .farewell:                  label = "farewell"
+            case .thankUser:                 label = "conversational"
+            case .canYouHearMe, .areYouListening: label = "conversational"
+            case .openApp, .openURL, .openAppOnPhone: label = "open_app"
+            case .searchMemory:              label = "search"
+            default:
+                label = String(describing: pi).components(separatedBy: "(").first ?? "intent"
+            }
+            Log.intent.info("[Intent] \(label, privacy: .public) confidence=1.0 source=phrase_store")
+        } else if isConversationalPhrase {
+            // Conversational phrase not in phrase store (safety net) — still skip entity resolution
+            Log.intent.info("[Intent] conversational confidence=1.0 source=pre_classifier phrase=\"\(normalized, privacy: .public)\"")
+        } else {
+            // Pre-classify entity-needing intents so [Intent] logs precede [EntityResolver] logs
+            let n = normalized
+            if n.hasPrefix("open ") || n.hasPrefix("launch ") || n.hasPrefix("start ") {
+                Log.intent.info("[Intent] open_app confidence=0.9 source=pre_classifier")
+            } else if n.hasPrefix("search ") || n.hasPrefix("search for ") || n.hasPrefix("find ") || n.hasPrefix("look up ") {
+                Log.intent.info("[Intent] search confidence=0.9 source=pre_classifier")
+            } else if n.hasPrefix("call ") || n.hasPrefix("phone ") || n.hasPrefix("ring ") {
+                Log.intent.info("[Intent] call confidence=0.9 source=pre_classifier")
+            } else if n.hasPrefix("message ") || n.hasPrefix("text ") || n.hasPrefix("send ") {
+                Log.intent.info("[Intent] message confidence=0.9 source=pre_classifier")
+            } else if n.hasPrefix("navigate to ") || n.hasPrefix("directions to ") || n.hasPrefix("go to ") {
+                Log.intent.info("[Intent] navigate confidence=0.9 source=pre_classifier")
+            }
+        }
+
         // === Step 2.7: EntityFirstResolver ===
         // Runs AFTER phrase-store matching so Jarvis's own overlay vocabulary
         // always wins before external entity resolution.  A bare noun like "news"
         // must open the Jarvis News overlay, not com.apple.news.
         // EntityFirstResolver only activates when the phrase-store has no match —
         // i.e. the user said something genuinely entity-specific ("open EuroNews").
-        if phraseIntent == nil {
+        // Conversational phrases bypass entity resolution entirely — their surface
+        // forms can fuzzy-match entity names and produce nonsensical results.
+        if phraseIntent == nil && !isConversationalPhrase {
             if let entityResult = await EntityFirstResolver.shared.resolve(
                 transcript: normalized, rawText: rawTranscript
             ) {
@@ -3005,11 +3345,16 @@ final class JarvisController {
                 }
                 if let binding = EntityIntentBinder.bind(entityResult) {
                     state.log("entity", .info,
-                        "entity_resolved span=\"\(entityResult.originalSpan)\" → \(entityResult.displayName) [\(entityResult.entityType.rawValue)] conf=\(String(format:"%.2f",entityResult.confidence)) provider=\(entityResult.provider) skipped_phrase_store=true")
+                        "[EntityResolver] resolved span=\"\(entityResult.originalSpan)\" → \(entityResult.displayName) [\(entityResult.entityType.rawValue)] conf=\(String(format:"%.2f",entityResult.confidence)) action=\(entityResult.action.rawValue) provider=\(entityResult.provider)")
+                    state.log("intent", .info,
+                        "[ActionGate] pass entity=\(entityResult.displayName) intent=\(binding.intent) action=\(entityResult.action.rawValue)")
                     rollingMemory.addUserTurn(rawTranscript)
                     speak(binding.spokenPrefix)
                     await execute(binding.intent)
                     return
+                } else {
+                    state.log("intent", .info,
+                        "[IntentGate] blocked entity=\(entityResult.displayName) [\(entityResult.entityType.rawValue)] conf=\(String(format:"%.2f",entityResult.confidence)) action=\(entityResult.action.rawValue) reason=no_explicit_verb — falling through to phrase store")
                 }
             }
         }
@@ -3406,7 +3751,11 @@ final class JarvisController {
         case .whatCanYouSee, .lookAtThis:
             showToast("Looking now…", icon: "eye")
             state.visionIsLoading = true
+            state.log("vision", .info, "[VisionCommand] intent=whatCanYouSee — starting captureDescription(.describe)")
+            state.log("vision", .info, "[CameraResolver] resolving available cameras via CameraAwarenessService")
             let (sceneDesc, sceneResult) = await cameraAwareness.captureDescription(mode: .describe)
+            state.log("vision", .info, "[CameraFrame] captureDescription completed result=\(String(describing: sceneResult).prefix(80))")
+            state.log("vision", .info, "[VisionAnalysis] description='\(sceneDesc.prefix(120))'")
             applyVisionResult(sceneResult, summary: sceneDesc, mode: .describe)
             overlayManager.open(.camera)
             state.sessionLastOverlayKind = .camera
@@ -4112,8 +4461,17 @@ final class JarvisController {
             speak(renderer.render(ResponseKey.surveillanceStopped))
 
         case .describeVisualScene:
-            let description = VisionModule.shared.describeCurrentScene()
-            speak(renderer.render(ResponseKey.sceneDescription, ["description": description]))
+            state.log("vision", .info, "[VisionCommand] intent=describeVisualScene — routing to captureDescription(.describe)")
+            showToast("Looking now…", icon: "eye")
+            state.visionIsLoading = true
+            state.log("vision", .info, "[CameraResolver] resolving camera via CameraAwarenessService")
+            let (sceneDesc2, sceneResult2) = await cameraAwareness.captureDescription(mode: .describe)
+            state.log("vision", .info, "[CameraFrame] captureDescription completed result=\(String(describing: sceneResult2).prefix(80))")
+            state.log("vision", .info, "[VisionAnalysis] description='\(sceneDesc2.prefix(120))'")
+            applyVisionResult(sceneResult2, summary: sceneDesc2, mode: .describe)
+            overlayManager.open(.camera)
+            state.sessionLastOverlayKind = .camera
+            speak(sceneDesc2)
 
         case .whoIsAtLocation(let location):
             let loc = location.isEmpty ? "door" : location
@@ -4544,6 +4902,33 @@ final class JarvisController {
              .githubLocalStats:
             gitHubIntentHandler.handle(intent)
 
+        case .openGitHubIssueOverlay(let withContext):
+            openGitHubIssueOverlay(withContext: withContext)
+
+        case .runStabilityReport:
+            speak("Opening stability diagnostic report.")
+            SelfMonitor.shared.openManualStabilityReport(controller: self)
+
+        case .whyAreYouCrashing:
+            // Speak the top CPU suspect, log it, open the profiler overlay
+            let summary = SelfMonitor.shared.spokenSuspectSummary()
+            speak(summary)
+            _ = SelfMonitor.shared.topSuspectJSON()   // logs [SelfMonitor] CURRENT TOP SUSPECT
+            overlayManager.open(.runtimeDiagnostics)
+
+        case .openCrashLog:
+            speak("Opening the crash log.")
+            let fm = FileManager.default
+            if let base = try? fm.url(for: .applicationSupportDirectory,
+                                      in: .userDomainMask, appropriateFor: nil, create: false) {
+                let logURL = base.appendingPathComponent("JarvisMac/crash-breadcrumbs.log")
+                NSWorkspace.shared.open(logURL)
+            }
+
+        case .enterSafeMode:
+            speak("Entering safe mode now.")
+            SelfMonitor.shared.enterSafeDegradedMode(reason: "User requested via voice")
+
         // MARK: Shopify — see ShopifyIntentHandler.swift
 
         case .showShopifyOverlay, .shopifyOrders, .shopifyRevenue, .shopifyFulfilment, .shopifyStatus:
@@ -4769,6 +5154,10 @@ final class JarvisController {
             speak(renderer.render(ResponseKey.hearingConfirm))
         case .areYouListening:
             speak(renderer.render(ResponseKey.listeningConfirm))
+        case .farewell:
+            speak(renderer.render(ResponseKey.farewellAcknowledge))
+        case .thankUser:
+            speak(renderer.render(ResponseKey.gratitudeAcknowledge))
 
         // Always-on listening lifecycle
         case .disableListening:
@@ -5590,28 +5979,79 @@ final class JarvisController {
             "user_expected": userExpected,
         ])
 
-        // Optional GitHub issue creation (dedup + cooldown enforced inside).
+        // Remember this transcript so "log this as an issue" can pre-fill the overlay.
+        state.lastUnmatchedTranscript = rawText
         let snapshot = unmatched.entry(normalizedText: normalized)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard let entry = snapshot,
-                  self.prefs.current.githubIssueLoggingEnabled,
-                  self.prefs.current.githubIssueAutoCreate else {
-                // Speak the local-only message.
-                self.speak("I don't know how to do that yet. I've logged it so we can wire it in.")
-                return
-            }
-            let result = await self.githubIssueService.createIssueIfNeeded(
-                for: entry, store: self.unmatched)
-            switch result {
-            case .created:
-                self.speak("I don't know how to do that yet. I've opened a GitHub issue for it.")
-            case .skippedDuplicate:
-                self.speak("I don't know how to do that yet. I've already logged it on GitHub previously.")
-            case .skippedCooldown, .skippedDisabled, .skippedNotConfigured, .failed:
-                self.speak("I don't know how to do that yet. I've logged it so we can wire it in.")
-            }
+        let context  = snapshot.map { e -> String in
+            [e.rawText, e.currentApp, e.activeOverlay, e.lastIntent]
+                .compactMap { $0 }.joined(separator: " | ")
         }
+        state.lastUnmatchedContext = context
+
+        // Open the GitHub Issue Overlay (never silent).
+        // The user reviews, edits, and submits — nothing is created automatically.
+        speak("I don't know how to do that yet. Opening a GitHub issue for your review.")
+        openGitHubIssueOverlay(rawTranscript: rawText, context: context)
+    }
+
+    // MARK: - GitHub Issue Overlay
+
+    /// Open the GitHub Issue Overlay for a manual voice request.
+    /// `withContext = true` pre-fills from the most recent unknown-command context.
+    func openGitHubIssueOverlay(withContext: Bool = false) {
+        let defaultRepo = defaultGitHubRepo
+        if withContext, let lastUnknown = state.lastUnmatchedTranscript {
+            GitHubIssueDraftStore.shared.openManual(
+                rawTranscript: lastUnknown,
+                context: state.lastUnmatchedContext,
+                defaultRepo: defaultRepo
+            )
+        } else {
+            GitHubIssueDraftStore.shared.openManual(defaultRepo: defaultRepo)
+        }
+        overlayManager.open(.githubIssue)
+    }
+
+    /// Open the overlay pre-filled from a runtime error (called by the unknown-command path).
+    private func openGitHubIssueOverlay(rawTranscript: String, context: String?) {
+        let defaultRepo = defaultGitHubRepo
+        GitHubIssueDraftStore.shared.openManual(
+            rawTranscript: rawTranscript,
+            context: context,
+            defaultRepo: defaultRepo
+        )
+        overlayManager.open(.githubIssue)
+    }
+
+    /// Open the overlay for an automatic runtime error.
+    func openGitHubIssueOverlayForError(
+        title: String,
+        description: String,
+        area: GitHubIssueArea,
+        severity: GitHubIssueSeverity,
+        logs: String,
+        signature: String?
+    ) {
+        let opened = GitHubIssueDraftStore.shared.openForError(
+            title: title,
+            description: description,
+            area: area,
+            severity: severity,
+            logs: logs,
+            signature: signature,
+            defaultRepo: defaultGitHubRepo
+        )
+        if opened {
+            overlayManager.open(.githubIssue)
+        }
+    }
+
+    var defaultGitHubRepo: String {
+        let owner = prefs.current.githubIssueRepoOwner
+        let repo  = prefs.current.githubIssueRepoName
+        if !owner.isEmpty && !repo.isEmpty { return "\(owner)/\(repo)" }
+        // Fall back to the main GitHub PAT repo if configured
+        return ""
     }
 
     // MARK: - Tailscale
@@ -5638,15 +6078,22 @@ final class JarvisController {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let daemonAlive = await DaemonManager.shared.checkDaemonHealth()
+            // Two quick health checks — daemon binds fast; more retries just spam the log.
+            var daemonAlive = false
+            for attempt in 1...2 {
+                daemonAlive = await DaemonManager.shared.checkDaemonHealth()
+                if daemonAlive { break }
+                if attempt < 2 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+            }
             if daemonAlive {
                 Log.net.info("[BrainGateway] Daemon owns port 8765 — skipping in-app server")
                 self.state.daemonUnavailable = false
                 return
             }
-            // Daemon not running — surface diagnostic, do NOT bind port 8765
-            Log.net.error("[BrainGateway] JarvisBrainDaemon is not running. Cross-device features unavailable.")
+            // Daemon not reachable — mark offline so WebSocket retry loop stops immediately.
+            Log.net.warning("[BrainGateway] JarvisBrainDaemon not running — Brain Offline. Cross-device features unavailable.")
             self.state.daemonUnavailable = true
+            // Bridge will keep retrying automatically — no longer sets permanentlyOffline
             self._startLocalBrainContextServer()
         }
     }
@@ -7053,11 +7500,23 @@ final class JarvisController {
             cameraWatching: state.cameraWatchActive
         )
         if newAttention != state.attentionState {
+            let prevAttention = state.attentionState
             state.attentionState = newAttention
             context.setAttention(newAttention)
             activityTimeline.record(kind: .attentionChange,
                                     title: newAttention.displayName,
                                     appName: state.activeApp)
+            // Log whether this transition has any effect on wake-word listening.
+            // Attention state changes do NOT suspend wake-word listening in this
+            // app — they only affect proactivity delivery. Log this explicitly so
+            // attention oscillations in the log are not mistaken for audio events.
+            Log.app.info("""
+                [Attention] \(prevAttention.rawValue, privacy: .public) → \
+                \(newAttention.rawValue, privacy: .public) \
+                wakeArmed=\(self.state.isWakeArmed, privacy: .public) \
+                listeningEnabled=\(self.state.listeningEnabled, privacy: .public) — \
+                attention does not suspend wake word
+                """)
         }
 
         // Sync overlay list into context
@@ -7461,8 +7920,12 @@ final class JarvisController {
 
     func showCommandCentre() {
         state.commandCentreVisible = true
-        if let win = mainWindow(), !win.styleMask.contains(.fullScreen) {
-            win.toggleFullScreen(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if let win = mainWindow() {
+            win.makeKeyAndOrderFront(nil)
+            if !win.styleMask.contains(.fullScreen) {
+                win.toggleFullScreen(nil)
+            }
         }
     }
 
@@ -7607,16 +8070,21 @@ final class JarvisController {
                     // Priority 1: pending question — always listen, enter .awaitingResponse.
                     // Priority 2: conversational window active — listen without wake word.
                     // Priority 3: return to passive wake.
+                    // TTS just finished a real response — Jarvis spoke something, so
+                    // reset the no-speech streak (this counts as conversational progress).
+                    self.consecutiveNoSpeechCount = 0
                     self.state.log("conv", .info,
                         "tts_finished armed=\(self.conversationalArmed) sessionActive=\(self.conversationalSessionActive) hasPending=\(self.activePendingContext != nil) followUpEnabled=\(self.prefs.current.conversationalFollowUpEnabled) listeningEnabled=\(self.state.listeningEnabled)")
                     if self.activePendingContext != nil && self.state.listeningEnabled {
                         self.state.phase = .awaitingResponse
+                        self.state.log("audio", .info, "[STTStartRequest] source=awaitingResponse reason=pendingContext")
                         self.startConversationalListening()
                         self.scheduleAwaitingResponseTimeout()
                     } else if (self.conversationalArmed || self.conversationalSessionActive)
                        && self.prefs.current.conversationalFollowUpEnabled
                        && self.state.listeningEnabled {
                         self.conversationalSessionActive = true
+                        self.state.log("audio", .info, "[STTStartRequest] source=ttsFinished reason=conversationalArmed")
                         self.startConversationalListening()
                     } else {
                         self.returnToPassiveWake(reason: .stateTransition)

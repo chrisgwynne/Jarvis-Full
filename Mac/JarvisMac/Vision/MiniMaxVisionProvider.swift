@@ -126,20 +126,23 @@ final class MiniMaxVisionProvider: VisionProvider {
         let totalStart = Date()
 
         // ── Availability gate ──────────────────────────────────────────────
+        let configuredModel = modelName().trimmingCharacters(in: .whitespaces)
+        let provEnabled = isEnabled()
+        log.info("[MiniMaxVision] configuredModel=\(configuredModel) providerEnabled=\(provEnabled)")
         guard isEnabled() else {
             return await earlyFallback(image: image, mode: mode, reason: "MiniMax vision not enabled")
         }
         guard let key = apiKey(), !key.isEmpty else {
-            log.warning("MiniMax vision: API key missing")
-            return await earlyFallback(image: image, mode: mode, reason: "API key missing")
+            log.warning("[MiniMaxVision] failed status=token_missing")
+            return await earlyFallback(image: image, mode: mode, reason: "MiniMax token is missing.")
         }
-        let model = modelName().trimmingCharacters(in: .whitespaces)
+        let model = configuredModel
         guard !model.isEmpty else {
-            log.warning("MiniMax vision: model name empty")
-            return await earlyFallback(image: image, mode: mode, reason: "Vision model name empty")
+            log.warning("[MiniMaxVision] failed status=model_empty")
+            return await earlyFallback(image: image, mode: mode, reason: "MiniMax vision model is not configured.")
         }
         guard let endpointURL = buildEndpoint() else {
-            log.error("MiniMax vision: invalid base URL")
+            log.error("[MiniMaxVision] failed status=invalid_base_url")
             return await earlyFallback(image: image, mode: mode, reason: "Invalid MiniMax base URL")
         }
 
@@ -162,12 +165,14 @@ final class MiniMaxVisionProvider: VisionProvider {
         let (systemPrompt, userPrompt) = buildPrompts(mode: mode, hasROI: roiJpeg != nil)
 
         // ── Call MiniMax ───────────────────────────────────────────────────
+        log.info("[MiniMaxVision] resolvedModel=\(model) endpoint=\(endpointURL.absoluteString)")
         let client = OpenAIChatClient(
             endpoint:            endpointURL,
             authorizationHeader: "Bearer \(key)",
             model:               model
         )
 
+        log.info("[MiniMaxVision] requestStarted")
         let requestStart = Date()
         do {
             let (rawText, _) = try await client.completeWithVisionImages(
@@ -193,6 +198,7 @@ final class MiniMaxVisionProvider: VisionProvider {
                 summary    = s.qualifiedSummary()
                 entities   = s.detectedEntities
                 confidence = s.confidenceScore
+                log.info("[MiniMaxVision] success")
                 log.info("""
                     MiniMax vision OK (JSON): model=\(model, privacy: .public) \
                     encode=\(encodeMs)ms request=\(requestMs)ms total=\(totalMs)ms \
@@ -228,11 +234,37 @@ final class MiniMaxVisionProvider: VisionProvider {
             let requestMs = Int(-requestStart.timeIntervalSinceNow * 1000)
             let totalMs   = Int(-totalStart.timeIntervalSinceNow * 1000)
             let reason = (error as? LLMError)?.errorDescription ?? error.localizedDescription
-            log.warning("MiniMax vision failed (\(reason, privacy: .public)) — falling back. \(requestMs)ms")
+            log.warning("[MiniMaxVision] failed status=\(reason, privacy: .public) model=\(model) \(requestMs)ms")
 
+            // HTTP 400 typically means an invalid/unknown model name. Return the exact
+            // error rather than the Apple Vision fallback text (which says "Enable MiniMax
+            // in Settings → AI" — misleading when MiniMax IS enabled but misconfigured).
+            let isModelError = reason.contains("400")
+                            || reason.localizedCaseInsensitiveContains("invalid")
+                            || reason.localizedCaseInsensitiveContains("unknown model")
+
+            if isModelError {
+                log.info("[MiniMaxVision] success=false model_invalid=true returning error description")
+                let diagResult = VisionProviderResult(
+                    description:      "MiniMax vision model is invalid: \"\(model)\". Check Settings → AI → MiniMax model.",
+                    providerUsed:     providerName,
+                    modelUsed:        model,
+                    latencyMs:        totalMs,
+                    imageWidthPx:     scaledW,
+                    imageSizeKB:      sizeKB,
+                    error:            reason,
+                    timestamp:        Date(),
+                    detectedEntities: [],
+                    confidenceScore:  nil
+                )
+                await updateDiagnostics(diagResult, encodeMs: encodeMs, requestMs: requestMs)
+                return diagResult
+            }
+
+            // Other errors (network, timeout, etc.) — fall back to Apple Vision.
             let appleResult = await fallback.analyze(image: image, mode: mode)
             let diagResult = VisionProviderResult(
-                description:      appleResult.description,
+                description:      "MiniMax vision request failed: \(reason)",
                 providerUsed:     "Apple Vision (fallback)",
                 modelUsed:        nil,
                 latencyMs:        totalMs,
@@ -240,7 +272,7 @@ final class MiniMaxVisionProvider: VisionProvider {
                 imageSizeKB:      sizeKB,
                 error:            reason,
                 timestamp:        Date(),
-                detectedEntities: [],
+                detectedEntities: appleResult.detectedEntities,
                 confidenceScore:  nil
             )
             await updateDiagnostics(diagResult, encodeMs: encodeMs, requestMs: requestMs)
