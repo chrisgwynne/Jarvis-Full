@@ -82,6 +82,8 @@ final class AppState {
     var listeningSessionShortID: String = ""   // first 8 chars of active session UUID
     var listeningMinRemainingMs: Int = 0       // ms remaining of protected listen window
     var listeningSawAudioBuffer: Bool = false  // first audio buffer reached recognizer
+    var micInputLevel: Float = 0              // 0.0-1.0 RMS; near-zero means no signal
+    var sttInputLevel: Float = 0               // RMS from active STT session tap
     var listeningRestartCount: Int = 0         // protected-window restart count for active session
 
     // Article overlay (in-app web view)
@@ -260,10 +262,21 @@ final class AppState {
     var lastRemoteRouteId: String = ""
     var lastRemoteActivityText: String = ""
 
+    // GitHub issue overlay context — stores the most recent unknown command
+    // so "log this as an issue" can pre-fill the form.
+    var lastUnmatchedTranscript: String? = nil
+    var lastUnmatchedContext: String?    = nil
+
     // Daemon state
     /// True when JarvisBrainDaemon is enabled in prefs but not reachable.
     /// Surfaced in UI to prompt the user to start the daemon.
     var daemonUnavailable: Bool = false
+    /// True when the daemon is running but the Brain subsystem is degraded
+    /// (e.g. database offline). Set by RuntimeCoordinator health callbacks.
+    var brainDegraded: Bool = false
+    /// Short reason string for the degraded state, e.g.
+    /// "Brain degraded: database offline".
+    var brainDegradedReason: String = ""
 
     // Error state
     var lastError: String? = nil
@@ -273,6 +286,9 @@ final class AppState {
     /// whenever the toggle changes. Controls animation rates, blur effects,
     /// and WKWebView autoplay throughout the UI.
     var safeMode: Bool = true
+    /// Set by SelfMonitor when it detects imminent instability and activates Safe Degraded Mode.
+    var safeModeActive: Bool = false
+    var safeModeReason: String = ""
     /// Set to true only when the user explicitly says "watch news" — keeps
     /// the WKWebView live player hidden on a plain "show news" command.
     var newsLivePlayerVisible: Bool = false

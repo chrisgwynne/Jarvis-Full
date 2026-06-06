@@ -58,20 +58,30 @@ enum KeychainAccount {
         webSocketAuthToken,
     ]
 
-    /// Every key the app may ever need — used by SecretsSnapshot.load() to
-    /// warm the KeychainService cache in a single startup pass.
-    static let allKnownKeys: [String] = [
+    /// Keys read unconditionally at startup — small set, always needed.
+    /// Only these trigger physical Keychain reads during bootstrap.
+    static let coreStartupKeys: [String] = [
+        homeAssistantToken,   // HA integration bootstraps immediately
+        gatewayToken,         // daemon WebSocket auth
+        webSocketAuthToken,   // pairing / QR code display
+    ]
+
+    /// Feature-specific keys — loaded lazily on first use via the cache.
+    /// These do NOT trigger reads at startup; if the feature is never used
+    /// in a session the physical read never happens.
+    static let featureKeys: [String] = [
         xaiAPIKey,
         miniMaxAPIKey,
         geminiAPIKey,
-        homeAssistantToken,
         todoistAPIToken,
         githubPersonalAccessToken,
         shopifyAccessToken,
         spotifyPersonalToken,
-        webSocketAuthToken,
         githubIssuesToken,
-        gatewayToken,
         brainServerToken,
     ]
+
+    /// Every key the app may ever need. Used only for diagnostics and bulk
+    /// invalidation — NOT for startup preload (use coreStartupKeys instead).
+    static let allKnownKeys: [String] = coreStartupKeys + featureKeys
 }

@@ -128,6 +128,16 @@ final class LLMFallbackHandler {
             speak(acknowledgements[ackIndex])
         }
 
+        // Classify query domain before assembling context.
+        // Only project/codebase knowledge is gated — personal memory and Obsidian
+        // notes are always injected (they are user-specific, not Jarvis-specific).
+        let isProjectQuery = isProjectRelatedQuery(normalized)
+        let isVisionQuery  = isVisionRelatedQuery(normalized)
+        let domainLabel = isProjectQuery ? "project" : "general"
+        let visionLabel = isVisionQuery ? "yes" : "no"
+        state.log("llm", .info,
+            "[ConversationTrace] userTranscript=\"\(String(rawText.prefix(80)))\" domain=\(domainLabel) vision=\(visionLabel)")
+
         // Context assembly
         let rawCtx = context.snapshot.summaryString()
         var ctx = PromptBudgeter.trimContext(rawCtx)
@@ -153,23 +163,25 @@ final class LLMFallbackHandler {
             ? LLMPrompts.intentClassifierSystem
             : personalityPrompt + "\n\n---\n\n" + LLMPrompts.intentClassifierSystem
 
-        // Memory injection
+        // Memory injection — always included (personal memory is user-specific, not project-specific)
         if let svc = search {
             let memResults = await svc.hybridSearch(query: rawText, limit: 3)
             let memTexts = memResults.filter { $0.kind == .memory }.map { $0.text }
             if !memTexts.isEmpty {
                 let memBlock = "Relevant memories:\n" + memTexts.map { "- \($0)" }.joined(separator: "\n")
                 ctx = ctx.isEmpty ? memBlock : ctx + "\n\n" + memBlock
+                state.log("llm", .info, "[ContextInjection] source=personalMemory count=\(memTexts.count)")
             }
         } else if let mem = memories {
             let memRows = await mem.search(query: rawText, limit: 3)
             if !memRows.isEmpty {
                 let memBlock = "Relevant memories:\n" + memRows.map { "- \($0.text)" }.joined(separator: "\n")
                 ctx = ctx.isEmpty ? memBlock : ctx + "\n\n" + memBlock
+                state.log("llm", .info, "[ContextInjection] source=memoryStore count=\(memRows.count)")
             }
         }
 
-        // Obsidian vault RAG
+        // Obsidian vault RAG — always included when enabled (personal notes)
         if prefs.current.obsidianLLMContextEnabled,
            let vaultCtx = await obsidianVault.contextForLLM(
                query: rawText,
@@ -177,26 +189,37 @@ final class LLMFallbackHandler {
                maxCharsPerNote: 600
            ) {
             ctx = ctx.isEmpty ? vaultCtx : ctx + "\n\n" + vaultCtx
+            state.log("llm", .info, "[ContextInjection] source=obsidianVault")
         }
 
-        // Brain long-term memory context
+        // Brain long-term memory context — always included (user history)
         let brainCtx = await BrainMemoryStore.shared.contextForLLM(query: rawText, maxItems: 5)
         if !brainCtx.isEmpty {
             ctx = ctx.isEmpty ? brainCtx : ctx + "\n\n" + brainCtx
+            state.log("llm", .info, "[ContextInjection] source=brainMemory")
         }
 
-        // Codebase self-knowledge context (for queries about Jarvis itself)
-        if prefs.current.selfKnowledgeEnabled {
+        // Codebase self-knowledge context — ONLY for project-related queries.
+        // Gated here so sport/general/opinion questions never receive camera
+        // vision capability text, feature implementation status, or code graph
+        // snippets. The user asked about Jarvis's codebase, not Liverpool FC.
+        if prefs.current.selfKnowledgeEnabled, isProjectQuery {
             let selfSvc = JarvisSelfQueryService.shared
             if selfSvc.isAboutSelf(normalized) {
+                state.log("llm", .info, "[Retrieval] source=selfKnowledge query=\"\(String(rawText.prefix(60)))\"")
                 if let result = await selfSvc.query(userQuery: rawText,
                                                     activeTopic: RollingDialogueMemory.shared.activeTopic) {
                     let block = selfSvc.contextBlock(for: result)
                     if !block.isEmpty {
                         ctx = ctx.isEmpty ? block : ctx + "\n\n" + block
+                        state.log("llm", .info, "[ContextInjection] source=selfKnowledge features=\(result.relevantFeatures.count)")
                     }
                 }
+            } else {
+                state.log("llm", .info, "[Retrieval] source=selfKnowledge skipped reason=notAboutSelf")
             }
+        } else if !isProjectQuery {
+            state.log("llm", .info, "[Retrieval] source=projectKnowledge skipped reason=nonProjectQuery domain=general")
         }
 
         // Rolling dialogue context (recent turns for pronoun resolution)
@@ -205,11 +228,18 @@ final class LLMFallbackHandler {
             ctx = ctx.isEmpty ? dialogueBlock : ctx + "\n\n" + dialogueBlock
         }
 
-        // Vision context (fresh < 60s)
+        // Vision context — ONLY when user is asking about camera/screen/vision.
+        // Never inject "Camera Vision is available. AVCaptureSession..." for
+        // unrelated queries like sports opinions or general knowledge questions.
         let visionCtx = state.lastVisionContext
         if visionCtx.isFresh && !visionCtx.summary.isEmpty {
-            let vBlock = visionCtx.toLLMContextString()
-            ctx = ctx.isEmpty ? vBlock : ctx + "\n\n" + vBlock
+            if isVisionQuery {
+                let vBlock = visionCtx.toLLMContextString()
+                ctx = ctx.isEmpty ? vBlock : ctx + "\n\n" + vBlock
+                state.log("llm", .info, "[ContextInjection] source=visionContext")
+            } else {
+                state.log("llm", .info, "[ContextInjection] source=visionContext skipped reason=nonVisionQuery")
+            }
         }
 
         // Post-tool reasoning context (one-shot, consumed here)
@@ -247,7 +277,14 @@ final class LLMFallbackHandler {
         } catch {
             latency.mark(.llmComplete)
             state.llmLastError = error.localizedDescription
-            state.log("llm", .warn, "llm_fallback_failed: \(error.localizedDescription)")
+            // providerDisabled means the user has not configured the provider —
+            // expected, not a real failure. Log at info so it doesn't appear
+            // as a warning every time an unconfigured provider is skipped.
+            if case LLMError.providerDisabled = error {
+                state.log("llm", .info, "llm_skipped: \(error.localizedDescription)")
+            } else {
+                state.log("llm", .warn, "llm_fallback_failed: \(error.localizedDescription)")
+            }
             if case LLMError.timeout = error {
                 speak(renderer.render(ResponseKey.llmTimeoutFallback))
             } else if case LLMError.notConfigured = error, error.localizedDescription.contains("circuit") {
@@ -304,6 +341,9 @@ final class LLMFallbackHandler {
             setPendingContext(pendingCtx)
         }
 
+        state.log("llm", .info,
+            "[PromptPreview] ctxChars=\(ctx.count) userPromptChars=\(rawText.count)")
+
         switch LLMIntentBridge.intent(from: json) {
 
         case .success(let intent):
@@ -357,5 +397,35 @@ final class LLMFallbackHandler {
                 return false
             }
         }
+    }
+
+    // MARK: - Domain classification helpers
+
+    /// Returns true when the query is specifically about Jarvis, its codebase,
+    /// connected devices, or home automation. Used to gate project/codebase
+    /// context injection — sport, opinion, and general questions should never
+    /// receive camera capability text, feature implementation status, or code
+    /// graph snippets.
+    private func isProjectRelatedQuery(_ normalized: String) -> Bool {
+        let signals: [String] = [
+            "jarvis", "your code", "your feature", "your camera", "your vision",
+            "your setting", "your log", "your debug", "your build", "your repo",
+            "your implementation", "this app", "this project", "codebase",
+            "homeassistant", "home assistant", "smart home", "the light", "the switch",
+            "turn on", "turn off", "my light", "my device", "automation",
+            "wake word", "speech", "microphone", "recognition", "tts", "stt"
+        ]
+        return signals.contains(where: { normalized.contains($0) })
+    }
+
+    /// Returns true when the query is specifically about camera, vision, or
+    /// screen content. Used to gate injection of live camera frame context.
+    private func isVisionRelatedQuery(_ normalized: String) -> Bool {
+        let signals: [String] = [
+            "camera", "vision", "what do you see", "what can you see",
+            "screen", "mjpeg", "stream", "capture", "frame", "webcam",
+            "what's on screen", "look at", "show me what"
+        ]
+        return signals.contains(where: { normalized.contains($0) })
     }
 }

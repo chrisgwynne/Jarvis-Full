@@ -2,11 +2,23 @@ import SwiftUI
 
 /// Single-screen Jarvis view. Orb sits front-and-centre when idle;
 /// slides to a compact corner pip when overlay panels are open.
-/// Developer diagnostics are available via the Debug HUD (⌘⇧D);
-/// they are never a separate full-screen mode.
+///
+/// Visual hierarchy (back to front):
+///   1. Blueprint background
+///   2. Stage (orb + transcript)
+///   3. Overlay panels
+///   4. Spatial interaction layer
+///   5. Calibration overlay
+///   6. File search overlay
+///   7. Toast notifications
+///   8. Command dashboard (from dock ☰)
+///   9. Control dock (bottom-centre, hover to show)
+///   10. Debug HUD (developer only, ⌘⇧D)
 struct CommandCentreView: View {
     let state: AppState
     let controller: JarvisController
+
+    @State private var isDashboardVisible = false
 
     private var hasOverlay: Bool {
         !controller.overlayManager.overlays.isEmpty
@@ -14,7 +26,7 @@ struct CommandCentreView: View {
 
     var body: some View {
         ZStack {
-            // 1. Blueprint background — always visible
+            // 1. Background
             BlueprintBackgroundView(
                 phaseColor: state.phase.accentColor,
                 ambientEnabled: state.ambientModeEnabled,
@@ -22,30 +34,24 @@ struct CommandCentreView: View {
                 safeMode: state.safeMode
             )
 
-            // 2. Stage — orb + transcript; orb animates to corner on overlay open
-            JarvisStageView(state: state, hasOverlay: hasOverlay)
+            // 2. Stage — orb + transcript
+            JarvisStageView(state: state, hasOverlay: hasOverlay,
+                            useLightweightOrb: controller.prefs.current.useLightweightOrb)
 
-            // 3. Overlay panels (news, chat, notifications, …)
+            // 3. Overlay panels
             OverlayHostView(state: state,
                             controller: controller,
                             manager: controller.overlayManager)
 
-            // 3.5. Spatial interaction layer — ambient, spans the full stage.
-            //      Always mounted; visible only when a hand is detected.
-            //      allowsHitTesting(false) — never blocks mouse or keyboard.
+            // 4. Spatial interaction layer (non-blocking)
             SpatialInteractionLayer(coordinator: controller.spatialCoordinator,
                                     hasOverlay: hasOverlay)
                 .allowsHitTesting(false)
 
-            // 3.6. Hand calibration overlay — shown over the full stage when
-            //      the user triggers calibration from Settings → Gestures.
-            //      CalibrationOverlayPresenter observes the coordinator so it
-            //      re-renders when isCalibrating changes (CommandCentreView
-            //      itself uses `let controller` and won't react to coordinator
-            //      @Published changes directly).
+            // 5. Hand calibration
             CalibrationOverlayPresenter(coordinator: controller.spatialCoordinator)
 
-            // 4. File search overlay — bottom-centred, multi-result findFile
+            // 6. File search overlay
             if state.fileSearchOverlayVisible && !state.fileSearchResults.isEmpty {
                 VStack {
                     Spacer()
@@ -54,54 +60,70 @@ struct CommandCentreView: View {
                         query: state.fileSearchQuery,
                         systemController: controller.systemController
                     ) {
-                        withAnimation(.spring(duration: 0.25)) {
+                        withAnimation(JarvisMotion.normalEase) {
                             state.fileSearchOverlayVisible = false
                         }
                     }
-                    .padding(.bottom, state.statusStripVisible ? 56 : 34)
+                    .padding(.bottom, 96)
                 }
-                .transition(.opacity)
-                .animation(.spring(duration: 0.28, bounce: 0.12),
-                           value: state.fileSearchOverlayVisible)
+                .transition(JarvisMotion.panel)
+                .animation(JarvisMotion.normalEase, value: state.fileSearchOverlayVisible)
             }
 
-            // 5. Toast — bottom-centred, auto-fades
+            // 7. Toast — auto-fades, bottom-centre
             VStack {
                 Spacer()
                 CommandResultToast(message: state.toastMessage, icon: state.toastIcon)
-                    .padding(.bottom, state.statusStripVisible ? 44 : 22)
-                    .animation(.spring(duration: 0.28, bounce: 0.18),
-                               value: state.toastMessage)
+                    .padding(.bottom, 96)
             }
 
-            // 6. Status strip
-            if state.statusStripVisible {
-                VStack {
-                    Spacer()
-                    MinimalStatusStrip(state: state)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+            // 8. Command dashboard — slides up from bottom
+            if isDashboardVisible {
+                CommandDashboardView(state: state,
+                                     controller: controller,
+                                     isVisible: $isDashboardVisible)
+                    .transition(JarvisMotion.panel)
             }
 
-            // 7. Debug HUD — bottom-trailing corner overlay
+            // 9. Control dock — hover-reveal, bottom-centre
+            ControlDockView(state: state,
+                            controller: controller,
+                            isDashboardVisible: $isDashboardVisible)
+
+            // 10. Debug HUD — developer only, ⌘⇧D to toggle
             if state.debugHUDVisible {
                 DebugHUDView(state: state, controller: controller)
                     .frame(maxWidth: .infinity, maxHeight: .infinity,
                            alignment: .bottomTrailing)
                     .padding(12)
-                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+                    .transition(JarvisMotion.panel)
             }
 
-            // 8. Always-visible corner controls
-            StageCornerControls(state: state, controller: controller)
-                .frame(maxWidth: .infinity, maxHeight: .infinity,
-                       alignment: .topTrailing)
+            // 11. Safe Degraded Mode banner — top of screen, dismissable
+            if state.safeModeActive {
+                VStack {
+                    SafeModeBanner(reason: state.safeModeReason) {
+                        SelfMonitor.shared.exitSafeDegradedMode()
+                    }
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(JarvisMotion.normalEase, value: state.safeModeActive)
+            }
         }
         .frame(minWidth: 1100, minHeight: 720)
         .preferredColorScheme(.dark)
-        .animation(.spring(duration: 0.45, bounce: 0.12), value: hasOverlay)
-        .animation(.spring(duration: 0.25), value: state.debugHUDVisible)
-        .animation(.spring(duration: 0.28), value: state.statusStripVisible)
+        .animation(JarvisMotion.layout, value: hasOverlay)
+        .animation(JarvisMotion.normalEase, value: state.debugHUDVisible)
+        .animation(JarvisMotion.normalEase, value: isDashboardVisible)
+        // ⌘⇧D still toggles the debug HUD for developers
+        .onKeyPress(.init("d"), phases: .down) { event in
+            if event.modifiers.contains(.command) && event.modifiers.contains(.shift) {
+                withAnimation(JarvisMotion.normalEase) { state.debugHUDVisible.toggle() }
+                return .handled
+            }
+            return .ignored
+        }
     }
 }
 
@@ -113,39 +135,31 @@ struct CommandCentreView: View {
 private struct JarvisStageView: View {
     let state: AppState
     let hasOverlay: Bool
+    var useLightweightOrb: Bool = true
 
     var body: some View {
         GeometryReader { geo in
             let orbSize: CGFloat = hasOverlay ? 72 : 340
-            // Centre the orb slightly above the screen mid-point so the
-            // transcript label fits below without crowding the bottom edge.
-            let orbX: CGFloat = hasOverlay ? geo.size.width  - 52 : geo.size.width  / 2
+            let orbX: CGFloat = hasOverlay ? geo.size.width - 52 : geo.size.width / 2
             let orbY: CGFloat = hasOverlay ? geo.size.height - 52 : geo.size.height / 2 - 30
 
             ZStack {
-                // Orb — position + size both animated
-                OrbView(state: state)
+                OrbView(state: state, useLightweightOrb: useLightweightOrb)
                     .frame(width: orbSize, height: orbSize)
                     .position(x: orbX, y: orbY)
-                    .animation(.spring(duration: 0.45, bounce: 0.15), value: hasOverlay)
+                    .animation(JarvisMotion.layout, value: hasOverlay)
 
-                // Transcript / phase pill — hidden while overlays are open
                 if !hasOverlay {
-                    Group {
-                        transcriptArea
-                    }
-                    // Centre horizontally; sit below the orb's lower edge
-                    .frame(maxWidth: geo.size.width - 104)
-                    .position(x: geo.size.width / 2,
-                              y: orbY + 170 + 14 + 28)
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.25), value: activeTranscript)
+                    Group { transcriptArea }
+                        .frame(maxWidth: geo.size.width - 104)
+                        .position(x: geo.size.width / 2,
+                                  y: orbY + 170 + 14 + 28)
+                        .transition(.opacity)
+                        .animation(JarvisMotion.normalEase, value: activeTranscript)
                 }
             }
         }
     }
-
-    // MARK: Transcript
 
     @ViewBuilder
     private var transcriptArea: some View {
@@ -157,7 +171,7 @@ private struct JarvisStageView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .padding(.horizontal, 52)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .transition(.opacity.combined(with: .offset(y: 4)))
         } else {
             phasePill
                 .transition(.opacity)
@@ -199,76 +213,8 @@ private struct JarvisStageView: View {
     }
 }
 
-// MARK: - Corner Controls
-
-/// Always-visible icon buttons in the top-trailing corner.
-/// Ear toggle, Debug HUD toggle, and status-strip toggle live here
-/// regardless of whether any overlay is open.
-private struct StageCornerControls: View {
-    let state: AppState
-    let controller: JarvisController
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            // Ear toggle — topmost so it's reachable even when muted
-            cornerButton(state.listeningEnabled ? "ear" : "ear.slash",
-                         activeIcon: "ear.fill",
-                         active: state.listeningEnabled) {
-                if state.listeningEnabled {
-                    controller.disableListening()
-                } else {
-                    controller.enableListening()
-                }
-            }
-            .help(state.listeningEnabled
-                  ? "Listening enabled — click to mute"
-                  : "Muted — click to resume listening")
-
-            cornerButton("ant.circle",
-                         activeIcon: "ant.circle.fill",
-                         active: state.debugHUDVisible) {
-                withAnimation { state.debugHUDVisible.toggle() }
-            }
-            .help("Debug HUD  (⌘⇧D)")
-            .keyboardShortcut("d", modifiers: [.command, .shift])
-
-            cornerButton("chart.bar.xaxis", active: state.statusStripVisible) {
-                withAnimation { state.statusStripVisible.toggle() }
-                controller.persistStatusStrip()
-            }
-            .help("Status strip")
-        }
-        .padding(.top, 14)
-        .padding(.trailing, 16)
-    }
-
-    // MARK: - Helpers
-
-    @ViewBuilder
-    private func cornerButton(_ icon: String,
-                               activeIcon: String? = nil,
-                               active: Bool,
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: active ? (activeIcon ?? icon) : icon)
-                .font(.callout)
-                .foregroundStyle(active ? state.phase.accentColor : .secondary)
-                .frame(width: 32, height: 32)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.055))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.10)))
-                )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - CalibrationOverlayPresenter
 
-/// Thin wrapper that observes the coordinator so it re-renders when
-/// `isCalibrating` changes — CommandCentreView uses `let controller` and
-/// won't react to coordinator @Published changes on its own.
 private struct CalibrationOverlayPresenter: View {
     @ObservedObject var coordinator: SpatialAmbientCoordinator
 
@@ -276,7 +222,46 @@ private struct CalibrationOverlayPresenter: View {
         if coordinator.isCalibrating {
             HandCalibrationView(coordinator: coordinator)
                 .transition(.opacity)
-                .animation(.easeInOut(duration: 0.20), value: coordinator.isCalibrating)
+                .animation(JarvisMotion.normalEase, value: coordinator.isCalibrating)
         }
+    }
+}
+
+// MARK: - SafeModeBanner
+
+private struct SafeModeBanner: View {
+    let reason: String
+    let onDismiss: () -> Void
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 14))
+                Text("⚠️ Jarvis Safe Mode Active")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Spacer()
+                Button("Details") { withAnimation(.easeInOut) { isExpanded.toggle() } }
+                    .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
+                Button("Exit Safe Mode") { onDismiss() }
+                    .buttonStyle(.bordered).controlSize(.small).tint(.orange)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            if isExpanded {
+                Text(reason.isEmpty ? "Non-essential subsystems have been paused to prevent a crash." : reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(Color.black.opacity(0.72))
+        .overlay(Rectangle().fill(Color.orange.opacity(0.30)).frame(height: 1), alignment: .bottom)
     }
 }

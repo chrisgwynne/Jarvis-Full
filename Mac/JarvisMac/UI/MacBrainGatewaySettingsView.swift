@@ -11,16 +11,55 @@ import CoreImage.CIFilterBuiltins
 struct MacBrainGatewaySettingsView: View {
     let controller: JarvisController
 
-    @State private var pairingCountdown: Int = 0
-    @State private var pairingTimer: Timer? = nil
     @State private var urlCopied = false
-    @State private var pairingError: String? = nil
 
     private var diag: GatewayDiagnostics { controller.gatewayDiagnostics }
     @State private var authStore: GatewayAuthStore = GatewayAuthStore.shared
 
     var body: some View {
         Form {
+            // ── Daemon URL ────────────────────────────────────────────────
+            // Simple: enter the URL, connect. No pairing codes, no tokens.
+            Section {
+                LabeledContent("Brain Daemon URL") {
+                    TextField("http://127.0.0.1:8765",
+                              text: Binding(
+                                get: { controller.prefs.current.daemonBaseURL },
+                                set: { v in controller.prefs.update { $0.daemonBaseURL = v } }
+                              ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit {
+                        let url = controller.prefs.current.daemonBaseURL
+                        DaemonAppBridge.shared.connect(baseURL: url)
+                    }
+                }
+                Text("The app derives health, version, and WebSocket URLs from this base URL. Use http://127.0.0.1:8765 for local daemon, or http://192.168.x.x:8765 for LAN access.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                // Live connection status
+                HStack(spacing: 8) {
+                    let bridge = DaemonAppBridge.shared
+                    Circle()
+                        .fill(bridge.isConnected ? Color.green
+                              : bridge.connectionStatus == .connecting ? Color.yellow
+                              : Color.red)
+                        .frame(width: 8, height: 8)
+                    Text(bridge.connectionStatus.shortLabel)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(2)
+                    Spacer()
+                    if !bridge.isConnected {
+                        Button("Connect") {
+                            DaemonAppBridge.shared.connect(
+                                baseURL: controller.prefs.current.daemonBaseURL)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+            } header: { Text("Connection") }
+
             // ── Brain Daemon (LaunchAgent) ────────────────────────────────
             DaemonControlView(manager: DaemonManager.shared, appState: controller.state)
 
@@ -42,7 +81,9 @@ struct MacBrainGatewaySettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                Text("Unified gateway on port \(controller.prefs.current.brainServerPort) serving Brain API, Windows sidecar, and Android WebSocket. Android connects to wss://…:\(controller.prefs.current.brainServerPort)/v1/android/ws.")
+                // Port formatted with String() — never use \(UInt16) in Text, which applies
+                // locale number formatting and produces "8,765" instead of "8765".
+                Text("Unified gateway on port \(String(controller.prefs.current.brainServerPort)) serving Brain API, Windows sidecar, and Android WebSocket. Android connects to wss://…:\(String(controller.prefs.current.brainServerPort))/v1/android/ws.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 // Status indicator
@@ -73,7 +114,8 @@ struct MacBrainGatewaySettingsView: View {
                             }
                         }
                     ), in: 1024...65535) {
-                        Text("\(controller.prefs.current.brainServerPort)")
+                        // Use String() not \() — prevents locale-based thousands separator
+                        Text(String(controller.prefs.current.brainServerPort))
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
                 }
@@ -164,49 +206,22 @@ struct MacBrainGatewaySettingsView: View {
                 }
             } header: { Text("Paired Devices") }
 
-            // ── Pairing ───────────────────────────────────────────────────
+            // ── Connection info for Android / Windows ─────────────────────
+            // No pairing needed. Clients enter the daemon URL and connect directly.
             Section {
-                if let code = authStore.activePairingCode, !code.isExpired {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .top, spacing: 16) {
-                            // SECURITY (#14): the QR encodes ONLY connection coordinates
-                            // and the one-time 6-digit pairing code — never the master
-                            // gateway token. Android exchanges the code for a scoped
-                            // device token over the wire; the master token stays in the
-                            // Mac Keychain and is never displayed, copied, or QR-encoded.
-                            let host = controller.state.tailscaleIP
-                                ?? TailscaleService.findLocalIP()
-                                ?? "127.0.0.1"
-                            let port = controller.prefs.current.brainServerPort
-                            let qrJSON = "{\"host\":\"\(host)\",\"port\":\(port),\"code\":\"\(code.code)\"}"
-                            QRCodeView(content: qrJSON, size: 140)
-                                .cornerRadius(8)
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(code.code)
-                                    .font(.system(size: 36, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.green)
-                                Text("Expires in \(pairingCountdown)s")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        Text("Scan the QR code with the Android Jarvis app to pair, or type the 6-digit code manually. The code expires shortly and grants a scoped device token — it never exposes the master key.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } else {
-                    Button("Generate Pairing Code") {
-                        pairingError = nil
-                        Task { await generateDaemonPairingCode() }
-                    }
-                    .buttonStyle(.borderless)
-                    if let err = pairingError {
-                        Text(err).font(.caption).foregroundStyle(.red)
-                    } else {
-                        Text("Generates a one-time 6-digit code the Android app uses to receive a scoped device token.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                let host = controller.state.tailscaleIP
+                    ?? TailscaleService.findLocalIP()
+                    ?? "127.0.0.1"
+                let port = controller.prefs.current.brainServerPort
+                LabeledContent("Android / Windows URL") {
+                    // Port displayed as plain string — no locale formatting
+                    Text("ws://\(host):\(String(port))/v1/client/ws")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
-            } header: { Text("Pairing") }
+                Text("On Android or Windows, enter the Brain Daemon URL: http://\(host):\(String(port)). The client connects immediately — no pairing code required.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Client Connection") }
 
             // ── Diagnostics ───────────────────────────────────────────────
             Section {
@@ -300,10 +315,6 @@ struct MacBrainGatewaySettingsView: View {
             // Legacy port toggle removed — external WebSocket hosting is owned by JarvisBrainDaemon.
         }
         .formStyle(.grouped)
-        .onDisappear {
-            pairingTimer?.invalidate()
-            pairingTimer = nil
-        }
     }
 
     // MARK: - Helpers
@@ -319,57 +330,6 @@ struct MacBrainGatewaySettingsView: View {
         return "wss://<your-ip>:\(port)/v1/android/ws"
     }
 
-    private func generateDaemonPairingCode() async {
-        guard let url = URL(string: "http://127.0.0.1:8765/v1/android/pair/code") else { return }
-
-        // Ensure a gateway token exists — first time setup
-        let token = GatewayAuthStore.shared.gatewayToken ?? GatewayAuthStore.shared.regenerateGatewayToken()
-
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 5
-
-        guard let (data, response) = try? await URLSession.shared.data(for: req) else {
-            pairingError = "Could not reach daemon on port 8765. Is it running?"
-            return
-        }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            pairingError = "Daemon rejected request (wrong token?). Restart the daemon."
-            return
-        }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let code = json["code"] as? String,
-              let expiresStr = json["expiresAt"] as? String,
-              let expiresAt = ISO8601DateFormatter().date(from: expiresStr) else {
-            pairingError = "Unexpected response from daemon."
-            return
-        }
-        pairingError = nil
-        let pairing = ActivePairingCode(code: code, expiresAt: expiresAt)
-        authStore.setActivePairingCode(pairing)
-        pairingCountdown = Int(expiresAt.timeIntervalSinceNow)
-        startPairingTimer()
-    }
-
-    private func startPairingTimer() {
-        pairingTimer?.invalidate()
-        pairingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if let code = authStore.activePairingCode {
-                let remaining = Int(code.expiresAt.timeIntervalSinceNow)
-                pairingCountdown = max(0, remaining)
-                diag.pairingCodeActive = remaining > 0
-                if remaining <= 0 {
-                    pairingTimer?.invalidate()
-                    pairingTimer = nil
-                }
-            } else {
-                pairingTimer?.invalidate()
-                pairingTimer = nil
-                diag.pairingCodeActive = false
-            }
-        }
-    }
 }
 
 // MARK: - QR Code

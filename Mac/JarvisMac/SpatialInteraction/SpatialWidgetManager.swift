@@ -237,7 +237,7 @@ final class SpatialWidgetManager {
             zOrder:           nextZ
         )
         widgets.append(widget)
-        print("[SpatialWidgetManager] Added widget \(kind.rawValue) id=\(id)")
+        Log.app.debug("[SpatialWidgetManager] Added widget \(kind.rawValue) id=\(id)")
         saveLayout()
         return id
     }
@@ -247,7 +247,7 @@ final class SpatialWidgetManager {
         guard let idx = index(for: id) else { return }
         widgets.remove(at: idx)
         if activeWidgetID == id { activeWidgetID = nil }
-        print("[SpatialWidgetManager] Removed widget id=\(id)")
+        Log.app.debug("[SpatialWidgetManager] Removed widget id=\(id)")
         saveLayout()
     }
 
@@ -257,7 +257,7 @@ final class SpatialWidgetManager {
         let id = widgets[idx].id
         widgets.remove(at: idx)
         if activeWidgetID == id { activeWidgetID = nil }
-        print("[SpatialWidgetManager] Removed widget kind=\(kind.rawValue)")
+        Log.app.debug("[SpatialWidgetManager] Removed widget kind=\(kind.rawValue)")
         saveLayout()
     }
 
@@ -483,7 +483,7 @@ final class SpatialWidgetManager {
             let data = try JSONEncoder().encode(persisted)
             try data.write(to: persistenceURL, options: .atomic)
         } catch {
-            print("[SpatialWidgetManager] Failed to save layout: \(error)")
+            Log.app.debug("[SpatialWidgetManager] Failed to save layout: \(error)")
         }
     }
 
@@ -494,9 +494,9 @@ final class SpatialWidgetManager {
             let data = try Data(contentsOf: persistenceURL)
             let persisted = try JSONDecoder().decode([PersistedWidget].self, from: data)
             widgets = persisted.compactMap { $0.toWidget() }
-            print("[SpatialWidgetManager] Loaded \(widgets.count) widget(s) from disk")
+            Log.app.debug("[SpatialWidgetManager] Loaded \(self.widgets.count) widget(s) from disk")
         } catch {
-            print("[SpatialWidgetManager] Failed to load layout: \(error)")
+            Log.app.debug("[SpatialWidgetManager] Failed to load layout: \(error)")
         }
     }
 }

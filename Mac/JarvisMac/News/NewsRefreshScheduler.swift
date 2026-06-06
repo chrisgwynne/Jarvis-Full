@@ -52,6 +52,19 @@ final class NewsRefreshScheduler {
         watchTask = nil
     }
 
+    /// Suspend the background timer tick without stopping watch-feeds.
+    /// Used by IdleEnforcer to reduce CPU during user inactivity.
+    func suspendBackgroundTick() {
+        timerTask?.cancel()
+        timerTask = nil
+    }
+
+    /// Resume the background timer tick after idle period ends.
+    func resumeBackgroundTick() {
+        guard timerTask == nil else { return }
+        startRefreshTimer()
+    }
+
     // MARK: - Manual refresh
 
     /// Refresh all enabled feeds. Returns total new article count.
@@ -210,8 +223,8 @@ final class NewsRefreshScheduler {
     private func startRefreshTimer() {
         timerTask?.cancel()
         timerTask = Task { @MainActor [weak self] in
-            // Initial refresh after 5s on startup
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            // Initial refresh after 60s — gives app time to stabilise before network I/O.
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
             guard let self, !Task.isCancelled else { return }
             await self.refreshAll()
 

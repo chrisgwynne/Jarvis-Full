@@ -332,6 +332,33 @@ final class ConversationRouter {
             }
         }
         if projectScore >= 1 {
+            // Generic opinion phrases ("what do you think", "is this good", etc.) must
+            // only trigger projectReflection when the transcript also contains at least
+            // one project-specific keyword. Without this guard, "What do you think about
+            // Arne Slot leaving Liverpool?" routes to projectReflection and gets Jarvis
+            // codebase context injected, mangling the LLM response.
+            let genericOpinionSignals: Set<String> = [
+                "what do you think", "what do you think about",
+                "thoughts on", "is this the right", "does this make sense",
+                "is this good", "is this right", "am i on track",
+            ]
+            let projectKeywords: [String] = [
+                "sprint", "feature", "module", "system", "component", "architecture",
+                "codebase", "roadmap", "implementation", "swift", "xcode", "jarvis",
+                "the code", "the file", "the class", "this module", "this system",
+                "this component", "this feature", "the design", "the plan",
+            ]
+            let onlyGenericSignals = projectMatched.allSatisfy { genericOpinionSignals.contains($0) }
+            let hasProjectKeyword  = projectKeywords.contains { t.contains($0) }
+            if onlyGenericSignals && !hasProjectKeyword {
+                return ConversationRouteResult(
+                    route: .generalChat, confidence: 0.75,
+                    commandHint: nil,
+                    rationale: "generic opinion signal '\(projectMatched.first ?? "")' without project context → generalChat",
+                    fastPath: true
+                )
+            }
+
             let conf = min(0.68 + Double(projectScore) * 0.07, 0.92)
             let matched = projectMatched.prefix(2).joined(separator: ", ")
             return ConversationRouteResult(

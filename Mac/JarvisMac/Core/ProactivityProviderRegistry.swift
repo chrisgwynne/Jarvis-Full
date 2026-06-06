@@ -124,15 +124,9 @@ import Foundation
                         sessionPassiveNewsCount += 1
                     }
 
-                    let spoken: String?
-                    if priority >= .urgent {
-                        spoken = "Breaking news from \(article.sourceName): \(article.title)."
-                    } else if priority == .high {
-                        let labelText = article.labels.first?.rawValue ?? "story"
-                        spoken = "Important \(labelText) story: \(article.title)."
-                    } else {
-                        spoken = nil
-                    }
+                    // News is notification-only. Never auto-speak at startup or on refresh.
+                    // User must manually open the News overlay to hear articles.
+                    let spoken: String? = nil
                     let signal = ProactivitySignal(
                         source: .news,
                         title: article.title,

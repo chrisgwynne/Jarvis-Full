@@ -77,7 +77,11 @@ enum CoreAudioInputRouter {
                 &addr, 0, nil, &size, &ids) == noErr
         else { return [] }
 
-        return ids.filter { hasInputStreams($0) }
+        // Filter out device ID 0 (uninitialized / invalid) before calling
+        // hasInputStreams(). Passing ID 0 to AudioObjectGetPropertyDataSize
+        // returns kAudioHardwareIllegalOperationError (-10877) and CoreAudio
+        // logs "AudioObjectRemovePropertyListener: no object with given ID 0".
+        return ids.filter { $0 != 0 && hasInputStreams($0) }
     }
 
     static func hasInputStreams(_ device: AudioDeviceID) -> Bool {

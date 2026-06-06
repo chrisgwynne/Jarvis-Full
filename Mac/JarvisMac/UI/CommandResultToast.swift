@@ -28,7 +28,7 @@ struct CommandResultToast: View {
                     )
             )
             .shadow(color: .black.opacity(0.35), radius: 14)
-            .transition(.scale(scale: 0.82, anchor: .bottom).combined(with: .opacity))
+            .transition(JarvisMotion.toast)
         }
     }
 }

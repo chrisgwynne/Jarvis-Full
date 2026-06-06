@@ -187,8 +187,9 @@ final class GeminiProvider: LLMProvider {
     // MARK: - Availability
 
     func isAvailable() async -> Bool {
+        // Config-only check — no Keychain read. Key presence is verified lazily
+        // inside complete() so Keychain is only touched when a request actually fires.
         guard enabled() else { return false }
-        guard let key = apiKey(), !key.isEmpty else { return false }
         return !modelName().trimmingCharacters(in: .whitespaces).isEmpty
     }
 

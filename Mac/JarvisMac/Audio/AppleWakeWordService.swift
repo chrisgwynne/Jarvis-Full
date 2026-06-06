@@ -16,7 +16,7 @@ import os
 /// Threading: `start()` and `stop()` must be called from the main thread
 /// (matching JarvisController's @MainActor context). All internal session
 /// management is dispatched back to the main thread to avoid races.
-final class AppleWakeWordService: WakeWordDetecting {
+final class AppleWakeWordService: WakeWordDetecting, WakeWordHealthCheckable {
 
     private(set) var isRunning: Bool = false
     let triggers: AsyncStream<WakeWordEvent>
@@ -26,12 +26,24 @@ final class AppleWakeWordService: WakeWordDetecting {
     private var sfRecognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var autoRestartTask: Task<Void, Never>?
     private var lastFireTime: Date = .distantPast
     private let fireCooldown: TimeInterval = 2.0
 
+    // WakeWordHealthCheckable: timestamp of the most recent audio buffer.
+    // Updated inside the AVAudioEngine tap on every buffer arrival.
+    // Nil until the first buffer arrives after start().
+    private(set) var lastAudioBufferTime: Date? = nil
+
     private let onLog: (String) -> Void
+    /// Called on the main thread with the current mic RMS (0.0–1.0) roughly every buffer.
+    var onAudioLevel: ((Float) -> Void)?
+
+    // Device-disconnect observers: cleared on stop() so we don't restart
+    // when the user has explicitly muted.
+    private var deviceDisconnectObserver: NSObjectProtocol?
+    private var deviceConnectObserver: NSObjectProtocol?
 
     init(onLog: @escaping (String) -> Void = { _ in }) {
         self.onLog = onLog
@@ -57,9 +69,20 @@ final class AppleWakeWordService: WakeWordDetecting {
             throw JarvisError.deviceUnavailable("SFSpeechRecognizer not available")
         }
         sfRecognizer = rec
+        // Reset cooldown so a detection right before the last stop() doesn't
+        // suppress the very first detection after re-arm.
+        lastFireTime = .distantPast
+        // Seed lastAudioBufferTime with the current time so the health watchdog
+        // doesn't immediately declare "no recent buffers" before the AVAudioEngine
+        // tap has had a chance to deliver its first buffer (typically within 1–2 s).
+        // A real buffer will overwrite this; if none arrives within 3 s the
+        // timestamp goes stale and the watchdog correctly restarts.
+        lastAudioBufferTime = Date()
         try startSession()
         isRunning = true
+        AudioSessionCoordinator.shared.transition(to: .passiveWake, from: "AppleWakeWordService")
         scheduleAutoRestart()
+        installDeviceObservers()
         let kws = settings.keywords.joined(separator: ", ")
         onLog("apple wake word armed, listening for: \(kws)")
     }
@@ -69,8 +92,11 @@ final class AppleWakeWordService: WakeWordDetecting {
         isRunning = false
         autoRestartTask?.cancel()
         autoRestartTask = nil
+        removeDeviceObservers()
         teardownSession()
         sfRecognizer = nil
+        lastAudioBufferTime = nil
+        AudioSessionCoordinator.shared.transition(to: .idle, from: "AppleWakeWordService.stop")
         onLog("apple wake word stopped")
     }
 
@@ -83,15 +109,33 @@ final class AppleWakeWordService: WakeWordDetecting {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
-        // Allow network fallback — wake detection doesn't need to be strictly
-        // offline and blocking on on-device support breaks common configurations.
+        // Prefer on-device recognition for the wake word — avoids "Reporter
+        // disconnected" errors from the Apple network STT server dropping the
+        // connection, which would kill wake detection silently. On-device is
+        // always available on macOS 13+ for English.
+        req.requiresOnDeviceRecognition = true
         self.request = req
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak req] buf, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self, weak req] buf, _ in
             req?.append(buf)
+            // Health check: stamp every arriving buffer so the watchdog knows
+            // audio is still flowing. This is the ONLY reliable liveness signal —
+            // isRunning==true is necessary but not sufficient (engine can stall
+            // silently after a device route change or App Nap throttle).
+            let now = Date()
+            self?.lastAudioBufferTime = now
+            // Compute RMS to detect silent / disconnected mic.
+            if let channelData = buf.floatChannelData?[0] {
+                let frameCount = Int(buf.frameLength)
+                var sumSq: Float = 0
+                for i in 0 ..< frameCount { sumSq += channelData[i] * channelData[i] }
+                let rms = frameCount > 0 ? sqrtf(sumSq / Float(frameCount)) : 0
+                let clamped = min(rms * 10, 1.0) // scale 0-0.1 input → 0-1 display range
+                DispatchQueue.main.async { self?.onAudioLevel?(clamped) }
+            }
         }
         engine.prepare()
         try engine.start()
@@ -105,9 +149,13 @@ final class AppleWakeWordService: WakeWordDetecting {
                 for kw in keywords {
                     if lower.contains(kw) {
                         let now = Date()
+                        self.onLog("[WakeWord] candidateDetected keyword=\"\(kw)\" transcript=\"\(lower)\"")
                         guard now.timeIntervalSince(self.lastFireTime) > self.fireCooldown else {
+                            let remaining = self.fireCooldown - now.timeIntervalSince(self.lastFireTime)
+                            self.onLog("[WakeWord] rejected reason=cooldown remainingMs=\(Int(remaining * 1000))")
                             return
                         }
+                        self.onLog("[WakeWord] accepted keyword=\"\(kw)\" — yielding event, releasing mic")
                         self.lastFireTime = now
                         let event = WakeWordEvent(timestamp: now, keyword: kw, confidence: 0.85)
                         // Tear down the wake session BEFORE yielding so the
@@ -122,7 +170,8 @@ final class AppleWakeWordService: WakeWordDetecting {
                             self.autoRestartTask = nil
                             self.teardownSession()
                             self.sfRecognizer = nil
-                            self.onLog("wake detected (mic released): \"\(kw)\"")
+                            AudioSessionCoordinator.shared.transition(to: .idle, from: "AppleWakeWordService.wakeDetected")
+                            self.onLog("[WakeWord] passive suspended — mic released for STT")
                             self.continuation.yield(event)
                         }
                         return
@@ -144,15 +193,32 @@ final class AppleWakeWordService: WakeWordDetecting {
         recognitionTask = nil
         request?.endAudio()
         request = nil
+        // Always remove the tap before stopping. AVAudioEngine.stop() is safe
+        // to call when not running; removeTap(onBus:) is a no-op when no tap
+        // is installed. Doing this in a consistent order avoids double-remove.
         engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning { engine.stop() }
+        // Do NOT replace the engine here. Creating a new AVAudioEngine on every
+        // 50-second auto-restart registers and immediately deregisters CoreAudio
+        // property listeners, which produces hundreds of
+        // "AudioObjectRemovePropertyListener: no object with given ID 0" (-10877)
+        // log lines when the associated audio device ID becomes stale.
+        // The same engine instance can be safely restarted after stop().
     }
 
     private func safeRestart() {
         guard isRunning else { return }
-        teardownSession()
-        do { try startSession() }
-        catch { onLog("wake word restart failed: \(error.localizedDescription)") }
+        // startSession() always calls teardownSession() at its top.
+        do {
+            lastAudioBufferTime = Date() // grace period — real buffer overwrites within 1–2 s
+            try startSession()
+        } catch {
+            // Mark offline so the external watchdog can detect the failure and
+            // trigger a full restart via restartWakeWordIfNeeded(). Leaving
+            // isRunning==true here would hide the failure from the watchdog.
+            isRunning = false
+            onLog("wake word restart failed: \(error.localizedDescription)")
+        }
     }
 
     private func scheduleAutoRestart() {
@@ -164,5 +230,39 @@ final class AppleWakeWordService: WakeWordDetecting {
                 await MainActor.run { self.safeRestart() }
             }
         }
+    }
+
+    // MARK: - Device change resilience
+
+    private func installDeviceObservers() {
+        removeDeviceObservers()
+        let nc = NotificationCenter.default
+        // AVCaptureDevice disconnect fires when the selected mic is unplugged or
+        // goes to sleep (e.g. AIRHUG Bluetooth headset powering off). We restart
+        // the session so the engine picks up the new default device rather than
+        // holding a stale HAL reference that delivers no buffers.
+        deviceDisconnectObserver = nc.addObserver(
+            forName: .AVCaptureDeviceWasDisconnected, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRunning else { return }
+            self.onLog("[WakeWordHealth] input device disconnected — restarting session")
+            self.lastAudioBufferTime = nil
+            self.safeRestart()
+        }
+        deviceConnectObserver = nc.addObserver(
+            forName: .AVCaptureDeviceWasConnected, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRunning else { return }
+            self.onLog("[WakeWordHealth] input device connected — restarting session to adopt new route")
+            self.lastAudioBufferTime = nil
+            self.safeRestart()
+        }
+    }
+
+    private func removeDeviceObservers() {
+        if let o = deviceDisconnectObserver { NotificationCenter.default.removeObserver(o) }
+        if let o = deviceConnectObserver    { NotificationCenter.default.removeObserver(o) }
+        deviceDisconnectObserver = nil
+        deviceConnectObserver    = nil
     }
 }

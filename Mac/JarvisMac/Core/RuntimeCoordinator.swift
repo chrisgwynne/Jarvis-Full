@@ -50,6 +50,10 @@ final class RuntimeCoordinator {
     var healthCheckIntervalSeconds: TimeInterval = 30.0
     let maxRestartAttempts = 3
 
+    /// Weak reference to AppState so health checks can surface degraded
+    /// subsystem status to the UI without creating a retain cycle.
+    weak var appState: AppState?
+
     private var healthMonitorTask: Task<Void, Never>?
 
     // MARK: - Registration
@@ -112,6 +116,13 @@ final class RuntimeCoordinator {
             case .degraded(let reason):
                 degradedIDs.insert(subsystem.id)
                 Log.runtime.warning("[RuntimeCoordinator] '\(subsystem.id)' degraded: \(reason)")
+                // Surface brain degradation to AppState so the UI can show a banner.
+                if subsystem.id == "brain" {
+                    await MainActor.run {
+                        appState?.brainDegraded = true
+                        appState?.brainDegradedReason = "Brain degraded: \(reason)"
+                    }
+                }
             case .failed(let reason):
                 degradedIDs.insert(subsystem.id)
                 Log.runtime.error("[RuntimeCoordinator] '\(subsystem.id)' FAILED: \(reason)")

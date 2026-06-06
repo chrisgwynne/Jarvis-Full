@@ -255,14 +255,17 @@ final class GitHubAPIClient {
     // MARK: ─────────────────── WRITE: ISSUES ─────────────────
 
     @discardableResult
-    func createIssue(repo: String, title: String, body: String?, labels: [String]?) async throws -> GHIssue {
+    func createIssue(repo: String, title: String, body: String?, labels: [String]?,
+                     assignees: [String]? = nil) async throws -> GHIssue {
         struct Payload: Encodable {
             let title: String
             let body: String?
             let labels: [String]?
+            let assignees: [String]?
         }
         let data = try await send(path: "/repos/\(repo)/issues", method: "POST",
-                                   body: Payload(title: title, body: body, labels: labels))
+                                   body: Payload(title: title, body: body,
+                                                 labels: labels, assignees: assignees))
         return try JSONDecoder().decode(GHIssue.self, from: data)
     }
 

@@ -289,19 +289,43 @@ final class AIProvidersContributor: DocumentationContributor {
     let id = "ai.providers"
     private let prefs: PreferencesStore
     init(prefs: PreferencesStore) { self.prefs = prefs }
+
+    /// Read the cache-only status of `key` as a display string.
+    /// Returns "configured", "key missing", or "not checked" — never reads Keychain.
+    private func cachedKeyStatus(_ key: String) -> String {
+        switch KeychainService.shared.cachedEntry(for: key) {
+        case .present(let v): return v.isEmpty ? "key missing" : "configured"
+        case .absent:         return "key missing"
+        case nil:             return "not checked yet"
+        }
+    }
+
+    /// True only if the cache already shows a non-empty value.
+    /// Does NOT trigger a Keychain read.
+    private func cachedKeyPresent(_ key: String) -> Bool {
+        if case .present(let v) = KeychainService.shared.cachedEntry(for: key) {
+            return !v.isEmpty
+        }
+        return false
+    }
+
     func section() -> DocumentationSection? {
         let p = prefs.current
         var enabledNames: [String] = []
         var statusLines: [String] = []
+        // Use the cached entry only — never trigger a physical Keychain read here.
+        // The docs overlay can open at any time including during startup; reading
+        // API keys eagerly caused 2-3 extra OS "use your confidential information"
+        // prompts on every launch.
         if p.miniMaxEnabled {
             enabledNames.append("MiniMax")
-            let hasKey = (Keychain.get(KeychainAccount.miniMaxAPIKey)?.isEmpty == false)
-            statusLines.append("MiniMax: \(hasKey ? "configured" : "key missing")")
+            let status = cachedKeyStatus(KeychainAccount.miniMaxAPIKey)
+            statusLines.append("MiniMax: \(status)")
         }
         if p.geminiEnabled {
             enabledNames.append("Gemini")
-            let hasKey = (Keychain.get(KeychainAccount.geminiAPIKey)?.isEmpty == false)
-            statusLines.append("Gemini: \(hasKey ? "configured" : "key missing")")
+            let status = cachedKeyStatus(KeychainAccount.geminiAPIKey)
+            statusLines.append("Gemini: \(status)")
         }
         if p.llamaCppEnabled {
             enabledNames.append("llama.cpp")
@@ -314,13 +338,13 @@ final class AIProvidersContributor: DocumentationContributor {
             : "Active providers: " + enabledNames.joined(separator: ", ")
                 + ".  Mode: \(p.llmProviderModeRaw)."
         var trouble: [DocumentationTroubleshooting] = []
-        if p.geminiEnabled, (Keychain.get(KeychainAccount.geminiAPIKey)?.isEmpty != false) {
+        if p.geminiEnabled, !cachedKeyPresent(KeychainAccount.geminiAPIKey) {
             trouble.append(DocumentationTroubleshooting(
                 symptom: "Gemini configured but missing API key",
                 fix: "Settings → AI → Gemini → paste your API key.  The token is stored in the macOS Keychain, never preferences.json.",
                 isActive: true))
         }
-        if p.miniMaxEnabled, (Keychain.get(KeychainAccount.miniMaxAPIKey)?.isEmpty != false) {
+        if p.miniMaxEnabled, !cachedKeyPresent(KeychainAccount.miniMaxAPIKey) {
             trouble.append(DocumentationTroubleshooting(
                 symptom: "MiniMax configured but missing API key",
                 fix: "Settings → AI → MiniMax → paste your API key.",

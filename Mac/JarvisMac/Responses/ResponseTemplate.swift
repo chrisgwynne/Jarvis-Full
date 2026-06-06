@@ -221,6 +221,8 @@ enum ResponseKey {
     // Status / identity
     static let listeningConfirm    = "ui.listening_confirm"
     static let hearingConfirm      = "ui.hearing_confirm"
+    static let farewellAcknowledge = "ui.farewell"
+    static let gratitudeAcknowledge = "ui.gratitude"
     static let timeNow             = "ui.time.current"
     static let dateToday           = "ui.date.current"
     static let dictationNeeded     = "ui.dictation_needed"

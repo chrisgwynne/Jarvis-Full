@@ -42,12 +42,48 @@ final class KeychainService {
     private let log   = Logger(subsystem: "com.jarvis.mac", category: "keychain")
     private var cache : [String: CacheEntry] = [:]
 
+    // MARK: - Startup phase guard
+
+    /// True from process start until `endStartupPhase()` is called.
+    /// While true, any read of a key that is not in `coreStartupKeys` is
+    /// blocked: the call returns nil immediately and is counted as a
+    /// blocked optional read.  This prevents background service inits from
+    /// triggering OS "use your confidential information" prompts at launch.
+    private(set) var startupPhaseActive: Bool = true
+
+    /// Keys that are always permitted during the startup phase.
+    private static let coreKeys: Set<String> = Set(["home_assistant_token",
+                                                     "gateway_token",
+                                                     "websocket_auth_token"])
+
+    /// Mark the startup phase as complete.  Call this once all
+    /// bootstrap-critical services have initialised (typically right after
+    /// the JarvisController startup log is emitted).  After this point,
+    /// feature keys may be read lazily without restriction.
+    func endStartupPhase() {
+        lock.lock()
+        startupPhaseActive = false
+        lock.unlock()
+        log.info("[Keychain] startup phase ended — optional reads now permitted")
+    }
+
+    /// Read the cached entry for `key` without triggering a physical read.
+    /// Returns nil if the key has not yet been read or written this session.
+    func cachedEntry(for key: String) -> CacheEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[key]
+    }
+
     // MARK: - Diagnostics (thread-safe via lock)
 
-    private(set) var physicalReads  = 0
-    private(set) var physicalWrites = 0
-    private(set) var cacheHits      = 0
+    private(set) var physicalReads         = 0
+    private(set) var physicalWrites        = 0
+    private(set) var cacheHits             = 0
     private(set) var perKeyReads : [String: Int] = [:]
+    private(set) var absentResults         = 0  // physical reads that found no item
+    private(set) var aclKeyReads           = 0  // physical reads of ACL-scoped keys (potential prompts)
+    private(set) var blockedOptionalReads  = 0  // reads blocked during startup phase
 
     // MARK: - Service identifier (matches existing entries)
 
@@ -58,12 +94,33 @@ final class KeychainService {
     /// Returns the cached value (if already read/written this session) or reads
     /// once from Keychain and caches the result. Never calls SecItemCopyMatching
     /// more than once per key per process lifetime.
+    ///
+    /// During the startup phase, reads of optional (non-core) keys are blocked:
+    /// nil is returned immediately without touching the OS Keychain, preventing
+    /// repeated password prompts at launch from background service initialisation.
     func get(_ key: String) -> String? {
+        // Startup guard: block optional key reads before bootstrap completes.
+        // Core keys (gateway_token, home_assistant_token, websocket_auth_token)
+        // are always permitted; all other keys return nil during this phase.
         lock.lock()
+        if startupPhaseActive && !Self.coreKeys.contains(key) {
+            blockedOptionalReads += 1
+            lock.unlock()
+            log.warning("[Keychain] blocked optional startup read key=\(key, privacy: .public)")
+            return nil
+        }
+
         if let entry = cache[key] {
             cacheHits += 1
             lock.unlock()
-            return entry.value
+            switch entry {
+            case .present(let v):
+                log.debug("[Keychain] cache hit key=\(key, privacy: .public)")
+                return v
+            case .absent:
+                log.debug("[Keychain] optional key absent key=\(key, privacy: .public)")
+                return nil
+            }
         }
         physicalReads += 1
         perKeyReads[key, default: 0] += 1
@@ -71,16 +128,21 @@ final class KeychainService {
         lock.unlock()
 
         if readsSoFar > 1 {
-            log.warning("[Keychain] '\(key, privacy: .public)' read \(readsSoFar, privacy: .public)× — duplicate not served from cache yet")
+            log.warning("[Keychain] '\(key, privacy: .public)' read \(readsSoFar, privacy: .public)× — duplicate physical read, cache miss")
         }
 
+        log.info("[Keychain] physical read key=\(key, privacy: .public)")
         let value = rawGet(key)
-        log.debug("[Keychain] read '\(key, privacy: .public)' → \(value != nil ? "present" : "absent", privacy: .public)")
 
         lock.lock()
         cache[key] = value.map { .present($0) } ?? .absent
+        if value == nil { absentResults += 1 }
+        if Self.aclScopedKeys.contains(key), value != nil { aclKeyReads += 1 }
         lock.unlock()
 
+        if value == nil {
+            log.info("[Keychain] optional key absent key=\(key, privacy: .public)")
+        }
         return value
     }
 
@@ -118,9 +180,13 @@ final class KeychainService {
     /// Call this at app startup (before any service initialises) so the first
     /// service access is always a cache hit — no repeated prompts.
     func preload(keys: [String]) {
-        log.info("[Keychain] preloading \(keys.count, privacy: .public) keys")
+        log.info("[Keychain] preload start keys=\(keys.count, privacy: .public)")
+        let beforeReads = physicalReads
+        let beforeHits  = cacheHits
         for key in keys { _ = get(key) }
-        log.info("[Keychain] preload complete — \(self.physicalReads, privacy: .public) physical reads")
+        let physDelta = physicalReads - beforeReads
+        let hitDelta  = cacheHits    - beforeHits
+        log.info("[Keychain] preload complete physicalReads=\(physDelta, privacy: .public) cacheHits=\(hitDelta, privacy: .public)")
     }
 
     // MARK: - Cache invalidation
@@ -140,17 +206,31 @@ final class KeychainService {
     /// complete and log the result.
     func startupReport() -> String {
         lock.lock()
-        let reads  = physicalReads
-        let writes = physicalWrites
-        let hits   = cacheHits
-        let perKey = perKeyReads
+        let reads    = physicalReads
+        let hits     = cacheHits
+        let absent   = absentResults
+        let aclReads = aclKeyReads
+        let blocked  = blockedOptionalReads
+        let perKey   = perKeyReads
+        let uniqueRead = perKey.count
         lock.unlock()
 
-        var lines: [String] = ["[Keychain] startup: \(reads) physical reads, \(writes) writes, \(hits) cache hits"]
-        for (key, n) in perKey.sorted(by: { $0.key < $1.key }) where n > 1 {
-            lines.append("  ⚠ '\(key)' read \(n)× — check for missing cache use")
+        // promptCountEstimate: ACL-scoped keys that exist and were physically read.
+        // On first install or after code-sign change, macOS prompts once per such key.
+        // After the user grants "Always Allow", subsequent launches prompt 0 times
+        // even though promptCountEstimate stays > 0 (ACL entry cached by the OS).
+        var summary = "[Keychain] startup summary physicalReads=\(reads) blockedOptionalReads=\(blocked) promptCountEstimate=\(aclReads) cacheHits=\(hits) uniqueKeysRead=\(uniqueRead) optionalAbsent=\(absent)"
+        if blocked > 0 {
+            summary += " ⚠ \(blocked) optional reads were blocked during startup — services are reading tokens too early"
         }
-        return lines.joined(separator: "\n")
+        var dupeLines: [String] = []
+        for (key, n) in perKey.sorted(by: { $0.key < $1.key }) where n > 1 {
+            dupeLines.append("  ⚠ '\(key)' read \(n)× — duplicate physical read")
+        }
+        if !dupeLines.isEmpty {
+            summary += "\n" + dupeLines.joined(separator: "\n")
+        }
+        return summary
     }
 
     // MARK: - SecItem internals (private — only call from get/set/remove)
@@ -262,26 +342,33 @@ struct SecretsSnapshot {
 
     // MARK: - Factory
 
-    /// Reads all known keys in a single batch, populating KeychainService's
-    /// cache. Subsequent reads by any service return cached values.
+    /// Reads only the core startup keys (homeAssistant, gateway, websocket) into
+    /// the cache. Feature-specific keys (LLM API keys, Todoist, GitHub, etc.) are
+    /// NOT read here — they are loaded lazily on first use and cached thereafter.
+    ///
+    /// This keeps the startup physical-read count to ≤3 and prevents optional
+    /// missing keys from triggering OS password prompts during bootstrap.
     @MainActor
     static func load() -> SecretsSnapshot {
         let ks = KeychainService.shared
-        // Pre-warm everything in one pass
-        ks.preload(keys: KeychainAccount.allKnownKeys)
+        // Warm only the 3 keys always needed at startup.
+        ks.preload(keys: KeychainAccount.coreStartupKeys)
+        // Core keys: always needed at bootstrap — already warmed by preload above.
+        // Feature keys: nil here; providers read them lazily on first use via Keychain.get().
+        // This keeps startup physical reads ≤ 3 and prevents optional-key OS prompts at launch.
         return SecretsSnapshot(
-            xaiAPIKey:                     ks.get(KeychainAccount.xaiAPIKey),
-            miniMaxAPIKey:                 ks.get(KeychainAccount.miniMaxAPIKey),
-            geminiAPIKey:                  ks.get(KeychainAccount.geminiAPIKey),
+            xaiAPIKey:                     nil,
+            miniMaxAPIKey:                 nil,
+            geminiAPIKey:                  nil,
             homeAssistantToken:            ks.get(KeychainAccount.homeAssistantToken),
-            todoistAPIToken:               ks.get(KeychainAccount.todoistAPIToken),
-            githubPersonalAccessToken:     ks.get(KeychainAccount.githubPersonalAccessToken),
-            shopifyAccessToken:            ks.get(KeychainAccount.shopifyAccessToken),
-            spotifyPersonalToken:          ks.get(KeychainAccount.spotifyPersonalToken),
+            todoistAPIToken:               nil,
+            githubPersonalAccessToken:     nil,
+            shopifyAccessToken:            nil,
+            spotifyPersonalToken:          nil,
             webSocketAuthToken:            ks.get(KeychainAccount.webSocketAuthToken),
-            githubIssuesToken:             ks.get(KeychainAccount.githubIssuesToken),
+            githubIssuesToken:             nil,
             gatewayToken:                  ks.get(KeychainAccount.gatewayToken),
-            brainServerToken:              ks.get(KeychainAccount.brainServerToken)
+            brainServerToken:              nil
         )
     }
 }

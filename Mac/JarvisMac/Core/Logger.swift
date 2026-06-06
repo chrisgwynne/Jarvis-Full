@@ -22,6 +22,7 @@ enum Log {
     static let screen    = Logger(subsystem: subsystem, category: "screen")
     static let android   = Logger(subsystem: subsystem, category: "android")
     static let runtime   = Logger(subsystem: subsystem, category: "runtime")
+    static let github    = Logger(subsystem: subsystem, category: "github")
 }
 
 struct LogEntry: Identifiable, Equatable {

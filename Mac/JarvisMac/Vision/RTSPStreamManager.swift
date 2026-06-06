@@ -116,7 +116,7 @@ import CoreImage
     /// Begin a periodic loop that extracts frames and sends them to `pipeline`.
     func startDetectionLoop(feedID: UUID, intervalSeconds: TimeInterval = 0.5) {
         guard detectionTasks[feedID] == nil else { return }
-        print("[RTSPStreamManager] Starting detection loop for feed \(feedID)")
+        Log.vision.debug("[RTSPStreamManager] Starting detection loop for feed \(feedID)")
         let task = Task { [weak self] in
             let nanos = UInt64(max(intervalSeconds, 0.1) * 1_000_000_000)
             while !Task.isCancelled {
@@ -138,10 +138,10 @@ import CoreImage
     /// Stop all active detection loops across all feeds.
     func stopAllDetectionLoops() {
         let count = detectionTasks.count
-        print("[RTSPStreamManager] Stopping \(count) detection loop(s)")
+        Log.vision.debug("[RTSPStreamManager] Stopping \(count) detection loop(s)")
         for task in detectionTasks.values { task.cancel() }
         detectionTasks.removeAll()
-        print("[RTSPStreamManager] All detection loops stopped")
+        Log.vision.debug("[RTSPStreamManager] All detection loops stopped")
     }
 
     // MARK: - Private helpers

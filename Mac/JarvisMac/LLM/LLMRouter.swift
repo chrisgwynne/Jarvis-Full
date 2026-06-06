@@ -78,6 +78,12 @@ final class LLMRouter {
             } catch {
                 lastErr = error
                 lastError = "\(provider.id): \(error.localizedDescription)"
+                // Don't penalise intentionally-disabled providers: they throw
+                // providerDisabled when the user hasn't configured them, which
+                // is expected — not a circuit-worthy failure.
+                if case LLMError.providerDisabled = error {
+                    continue
+                }
                 circuitBreaker?.recordFailure(provider.id)
                 // Telemetry — provider id + short error class only.  No prompt,
                 // no token, no model output is included.

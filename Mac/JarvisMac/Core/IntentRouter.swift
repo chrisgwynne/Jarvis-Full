@@ -215,6 +215,22 @@ struct IntentRouter {
             return .areYouListening
         }
 
+        // Conversational closings — match BEFORE entity resolution so "goodbye"
+        // never fuzzy-matches "Google" via Jaro-Winkler.
+        if t == "goodbye" || t == "bye" || t == "see you" || t == "see ya"
+            || t == "good night" || t == "goodnight" || t == "night"
+            || t == "bye jarvis" || t == "goodbye jarvis" || t == "good night jarvis" {
+            return .farewell
+        }
+
+        // Gratitude — same reasoning: "thanks" must not entity-resolve to an app.
+        if t == "thanks" || t == "thank you" || t == "cheers"
+            || t == "thank you very much" || t == "thanks a lot"
+            || t == "thanks jarvis" || t == "thank you jarvis"
+            || t == "much appreciated" {
+            return .thankUser
+        }
+
         // Time
         if t == "what time is it" || t == "what's the time" || t == "whats the time"
             || t == "tell me the time" || t == "current time" || t == "time check"

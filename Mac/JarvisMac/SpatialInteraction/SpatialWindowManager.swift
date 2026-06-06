@@ -93,7 +93,7 @@ final class SpatialWindowManager {
             [.optionOnScreenOnly, .excludeDesktopElements],
             kCGNullWindowID
         ) as? [[String: Any]] else {
-            print("[SpatialWindowManager] CGWindowListCopyWindowInfo returned nil")
+            Log.app.debug("[SpatialWindowManager] CGWindowListCopyWindowInfo returned nil")
             return
         }
 
@@ -155,7 +155,7 @@ final class SpatialWindowManager {
         }
 
         capturedWindows = snapshots
-        print("[SpatialWindowManager] refreshWindows: captured \(snapshots.count) windows")
+        Log.app.debug("[SpatialWindowManager] refreshWindows: captured \(snapshots.count) windows")
     }
 
     /// Returns windows whose app name or title contains `query` (case-insensitive).
@@ -176,7 +176,7 @@ final class SpatialWindowManager {
     func focus(window: WindowSnapshot) async {
         guard accessibilityCheck(for: "focus") else { return }
         guard let app = NSRunningApplication(processIdentifier: window.pid) else {
-            print("[SpatialWindowManager] focus: no running app for pid \(window.pid)")
+            Log.app.debug("[SpatialWindowManager] focus: no running app for pid \(window.pid)")
             return
         }
         if #available(macOS 14.0, *) {
@@ -184,7 +184,7 @@ final class SpatialWindowManager {
         } else {
             app.activate(options: .activateIgnoringOtherApps)
         }
-        print("[SpatialWindowManager] focus: activated '\(window.appName)'")
+        Log.app.debug("[SpatialWindowManager] focus: activated '\(window.appName)'")
     }
 
     // MARK: - Control: move / resize
@@ -195,14 +195,14 @@ final class SpatialWindowManager {
 
         var point = origin
         guard let axVal = AXValueCreate(.cgPoint, &point) else {
-            print("[SpatialWindowManager] move: failed to create AXValue for origin")
+            Log.app.debug("[SpatialWindowManager] move: failed to create AXValue for origin")
             return
         }
         let result = AXUIElementSetAttributeValue(axWindow, kAXPositionAttribute as CFString, axVal)
         if result != .success {
-            print("[SpatialWindowManager] move: AXUIElementSetAttributeValue failed (\(result.rawValue))")
+            Log.app.debug("[SpatialWindowManager] move: AXUIElementSetAttributeValue failed (\(result.rawValue))")
         } else {
-            print("[SpatialWindowManager] move: '\(window.appName)' → \(origin)")
+            Log.app.debug("[SpatialWindowManager] move: '\(window.appName)' → \(origin.debugDescription)")
         }
     }
 
@@ -212,14 +212,14 @@ final class SpatialWindowManager {
 
         var sz = size
         guard let axVal = AXValueCreate(.cgSize, &sz) else {
-            print("[SpatialWindowManager] resize: failed to create AXValue for size")
+            Log.app.debug("[SpatialWindowManager] resize: failed to create AXValue for size")
             return
         }
         let result = AXUIElementSetAttributeValue(axWindow, kAXSizeAttribute as CFString, axVal)
         if result != .success {
-            print("[SpatialWindowManager] resize: AXUIElementSetAttributeValue failed (\(result.rawValue))")
+            Log.app.debug("[SpatialWindowManager] resize: AXUIElementSetAttributeValue failed (\(result.rawValue))")
         } else {
-            print("[SpatialWindowManager] resize: '\(window.appName)' → \(size)")
+            Log.app.debug("[SpatialWindowManager] resize: '\(window.appName)' → \(size.debugDescription)")
         }
     }
 
@@ -230,7 +230,7 @@ final class SpatialWindowManager {
         let rect = frameFor(target: target, screenSize: screenSize)
         await move(window: window, to: rect.origin)
         await resize(window: window, to: rect.size)
-        print("[SpatialWindowManager] snap: '\(window.appName)' → \(target) frame=\(rect)")
+        Log.app.debug("[SpatialWindowManager] snap: '\(window.appName)' → \(String(describing: target)) frame=\(rect.debugDescription)")
     }
 
     // MARK: - Control: minimize / restore / close
@@ -240,7 +240,7 @@ final class SpatialWindowManager {
         guard let axWindow = axWindow(for: window) else { return }
         let val = true as CFTypeRef
         AXUIElementSetAttributeValue(axWindow, kAXMinimizedAttribute as CFString, val)
-        print("[SpatialWindowManager] minimize: '\(window.appName)'")
+        Log.app.debug("[SpatialWindowManager] minimize: '\(window.appName)'")
     }
 
     func restore(window: WindowSnapshot) async {
@@ -248,7 +248,7 @@ final class SpatialWindowManager {
         guard let axWindow = axWindow(for: window) else { return }
         let val = false as CFTypeRef
         AXUIElementSetAttributeValue(axWindow, kAXMinimizedAttribute as CFString, val)
-        print("[SpatialWindowManager] restore: '\(window.appName)'")
+        Log.app.debug("[SpatialWindowManager] restore: '\(window.appName)'")
     }
 
     func close(window: WindowSnapshot) async {
@@ -261,11 +261,11 @@ final class SpatialWindowManager {
             axWindow, kAXCloseButtonAttribute as CFString, &closeButtonRef
         )
         guard err == .success, let closeButton = closeButtonRef else {
-            print("[SpatialWindowManager] close: could not get AXCloseButton for '\(window.appName)'")
+            Log.app.debug("[SpatialWindowManager] close: could not get AXCloseButton for '\(window.appName)'")
             return
         }
         AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString)
-        print("[SpatialWindowManager] close: '\(window.appName)'")
+        Log.app.debug("[SpatialWindowManager] close: '\(window.appName)'")
     }
 
     // MARK: - Voice-friendly API
@@ -274,7 +274,7 @@ final class SpatialWindowManager {
     func findAndSnap(matching query: String, to target: WindowSnapTarget) async -> Bool {
         await refreshWindows()
         guard let window = windows(matching: query).first else {
-            print("[SpatialWindowManager] findAndSnap: no window matching '\(query)'")
+            Log.app.debug("[SpatialWindowManager] findAndSnap: no window matching '\(query)'")
             return false
         }
         let screenSize = primaryScreenSize()
@@ -286,7 +286,7 @@ final class SpatialWindowManager {
     func findAndFocus(matching query: String) async -> Bool {
         await refreshWindows()
         guard let window = windows(matching: query).first else {
-            print("[SpatialWindowManager] findAndFocus: no window matching '\(query)'")
+            Log.app.debug("[SpatialWindowManager] findAndFocus: no window matching '\(query)'")
             return false
         }
         await focus(window: window)
@@ -302,7 +302,7 @@ final class SpatialWindowManager {
         for (window, target) in pairs {
             await snap(window: window, to: target, screenSize: screenSize)
         }
-        print("[SpatialWindowManager] tileWindows: tiled \(Array(pairs).count) window(s)")
+        Log.app.debug("[SpatialWindowManager] tileWindows: tiled \(Array(pairs).count) window(s)")
     }
 
     // MARK: - Private: AX helpers
@@ -314,7 +314,7 @@ final class SpatialWindowManager {
         var windowsRef: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
         guard err == .success, let windowList = windowsRef as? [AXUIElement], !windowList.isEmpty else {
-            print("[SpatialWindowManager] axWindow: cannot get AX windows for '\(snapshot.appName)' (err=\(err.rawValue))")
+            Log.app.debug("[SpatialWindowManager] axWindow: cannot get AX windows for '\(snapshot.appName)' (err=\(err.rawValue))")
             return nil
         }
 
@@ -398,7 +398,7 @@ final class SpatialWindowManager {
     @discardableResult
     private func accessibilityCheck(for operation: String) -> Bool {
         guard isAccessibilityGranted else {
-            print("[SpatialWindowManager] \(operation): Accessibility permission not granted — request via checkAccessibility()")
+            Log.app.debug("[SpatialWindowManager] \(operation): Accessibility permission not granted — request via checkAccessibility()")
             return false
         }
         return true

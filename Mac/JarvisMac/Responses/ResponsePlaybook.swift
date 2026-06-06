@@ -812,6 +812,16 @@ enum ResponsePlaybook {
             "Loud and clear.",
             "Yep."
         ],
+        ResponseKey.farewellAcknowledge: [
+            "Goodbye.",
+            "See you later.",
+            "Take care."
+        ],
+        ResponseKey.gratitudeAcknowledge: [
+            "You're welcome.",
+            "Happy to help.",
+            "Of course."
+        ],
         ResponseKey.timeNow: [
             "It's {time}.",
             "The time is {time}.",

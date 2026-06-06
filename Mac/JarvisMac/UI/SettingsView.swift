@@ -1132,12 +1132,32 @@ struct SettingsView: View {
 
     private var devicesTab: some View {
         Form {
-            Section("Daemon") {
-                LabeledContent("Status") {
-                    Text(DaemonManager.shared.status == .running ? "Connected" : "Disconnected")
-                        .foregroundStyle(DaemonManager.shared.status == .running ? .green : .secondary)
+            Section("Brain Daemon") {
+                // Configured URL — no formatting, shown verbatim
+                LabeledContent("URL") {
+                    Text(controller.prefs.current.daemonBaseURL.isEmpty
+                         ? "Not configured" : controller.prefs.current.daemonBaseURL)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
-                LabeledContent("Port") { Text("8765") }
+                // Mac bridge — WebSocket connection (the only accurate status)
+                LabeledContent("Connection") {
+                    let bridge = DaemonAppBridge.shared
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(bridge.isConnected ? Color.green
+                                  : bridge.connectionStatus == .connecting ? Color.yellow
+                                  : Color.red)
+                            .frame(width: 7, height: 7)
+                        Text(bridge.connectionStatus.shortLabel)
+                            .foregroundStyle(bridge.isConnected ? Color.green : Color.primary)
+                            .lineLimit(2)
+                    }
+                }
+                if !DaemonAppBridge.shared.isConnected {
+                    Button("Reconnect") { DaemonAppBridge.shared.resetAndReconnect() }
+                        .buttonStyle(.bordered)
+                }
             }
             Section("Connected Devices") {
                 let deviceCount = DaemonManager.shared.connectedDevices

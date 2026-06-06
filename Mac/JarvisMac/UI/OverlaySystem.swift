@@ -54,6 +54,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
     case haDiagnostics       // Home Assistant integration diagnostics
     case surveillance        // POI visual intelligence dashboard
     case pingPong            // hand-tracked ping pong game
+    case githubIssue         // GitHub issue overlay — reviewable before submit
 
     var title: String {
         switch self {
@@ -89,6 +90,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .haDiagnostics:        return "HA Diagnostics"
         case .surveillance:         return "Surveillance"
         case .pingPong:             return "Ping Pong"
+        case .githubIssue:          return "New Issue"
         }
     }
     var systemImage: String {
@@ -125,6 +127,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .haDiagnostics:        return "house.circle.fill"
         case .surveillance:         return "eye.trianglebadge.exclamationmark"
         case .pingPong:             return "gamecontroller.fill"
+        case .githubIssue:          return "exclamationmark.bubble.fill"
         }
     }
     var defaultSize: OverlaySize {
@@ -161,6 +164,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .haDiagnostics:        return .medium
         case .surveillance:         return .large
         case .pingPong:             return .cinema
+        case .githubIssue:          return .large
         }
     }
     var accentColor: Color {
@@ -197,6 +201,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
         case .haDiagnostics:        return .yellow
         case .surveillance:         return .yellow
         case .pingPong:             return .green
+        case .githubIssue:          return .purple
         }
     }
 
@@ -220,7 +225,7 @@ enum OverlayKind: String, Equatable, CaseIterable, Codable {
              .github, .home, .shopify, .obsidian, .androidBridge, .phone,
              .help, .reddit, .brain, .ambientContext, .runtimeDiagnostics, .spatialHUD,
              .haCamera, .haAllCameras, .haDiagnostics, .surveillance,
-             .pingPong, .speechLatency, .voiceLab:
+             .pingPong, .speechLatency, .voiceLab, .githubIssue:
             return true
         }
     }
@@ -506,8 +511,7 @@ struct OverlayHostView: View {
                             frame:      frame
                         )
                         .zIndex(Double(idx))
-                        .transition(.scale(scale: 0.90, anchor: .center)
-                            .combined(with: .opacity))
+                        .transition(JarvisMotion.panel)
                     }
                 }
             }
@@ -529,7 +533,7 @@ struct OverlayHostView: View {
                 pushSpatialContext(frames: f)
             }
         }
-        .animation(.spring(duration: 0.28, bounce: 0.18), value: manager.overlays.count)
+        .animation(JarvisMotion.normalEase, value: manager.overlays.count)
         // Escape key closes the top non-pinned overlay — idiomatic SwiftUI-on-macOS
         // shortcut capture without an NSEvent monitor (works on macOS 13+).
         .background(
@@ -583,11 +587,10 @@ private struct OverlayPanelView: View {
     private var isResizing: Bool { resizeDelta != .zero }
 
     /// Live frame during an in-progress gesture — otherwise equals `frame`.
+    /// Drag offset is intentionally excluded: it is applied as a compositor
+    /// `.offset()` on the view, avoiding layout recalculation every drag tick.
     private var liveFrame: CGRect {
         var f = frame
-        if isDragging {
-            f = f.offsetBy(dx: dragDelta.width, dy: dragDelta.height)
-        }
         if isResizing {
             let w = max(OverlayLayoutEngine.minWidth,  f.width  + resizeDelta.width)
             let h = max(OverlayLayoutEngine.minHeight, f.height + resizeDelta.height)
@@ -619,6 +622,8 @@ private struct OverlayPanelView: View {
         }
         .frame(width: effectiveFrame.width, height: effectiveFrame.height)
         .position(x: effectiveFrame.midX, y: effectiveFrame.midY)
+        // Drag is a pure compositor transform — no layout recalculation per tick.
+        .offset(x: dragDelta.width, y: dragDelta.height)
         // ── Spatial hover glow ─────────────────────────────────────────────
         // Cyan border appears when the hand-tracking cursor enters this panel.
         .overlay(spatialHoverGlow)
@@ -904,7 +909,9 @@ private struct OverlayPanelView: View {
         case .ambientContext:
             AmbientContextOverlayView(engine: controller.ambientContext)
         case .runtimeDiagnostics:
-            RuntimeDiagnosticsOverlayView()
+            // RuntimeProfilerView wraps the older RuntimeDiagnosticsOverlayView,
+            // adding SelfMonitor live data and idle enforcement controls.
+            RuntimeProfilerView(controller: controller)
         case .speechLatency:
             SpeechLatencyView()
         case .voiceLab:
@@ -954,6 +961,18 @@ private struct OverlayPanelView: View {
 
         case .pingPong:
             PingPongOverlayView(coordinator: controller.spatialCoordinator)
+
+        case .githubIssue:
+            if let draft = GitHubIssueDraftStore.shared.currentDraft {
+                GitHubIssueOverlayView(controller: controller, draft: draft)
+            } else {
+                ContentUnavailableView(
+                    "No Issue Draft",
+                    systemImage: "exclamationmark.bubble",
+                    description: Text("Say \"open a GitHub issue\" to start one.")
+                )
+                .padding()
+            }
         }
     }
 

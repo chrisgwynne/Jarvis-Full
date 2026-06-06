@@ -1,10 +1,29 @@
 import SwiftUI
 
-/// Animated orb that reflects assistant phase. Each phase has a distinct
-/// colour, pulse frequency, and orbiting-dot speed so the user can tell
-/// at a glance whether Jarvis is idle, armed for wake word, listening,
-/// thinking, speaking, or recovering from a barge-in.
+/// Animated orb that reflects assistant phase.
+///
+/// Routing: when `prefs.current.useLightweightOrb` is true (default), renders
+/// `LightweightOrbView` — the pure SwiftUI ring renderer with dark core, breathing
+/// ring, rotating arc, and audio-reactive line width. Set to false to fall back to
+/// the legacy Canvas/orbiting-dot renderer.
 struct OrbView: View {
+    let state: AppState
+    var useLightweightOrb: Bool = true
+    var interaction: OrbInteractionController? = nil
+
+    var body: some View {
+        if useLightweightOrb {
+            LightweightOrbView(state: state, interaction: interaction)
+        } else {
+            LegacyOrbView(state: state)
+        }
+    }
+}
+
+// MARK: - LegacyOrbView
+
+/// Original Canvas-based renderer. Preserved behind the feature toggle.
+private struct LegacyOrbView: View {
     let state: AppState
 
     var body: some View {

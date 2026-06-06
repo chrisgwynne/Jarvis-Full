@@ -175,6 +175,8 @@ enum IntentMapping {
         // Small Talk
         case "can_you_hear_me":     return .canYouHearMe
         case "are_you_listening":   return .areYouListening
+        case "farewell":            return .farewell
+        case "thank_user":          return .thankUser
         case "status":              return .status
         case "repeat_last":         return .repeatLast
         case "why_did_you_do_that": return .whyDidYouDoThat
@@ -219,6 +221,12 @@ enum IntentMapping {
         case "github_list_issues":          return .githubListIssues(repo: nil)
         case "github_stale_issues":         return .githubStaleIssues(repo: nil)
         case "github_create_issue":         return .githubCreateIssue(repo: nil, title: nil)
+        case "open_github_issue_overlay":   return .openGitHubIssueOverlay(withContext: false)
+        case "log_as_github_issue":         return .openGitHubIssueOverlay(withContext: true)
+        case "why_are_you_crashing":        return .whyAreYouCrashing
+        case "open_crash_log":              return .openCrashLog
+        case "run_stability_report":        return .runStabilityReport
+        case "enter_safe_mode":             return .enterSafeMode
         case "github_recent_commits":       return .githubRecentCommits(repo: nil)
         case "github_changes_today":        return .githubChangesToday(repo: nil)
         case "github_check_ci":             return .githubCheckCI(repo: nil)
@@ -441,6 +449,8 @@ enum IntentMapping {
         case .enableListening:      return "start_listening"
         case .canYouHearMe:         return "can_you_hear_me"
         case .areYouListening:      return "are_you_listening"
+        case .farewell:             return "farewell"
+        case .thankUser:            return "thank_user"
         case .repeatLast:           return "repeat_last"
         case .stopTalking:          return "stop_talking"
         case .whatAmILookingAt:     return "what_am_i_looking_at"

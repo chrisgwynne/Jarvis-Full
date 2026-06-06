@@ -20,14 +20,21 @@ final class ScreenCaptureService {
 
     // MARK: - Permission
 
+    /// AppState reference — set by JarvisController after both are created so
+    /// permission changes are reflected in the UI without polling.
+    weak var appState: AppState?
+
     func checkPermission() async {
         do {
             _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             permissionState = .granted
-            Log.vision.info("screen recording permission: granted")
+            appState?.screenPermissionGranted = true
+            Log.vision.info("[Permission] screen recording: granted")
         } catch {
             permissionState = .denied
-            Log.vision.warning("screen recording permission: denied — \(error.localizedDescription)")
+            appState?.screenPermissionGranted = false
+            // Surface as a clear actionable error — not just a buried log line.
+            Log.vision.warning("[Permission] screen recording: DENIED — screen-context features disabled. Grant in System Settings → Privacy → Screen Recording.")
         }
     }
 

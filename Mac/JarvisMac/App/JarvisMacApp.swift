@@ -28,7 +28,10 @@ struct JarvisMacApp: App {
                 Button("Stop Speaking") { appDelegate.controller.stopSpeaking() }
                     .keyboardShortcut(".", modifiers: [.command])
                 Divider()
-                Button("Toggle Command Centre") { appDelegate.controller.toggleCommandCentre() }
+                Button("Toggle Command Centre") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    appDelegate.controller.toggleCommandCentre()
+                }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                 Button("Capture Camera Frame") {
                     Task { await appDelegate.controller.captureCameraAndDescribe(announce: true) }
@@ -87,6 +90,7 @@ private struct MenuBarContent: View {
 
     var body: some View {
         Button("Open Command Centre") {
+            NSApp.activate(ignoringOtherApps: true)
             openWindow(id: JarvisMacApp.commandCentreWindowID)
         }
         .keyboardShortcut("f", modifiers: [.command, .shift])
@@ -123,6 +127,7 @@ private struct MenuBarContent: View {
 
 // MARK: - App delegate (lifecycle + runtime ownership)
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = AppState()
     lazy var controller = JarvisController(state: state)

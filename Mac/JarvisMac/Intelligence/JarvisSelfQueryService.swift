@@ -16,12 +16,18 @@ final class JarvisSelfQueryService {
     // MARK: - Detection
 
     private static let selfQuerySignals: [String] = [
-        "can you", "do you", "are you able", "do you support", "are you connected",
-        "do you have", "can jarvis", "does jarvis", "what can you", "how do you",
-        "are you", "what are you", "do you know", "can you do", "will you",
-        "what do you", "how are you built", "what features", "what integrations",
-        "what services", "is the", "is there a", "does the", "have you",
-        "what is your", "how does your", "tell me about your", "explain your"
+        // Specific enough to indicate the user is asking about Jarvis's own
+        // capabilities or state. Deliberately excludes broad conversational
+        // openers ("can you", "do you", "are you", "what do you", etc.) that
+        // would match entirely unrelated queries like "what do you think of Arne Slot".
+        "are you able", "do you support", "are you connected",
+        "do you have", "can jarvis", "does jarvis", "what can you",
+        "what are you capable", "do you know how to", "can you do",
+        "how are you built", "what features", "what integrations",
+        "what services", "what is your", "how does your",
+        "tell me about your", "explain your", "show me your",
+        "jarvis status", "jarvis health", "your capabilities",
+        "your features", "your integrations"
     ]
 
     /// Returns true if this query is asking about Jarvis's own capabilities or state.

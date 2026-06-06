@@ -134,6 +134,13 @@ struct Preferences: Codable, Equatable {
     var obsidianWatchTags: [String] = ["jarvis", "review", "urgent"]
 
     // ── JarvisBrainDaemon ────────────────────────────────────────────────────
+    /// Base URL of the Brain daemon (without trailing slash).
+    /// The app derives health, version, and WebSocket URLs from this.
+    /// Default: http://127.0.0.1:8765
+    var daemonBaseURL: String = "http://127.0.0.1:8765"
+    /// When false (default for private/local use), no auth token is sent.
+    /// Enable only if the daemon is internet-exposed.
+    var daemonAuthRequired: Bool = false
     /// When true, the app defers port 8765 to the background LaunchAgent daemon
     /// instead of hosting the server in-process.
     var daemonEnabled: Bool = true
@@ -368,6 +375,11 @@ struct Preferences: Codable, Equatable {
     /// When true, the Developer tab is visible in Settings.
     /// Defaults false so the tab stays hidden on first launch.
     var developerModeEnabled: Bool = false
+
+    // ── Orb renderer ────────────────────────────────────────────────────────
+    /// When true (default) uses the lightweight SwiftUI ring renderer.
+    /// Set false to revert to the legacy Canvas/orbiting-dot renderer.
+    var useLightweightOrb: Bool = true
 
     static let `default` = Preferences(
         userName: nil,
@@ -672,7 +684,9 @@ struct Preferences: Codable, Equatable {
         legacyAndroidPortEnabled = try c.decodeIfPresent(Bool.self,   forKey: .legacyAndroidPortEnabled) ?? false
 
         // JarvisBrainDaemon
-        daemonEnabled                          = try c.decodeIfPresent(Bool.self, forKey: .daemonEnabled)                          ?? true
+        daemonBaseURL                          = try c.decodeIfPresent(String.self, forKey: .daemonBaseURL)                        ?? "http://127.0.0.1:8765"
+        daemonAuthRequired                     = try c.decodeIfPresent(Bool.self,   forKey: .daemonAuthRequired)                    ?? false
+        daemonEnabled                          = try c.decodeIfPresent(Bool.self,   forKey: .daemonEnabled)                        ?? true
         legacyBrainServerEnabled               = try c.decodeIfPresent(Bool.self, forKey: .legacyBrainServerEnabled)               ?? false
         speakRemoteRepliesOnMac                = try c.decodeIfPresent(Bool.self, forKey: .speakRemoteRepliesOnMac)                ?? false
         showRemoteActivityInMacUI              = try c.decodeIfPresent(Bool.self, forKey: .showRemoteActivityInMacUI)              ?? true
@@ -715,6 +729,7 @@ struct Preferences: Codable, Equatable {
         silentActionsEnabled               = try c.decodeIfPresent(Bool.self,   forKey: .silentActionsEnabled)               ?? true
         selfKnowledgeEnabled               = try c.decodeIfPresent(Bool.self,   forKey: .selfKnowledgeEnabled)               ?? true
         developerModeEnabled               = try c.decodeIfPresent(Bool.self,   forKey: .developerModeEnabled)               ?? false
+        useLightweightOrb                  = try c.decodeIfPresent(Bool.self,   forKey: .useLightweightOrb)                  ?? true
     }
 }
 

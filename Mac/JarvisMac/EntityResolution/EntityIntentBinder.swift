@@ -20,7 +20,10 @@ enum EntityIntentBinder {
         let action = result.action
 
         // ── App entity ──────────────────────────────────────────────────────
+        // Require an explicit open/launch verb — prevents ambient speech or
+        // news audio containing an app name from silently launching it.
         if entity.entityType == .app {
+            guard action != .unknown else { return nil }
             let spoken = "Opening \(entity.displayName)."
             if let bid = entity.bundleIdentifier {
                 return (.openApp(name: bid), spoken)
@@ -83,14 +86,14 @@ enum EntityIntentBinder {
         }
 
         // ── News channel, streaming, website, browser bookmark ─────────────
+        // Require an explicit navigation/play verb. A fuzzy entity match alone
+        // (score ≥ 0.72) is not enough — the user must have said something like
+        // "open", "play", "go to", etc. This prevents news audio or ambient
+        // speech that happens to contain a website name from triggering a URL open.
         if [.newsChannel, .youtubeChannel, .stream, .website, .browserBookmark, .mediaSource].contains(entity.entityType) {
+            guard action != .unknown else { return nil }
             if let url = entity.externalURL {
-                let verb: String
-                switch action {
-                case .play, .navigate: verb = "Opening"
-                default:               verb = "Opening"
-                }
-                return (.openURL(url), "\(verb) \(entity.displayName).")
+                return (.openURL(url), "Opening \(entity.displayName).")
             }
             // App bundle fallback
             if let bid = entity.bundleIdentifier {
@@ -99,6 +102,8 @@ enum EntityIntentBinder {
         }
 
         // ── Generic: URL or app fallback ────────────────────────────────────
+        // Same guard: never open a URL or app without an explicit intent verb.
+        guard action != .unknown else { return nil }
         if let url = entity.externalURL {
             return (.openURL(url), "Opening \(entity.displayName).")
         }

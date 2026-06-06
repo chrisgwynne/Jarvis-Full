@@ -319,6 +319,8 @@ enum Intent: Equatable {
     // Small talk / sanity-check commands — proof routing works.
     case canYouHearMe
     case areYouListening
+    case farewell      // goodbye, bye, see you, good night
+    case thankUser     // thanks, thank you
     case tellTime
     case tellDate   // "what's the date", "what day is it"
 
@@ -413,6 +415,19 @@ enum Intent: Equatable {
     case githubSummariseDiff(repo: String?)
     case githubLocalStats(repo: String?)
     case githubDashboard
+    /// Opens the GitHub Issue Overlay (reviewable — never silently creates).
+    /// If `withContext: true`, pre-fills from the most recent error/command context.
+    case openGitHubIssueOverlay(withContext: Bool)
+
+    // Stability / watchdog
+    /// Open a manual stability / crash diagnostic report.
+    case runStabilityReport
+    /// Speak the current top CPU suspect and open the diagnostics overlay.
+    case whyAreYouCrashing
+    /// Open the crash breadcrumb log in Console / Finder.
+    case openCrashLog
+    /// Enter safe degraded mode immediately.
+    case enterSafeMode
 
     // Shopify
     case shopifyOrders

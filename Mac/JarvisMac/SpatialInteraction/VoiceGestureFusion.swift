@@ -201,12 +201,12 @@ struct FusedAction: Equatable {
             confidence: confidence
         )
         recentVoiceIntents.append(entry)
-        print("[VoiceGestureFusion] Recorded voice intent '\(label)' (conf=\(String(format: "%.2f", confidence)))")
+        Log.app.debug("[VoiceGestureFusion] Recorded voice intent '\(label)' (conf=\(String(format: "%.2f", confidence)))")
 
         // Auto-fuse when gesture context is present.
         if currentGestureContext != nil {
             if let result = fuse(), result.confidence >= autoFireThreshold {
-                print("[VoiceGestureFusion] Auto-fire: \(result.action) conf=\(String(format: "%.2f", result.confidence))")
+                Log.app.debug("[VoiceGestureFusion] Auto-fire: \(String(describing: result.action)) conf=\(String(format: "%.2f", result.confidence))")
                 onFusedAction?(result)
             }
         }
@@ -223,13 +223,13 @@ struct FusedAction: Equatable {
             cursorPosition: cursorPosition,
             timestamp: Date()
         )
-        print("[VoiceGestureFusion] Gesture context updated — hovered=\(hoveredWidgetID?.uuidString ?? "none") gesture=\(gesture ?? "none")")
+        Log.app.debug("[VoiceGestureFusion] Gesture context updated — hovered=\(hoveredWidgetID?.uuidString ?? "none") gesture=\(gesture ?? "none")")
     }
 
     /// Discard all buffered voice intents.
     func clearVoiceBuffer() {
         recentVoiceIntents.removeAll()
-        print("[VoiceGestureFusion] Voice buffer cleared")
+        Log.app.debug("[VoiceGestureFusion] Voice buffer cleared")
     }
 
     // -----------------------------------------------------------------------
@@ -251,7 +251,7 @@ struct FusedAction: Equatable {
 
         // 2. Pick the most recent voice intent.
         guard let voiceEntry = recentVoiceIntents.last else {
-            print("[VoiceGestureFusion] fuse() — no recent voice intent in window")
+            Log.app.debug("[VoiceGestureFusion] fuse() — no recent voice intent in window")
             return nil
         }
 
@@ -279,7 +279,7 @@ struct FusedAction: Equatable {
            now.timeIntervalSince(voiceEntry.timestamp) <= proximityWindowSeconds,
            isDeicticTranscript(voiceEntry.transcript) {
             computedConfidence = min(computedConfidence + proximityBoost, 1.0)
-            print("[VoiceGestureFusion] Proximity boost applied (+\(proximityBoost))")
+            Log.app.debug("[VoiceGestureFusion] Proximity boost applied (+\(self.proximityBoost))")
         }
 
         let result = FusedAction(
@@ -291,7 +291,7 @@ struct FusedAction: Equatable {
         )
 
         lastFusedAction = result
-        print("[VoiceGestureFusion] Fused: \(actionType) widgetID=\(widgetID?.uuidString ?? "none") conf=\(String(format: "%.2f", computedConfidence)) source=\(source)")
+        Log.app.debug("[VoiceGestureFusion] Fused: \(String(describing: actionType)) widgetID=\(widgetID?.uuidString ?? "none") conf=\(String(format: "%.2f", computedConfidence)) source=\(String(describing: source))")
         return result
     }
 

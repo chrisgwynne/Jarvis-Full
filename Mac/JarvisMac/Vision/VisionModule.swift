@@ -81,7 +81,7 @@ import AVFoundation
 
     func start() {
         guard !isRunning else { return }
-        print("[VisionModule] Starting — feeds: \(cameraFeedManager.feeds.count)")
+        Log.vision.debug("[VisionModule] Starting — feeds: \(self.cameraFeedManager.feeds.count)")
         isRunning = true
         loadConfiguredFeeds()
         cameraFeedManager.startAll()
@@ -90,7 +90,7 @@ import AVFoundation
     }
 
     func stop() {
-        print("[VisionModule] Stopping — active RTSP loops: \(rtspStreamManager.activeLoopCount)")
+        Log.vision.debug("[VisionModule] Stopping — active RTSP loops: \(self.rtspStreamManager.activeLoopCount)")
         guard isRunning else { return }
         isRunning = false
         cameraFeedManager.stopAll()
@@ -101,7 +101,7 @@ import AVFoundation
         activeFeedCount = 0
         lastCommittedThreatLevel = .normal
         lastThreatEscalationTime = .distantPast
-        print("[VisionModule] Stopped")
+        Log.vision.debug("[VisionModule] Stopped")
     }
 
     func toggleSurveillance() {

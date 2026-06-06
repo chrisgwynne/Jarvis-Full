@@ -53,6 +53,32 @@ protocol WakeWordDetecting: AnyObject {
     func recordFeedback(_ feedback: WakeWordFeedback, for event: WakeWordEvent?)
 }
 
+/// Optional health-check extension for wake-word engines that can report
+/// whether audio buffers are actively arriving from CoreAudio.
+///
+/// `WakeWordDetecting.isRunning` only indicates the engine *was started*.
+/// A running engine can silently stall (device route change, App Nap, HAL
+/// reset, SFSpeechRecognitionTask silent death). This protocol lets the
+/// health watchdog detect that and force a restart before the user notices.
+protocol WakeWordHealthCheckable: WakeWordDetecting {
+    /// Timestamp of the most recent audio buffer received from CoreAudio.
+    /// `nil` if no buffer has ever arrived (engine just started or stalled
+    /// before the first buffer could be delivered).
+    var lastAudioBufferTime: Date? { get }
+}
+
+extension WakeWordHealthCheckable {
+    /// Maximum age before a buffer timestamp is considered stale (seconds).
+    static var maxBufferAgeSecs: TimeInterval { 3.0 }
+
+    /// `true` when a buffer arrived within the last 3 seconds.
+    /// A `false` result while `isRunning == true` is a health-check failure.
+    var isReceivingAudioBuffers: Bool {
+        guard let t = lastAudioBufferTime else { return false }
+        return Date().timeIntervalSince(t) < Self.maxBufferAgeSecs
+    }
+}
+
 /// Phase-1 placeholder: never fires. Push-to-talk drives the MVP.
 /// Swap with a `SherpaOnnxWakeWord` implementation in Phase 2 — call sites
 /// won't notice because they only see `WakeWordDetecting`.

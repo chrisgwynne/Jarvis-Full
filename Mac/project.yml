@@ -29,12 +29,9 @@ settings:
 #   SupertonicTTSBackend is gated by `#if canImport(onnxruntime)` so the project
 #   still builds without it — Supertonic will report "not compiled in".
 # - whisper: optional Phase-2 offline STT (commented out until pinned).
-packages:
-  onnxruntime-swift-package-manager:
-    url: https://github.com/microsoft/onnxruntime-swift-package-manager.git
-    # Exact pin (not `from:`) so a clean checkout resolves deterministically.
-    # Bump deliberately + re-run `make resolve` to refresh the committed Package.resolved.
-    exactVersion: "1.16.0"
+# packages: (none currently — onnxruntime removed because v1.16.0 has no macOS slice;
+# SupertonicTTSBackend is gated with #if canImport(OnnxRuntimeBindings) so it builds without it.
+# To re-enable, add onnxruntime-swift-package-manager pinned to ≥1.19.0)
 # Uncomment to enable offline wake-word STT:
 #   whisper:
 #     url: https://github.com/ggerganov/whisper.cpp
@@ -92,8 +89,6 @@ targets:
         # Release values are supplied by Signing.xcconfig (CODE_SIGN_IDENTITY,
         # DEVELOPMENT_TEAM, CODE_SIGN_STYLE). Hardened runtime is on globally.
     dependencies:
-      - package: onnxruntime-swift-package-manager
-        product: onnxruntime
       # Copy the daemon executable into JarvisMac.app/Contents/MacOS so a
       # shipped (notarized) build can locate it via forAuxiliaryExecutable.
       # `link: false` — it is a standalone helper tool, not linked into the app.

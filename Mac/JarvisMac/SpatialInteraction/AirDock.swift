@@ -125,7 +125,7 @@ final class AirDock {
         )
         workspaces.append(workspace)
         saveToDisk()
-        print("[AirDock] Saved workspace '\(name)' (id: \(workspace.id))")
+        Log.app.debug("[AirDock] Saved workspace '\(name)' (id: \(workspace.id))")
         return workspace
     }
 
@@ -136,7 +136,7 @@ final class AirDock {
         workspaces.remove(at: idx)
         if activeWorkspaceID == id { activeWorkspaceID = nil }
         saveToDisk()
-        print("[AirDock] Deleted workspace '\(name)' (id: \(id))")
+        Log.app.debug("[AirDock] Deleted workspace '\(name)' (id: \(id))")
     }
 
     /// Rename an existing workspace.
@@ -147,7 +147,7 @@ final class AirDock {
         // Update thumbnail to reflect new name keywords.
         workspaces[idx].thumbnail = autoThumbnail(for: newName)
         saveToDisk()
-        print("[AirDock] Renamed workspace \(id) → '\(newName)'")
+        Log.app.debug("[AirDock] Renamed workspace \(id) → '\(newName)'")
     }
 
     /// Replace the widget states and overlay kinds for an existing workspace in-place.
@@ -159,7 +159,7 @@ final class AirDock {
         workspaces[idx].activeOverlayKinds = overlayKinds
         workspaces[idx].updatedAt          = Date()
         saveToDisk()
-        print("[AirDock] Updated workspace '\(workspaces[idx].name)' (id: \(id))")
+        Log.app.debug("[AirDock] Updated workspace '\(self.workspaces[idx].name)' (id: \(id))")
     }
 
     // MARK: - Lookup
@@ -213,17 +213,17 @@ final class AirDock {
     /// for reading the returned workspace data and restoring widget positions.
     func activate(id: UUID) {
         guard workspaces.contains(where: { $0.id == id }) else {
-            print("[AirDock] activate(id:) — workspace \(id) not found")
+            Log.app.debug("[AirDock] activate(id:) — workspace \(id) not found")
             return
         }
         activeWorkspaceID = id
-        print("[AirDock] Activated workspace \(id) ('\(workspace(id: id)?.name ?? "?")')")
+        Log.app.debug("[AirDock] Activated workspace \(id) ('\(self.workspace(id: id)?.name ?? "?")')")
     }
 
     /// Clear the active workspace selection without deleting anything.
     func deactivate() {
         activeWorkspaceID = nil
-        print("[AirDock] Deactivated current workspace")
+        Log.app.debug("[AirDock] Deactivated current workspace")
     }
 
     // MARK: - Persistence
@@ -231,7 +231,7 @@ final class AirDock {
     /// Load workspaces from disk.  Called automatically on first access via `init`.
     func loadFromDisk() {
         guard let url = storageURL else {
-            print("[AirDock] Could not resolve storage URL — skipping load")
+            Log.app.debug("[AirDock] Could not resolve storage URL — skipping load")
             return
         }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
@@ -239,16 +239,16 @@ final class AirDock {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode([AirWorkspace].self, from: data)
             workspaces = decoded
-            print("[AirDock] Loaded \(decoded.count) workspace(s) from disk")
+            Log.app.debug("[AirDock] Loaded \(decoded.count) workspace(s) from disk")
         } catch {
-            print("[AirDock] Load error: \(error)")
+            Log.app.debug("[AirDock] Load error: \(error)")
         }
     }
 
     /// Persist the current workspace list to disk.  Called automatically after every mutation.
     func saveToDisk() {
         guard let url = storageURL else {
-            print("[AirDock] Could not resolve storage URL — skipping save")
+            Log.app.debug("[AirDock] Could not resolve storage URL — skipping save")
             return
         }
         do {
@@ -263,7 +263,7 @@ final class AirDock {
             let data = try encoder.encode(workspaces)
             try data.write(to: url, options: .atomic)
         } catch {
-            print("[AirDock] Save error: \(error)")
+            Log.app.debug("[AirDock] Save error: \(error)")
         }
     }
 
