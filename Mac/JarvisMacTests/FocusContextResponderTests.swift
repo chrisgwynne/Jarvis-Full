@@ -165,16 +165,4 @@ final class FocusContextResponderTests: XCTestCase {
 
     // MARK: - pbxproj UUID uniqueness
 
-    func testNoDuplicateBuildFileUUIDs() throws {
-        let pbxPath = "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj"
-        let content = try String(contentsOfFile: pbxPath, encoding: .utf8)
-        let pattern = try NSRegularExpression(pattern: "[A-Z0-9]{24} /\\*")
-        let matches = pattern.matches(in: content, range: NSRange(content.startIndex..., in: content))
-        let uuids   = matches.map { r -> String in
-            let range = Range(r.range, in: content)!
-            return String(content[range].prefix(24))
-        }
-        let unique = Set(uuids)
-        XCTAssertEqual(uuids.count, unique.count, "Duplicate UUID found in project.pbxproj")
-    }
 }

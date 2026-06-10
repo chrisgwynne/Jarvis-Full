@@ -258,19 +258,4 @@ final class GitHubIssueOverlayTests: XCTestCase {
         XCTAssertNil(store.currentDraft)
     }
 
-    // pbxproj UUID regression guard
-    func testPbxprojUUIDs() throws {
-        let pbxPath = "/Users/chris/Desktop/jarvis/Mac/JarvisMac.xcodeproj/project.pbxproj"
-        let content = try String(contentsOfFile: pbxPath, encoding: .utf8)
-        for uuid in ["GI01A2B3C4D5E6F7A8B9C0001",  // GitHubIssueDraft build file
-                     "GI02A2B3C4D5E6F7A8B9C0001",  // GitHubIssueDraft file ref
-                     "GI01A2B3C4D5E6F7A8B9C0002",  // GitHubIssueOverlayView build file
-                     "GI02A2B3C4D5E6F7A8B9C0002",  // GitHubIssueOverlayView file ref
-                     "GI01A2B3C4D5E6F7A8B9C0003",  // GitHubIssueOverlayTests build file
-                     "GI02A2B3C4D5E6F7A8B9C0003"] { // GitHubIssueOverlayTests file ref
-            let occurrences = content.components(separatedBy: uuid).count - 1
-            XCTAssertGreaterThanOrEqual(occurrences, 1,
-                "UUID \(uuid) not found in pbxproj — add the new files to the project")
-        }
-    }
 }

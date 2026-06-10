@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    name: generate + build
+    name: generate + build + test
     # macos-15 ships Xcode 16, which can read the Xcode project format (77)
     # that current XcodeGen emits. macos-14 (Xcode 15.4) rejects it.
     runs-on: macos-15
@@ -50,6 +50,27 @@ jobs:
           set -o pipefail
           xcodebuild -scheme JarvisMac -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      # Runs both bundles wired into the JarvisMac scheme: JarvisMacTests
+      # (hosted on the app — bootstrap is skipped under XCTest, see
+      # AppEnvironment.isRunningTests) and JarvisBrainDaemonTests (standalone,
+      # compiles the real daemon sources). Failures fail the workflow.
+      - name: Run tests (JarvisMac + JarvisBrainDaemon bundles)
+        run: |
+          set -o pipefail
+          xcodebuild -scheme JarvisMac -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            -resultBundlePath "$RUNNER_TEMP/JarvisMacTests.xcresult" \
+            test 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: ${{ runner.temp }}/JarvisMacTests.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Report failure to PR
         if: failure()

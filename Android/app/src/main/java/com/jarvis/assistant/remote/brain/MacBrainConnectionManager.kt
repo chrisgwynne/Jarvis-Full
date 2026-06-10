@@ -404,35 +404,33 @@ class MacBrainConnectionManager(
 
             "reply.final", "chat.reply.final" -> {
                 LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
-                val replyText = json.optString("text").ifBlank { return }
-                val correlationId = json.optString("correlationId").ifBlank { null }
-                    ?: json.optString("messageId").ifBlank { null }
+                val replyText = BrainProtocol.replyText(json) ?: return
+                val correlationId = BrainProtocol.replyCorrelationId(json)
                 Log.d(TAG, "reply.final: len=${replyText.length} correlationId=$correlationId")
                 onReplyFinal?.invoke(replyText, correlationId)
             }
 
             "reply.partial", "chat.reply.partial" -> {
                 LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
-                val partial = json.optString("text").ifBlank { return }
+                val partial = BrainProtocol.replyText(json) ?: return
                 onReplyPartial?.invoke(partial)
             }
 
             "orchestrate.speak" -> {
                 LatencyTracker.mark(LatencyTracker.DAEMON_REPLY_RECEIVED)
-                val speakText = json.optString("text").ifBlank { return }
+                val speakText = BrainProtocol.replyText(json) ?: return
                 Log.d(TAG, "orchestrate.speak: ${speakText.take(80)}")
                 onOrchestrateSpeak?.invoke(speakText)
             }
 
             "orchestrate.silent" -> {
-                val reason = json.optString("reason", "mac_responding")
+                val reason = BrainProtocol.silentReason(json)
                 Log.d(TAG, "orchestrate.silent: reason=$reason")
                 onOrchestrateSilent?.invoke(reason)
             }
 
             "proactive.notify" -> {
-                val title = json.optString("title", "Jarvis")
-                val body  = json.optString("body").ifBlank { return }
+                val (title, body) = BrainProtocol.proactiveNotification(json) ?: return
                 Log.d(TAG, "proactive.notify: $title — ${body.take(60)}")
                 onProactiveNotify?.invoke(title, body)
             }
@@ -572,13 +570,12 @@ class MacBrainConnectionManager(
             Log.w(TAG, "sendTranscript skipped — not connected")
             return
         }
-        val frame = JSONObject().apply {
-            put("type",       "transcript.final")
-            put("messageId",  routeId)
-            put("transcript", text)
-            put("deviceId",   deviceName())
-            put("timestamp",  System.currentTimeMillis())
-        }
+        val frame = BrainProtocol.transcriptFinal(
+            text        = text,
+            routeId     = routeId,
+            deviceId    = deviceName(),
+            timestampMs = System.currentTimeMillis(),
+        )
         val sent = sendFrame(frame)
         if (sent) {
             LatencyTracker.mark(LatencyTracker.TRANSCRIPT_SENT_TO_DAEMON)

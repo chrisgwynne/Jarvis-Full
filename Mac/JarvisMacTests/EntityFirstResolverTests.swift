@@ -312,18 +312,6 @@ final class EntityFirstResolverTests: XCTestCase {
 
     // MARK: - pbxproj UUID regression
 
-    func testPbxprojUUIDsUnique() throws {
-        let pbxproj = try String(contentsOfFile:
-            "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj")
-        let prefixIDs = ["EL01", "EL02", "MD01", "MD02", "EF01", "EF02",
-                         "EG01", "EG02", "EI01", "EI02", "CE01", "CE02",
-                         "ER01", "ER02",
-                         "EX01", "EX02", "ED01", "ED02"]
-        for id in prefixIDs {
-            let count = pbxproj.components(separatedBy: id).count - 1
-            XCTAssertEqual(count, 1, "UUID \(id) should appear exactly once in pbxproj")
-        }
-    }
 
     // MARK: - Helpers
 

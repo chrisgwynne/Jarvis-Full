@@ -98,7 +98,11 @@ import com.jarvis.assistant.preferences.db.ResponsePreferenceEntity
         ResponsePreferenceEntity::class,
     ],
     version = 19,
-    exportSchema = false
+    // Schema history is exported to app/schemas/ (committed to git) so
+    // JarvisDatabaseMigrationTest can verify the migration chain against the
+    // real schema instead of trusting it blindly. Bump version → a new JSON
+    // is generated on the next build → commit it alongside the migration.
+    exportSchema = true
 )
 abstract class JarvisDatabase : RoomDatabase() {
 
@@ -688,6 +692,20 @@ abstract class JarvisDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * The complete migration chain, in order. Single source of truth shared
+         * by the production builder below and JarvisDatabaseMigrationTest, so a
+         * migration added to one cannot silently be missing from the other.
+         */
+        internal val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+            MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
+            MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
+            MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
+            MIGRATION_18_19,
+        )
+
         fun getInstance(context: Context): JarvisDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -695,12 +713,7 @@ abstract class JarvisDatabase : RoomDatabase() {
                     JarvisDatabase::class.java,
                     DB_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                                   MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                                   MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
-                                   MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
-                                   MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
-                                   MIGRATION_18_19)
+                    .addMigrations(*ALL_MIGRATIONS)
                     // #46: destructive fallback is a DEBUG-ONLY dev safety net.
                     // In release it must NEVER silently drop all tables (that
                     // wipes the user's memories/conversations on any schema

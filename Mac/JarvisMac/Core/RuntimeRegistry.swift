@@ -67,6 +67,13 @@ final class AudioRuntime: RuntimeSubsystem {
     private(set) var state: RuntimeState = .stopped
 
     private weak var appState: AppState?
+
+    /// Real recovery action, wired by RuntimeBootstrapper to
+    /// `JarvisController.rebuildWakeWord()` — the same repair path the
+    /// wake-word watchdog uses. Without this, the default `recover()`
+    /// (no-op stop/start) restarted nothing.
+    var onRecover: (() async -> Void)?
+
     init(appState: AppState) { self.appState = appState }
 
     func start() async throws { state = .running }
@@ -76,7 +83,7 @@ final class AudioRuntime: RuntimeSubsystem {
         guard let appState else { return .degraded("AppState deallocated") }
         switch appState.microphoneStatus {
         case .ready:
-            return .healthy
+            break
         case .denied:
             return .failed("Microphone permission denied")
         case .failed(let reason):
@@ -86,6 +93,33 @@ final class AudioRuntime: RuntimeSubsystem {
         case .unknown:
             return .degraded("Microphone status unknown")
         }
+        // The wake-word engine is the audio subsystem's recoverable failure
+        // mode: a dead engine while listening is enabled is exactly what
+        // rebuildWakeWord() repairs. Without this check the coordinator never
+        // saw the one failure it can actually fix.
+        if case .failed(let reason) = appState.wakeWordStatus, appState.listeningEnabled {
+            return .failed("Wake word: \(reason)")
+        }
+        return .healthy
+    }
+
+    func recover() async throws {
+        // Mic permission denial is not programmatically recoverable — needs
+        // the user in System Settings. Throw so the coordinator's bounded
+        // retry budget is consumed instead of looping a pointless restart.
+        if appState?.microphoneStatus == .denied {
+            throw RuntimeRecoveryError.requiresUserAction("microphone permission denied")
+        }
+        await onRecover?()
+    }
+}
+
+/// Recovery failures that need a human, not a retry.
+enum RuntimeRecoveryError: Error, LocalizedError {
+    case requiresUserAction(String)
+    var errorDescription: String? {
+        if case .requiresUserAction(let what) = self { return "requires user action: \(what)" }
+        return nil
     }
 }
 

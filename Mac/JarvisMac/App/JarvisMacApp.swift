@@ -141,12 +141,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // test runner. See JarvisMacTests target / AppEnvironment.
         guard !AppEnvironment.isRunningTests else { return }
 
+        // Crash capture must precede everything that can crash: uncaught
+        // NSExceptions + fatal signals are persisted to Diagnostics/Crashes
+        // and surfaced through AppState on the next launch.
+        CrashReporter.install()
+
         // Auto-launch at login so the app comes back after a reboot alongside
         // the daemon LaunchAgent.
         LoginItemManager.shared.registerIfNeeded()
 
         Task { @MainActor in
             state.log("app", .info, "Launching JarvisMac")
+            CrashReporter.surfacePendingReports(state: state)
             await controller.bootstrap()
         }
     }

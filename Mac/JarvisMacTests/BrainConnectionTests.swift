@@ -167,18 +167,6 @@ final class BrainConnectionTests: XCTestCase {
                        "Bridge must never lock into permanent offline — always reconnectable")
     }
 
-    // pbxproj UUID regression
-    func testPbxprojUUIDs() throws {
-        let path = "/Users/chris/Desktop/jarvis/Mac/JarvisMac.xcodeproj/project.pbxproj"
-        let content = try String(contentsOfFile: path, encoding: .utf8)
-        let required = [
-            "BC01A2B3C4D5E6F7A8B9C0001",  // BrainConnectionTests build file
-            "BC02A2B3C4D5E6F7A8B9C0001",  // BrainConnectionTests file ref
-        ]
-        for uuid in required {
-            XCTAssertTrue(content.contains(uuid), "UUID \(uuid) not in pbxproj")
-        }
-    }
 }
 
 // MARK: - Preferences.defaults helper for tests

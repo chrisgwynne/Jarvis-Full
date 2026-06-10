@@ -217,24 +217,4 @@ final class MediaSuppressionTests: XCTestCase {
 
     // MARK: - pbxproj UUID uniqueness regression
 
-    func test_pbxprojUUIDs_areUnique() throws {
-        let pbxPath = "/Users/chris/Desktop/jarvis/Mac/JarvisMac.xcodeproj/project.pbxproj"
-        let content = try String(contentsOfFile: pbxPath, encoding: .utf8)
-        let uuidRegex = try NSRegularExpression(pattern: "[A-F0-9]{24}")
-        let matches = uuidRegex.matches(
-            in: content,
-            range: NSRange(content.startIndex..., in: content))
-        let uuids = matches.map { match -> String in
-            String(content[Range(match.range, in: content)!])
-        }
-        let unique = Set(uuids)
-        // Expect no UUID to appear more than ~10 times (build file, file ref, group membership
-        // each appear a handful of times per file). A UUID appearing 20+ times indicates a
-        // copy-paste collision.
-        var counts: [String: Int] = [:]
-        uuids.forEach { counts[$0, default: 0] += 1 }
-        let duplicated = counts.filter { $0.value > 12 }.keys
-        XCTAssertTrue(duplicated.isEmpty,
-            "These pbxproj UUIDs appear suspiciously often (copy-paste collision?): \(duplicated)")
-    }
 }

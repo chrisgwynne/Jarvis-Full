@@ -150,18 +150,4 @@ final class MacCameraServerTests: XCTestCase {
 
     // MARK: - pbxproj UUID regression
 
-    func testNoDuplicateBuildFileUUIDs() throws {
-        let pbxprojURL = URL(fileURLWithPath: "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj")
-        let content    = try String(contentsOf: pbxprojURL, encoding: .utf8)
-        let pattern    = try NSRegularExpression(pattern: "[A-F0-9]{24}")
-        let range      = NSRange(content.startIndex..., in: content)
-        let matches    = pattern.matches(in: content, range: range)
-        var uuids      = [String: Int]()
-        for m in matches {
-            let uuid = String(content[Range(m.range, in: content)!])
-            uuids[uuid, default: 0] += 1
-        }
-        let duplicates = uuids.filter { $0.value > 1 }.map(\.key)
-        XCTAssert(duplicates.isEmpty, "Duplicate UUIDs in pbxproj: \(duplicates.prefix(5))")
-    }
 }

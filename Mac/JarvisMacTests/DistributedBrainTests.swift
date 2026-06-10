@@ -208,25 +208,6 @@ final class DistributedBrainTests: XCTestCase {
 
     // MARK: - pbxproj UUID regression
 
-    func testPbxprojUUIDsUnique() throws {
-        let pbxproj = try String(contentsOfFile:
-            "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj")
-        let prefixIDs = [
-            "DM01", "DM02", "DC01", "DC02", "PA01", "PA02",
-            "DO01", "DO02", "SK01", "SK02", "DR01", "DR02",
-            "RX01", "RX02", "GC01", "GC02", "DF01", "DF02",
-            "BV01", "BV02", "AC01", "AC02", "DD01", "DD02",
-            "GL01", "GL02", "DT01", "DT02",
-            "XM01", "XM02", "ZE01", "ZE02", "XX01", "XX02",
-            "ZH01", "ZH02", "XS01", "XS02", "XL01", "XL02",
-            "XW01", "XW02", "XD01", "XD02", "XB01", "XB02",
-            "XY01", "XY02", "XT01", "XT02"
-        ]
-        for id in prefixIDs {
-            let count = pbxproj.components(separatedBy: id).count - 1
-            XCTAssertEqual(count, 1, "UUID \(id) should appear exactly once in pbxproj")
-        }
-    }
 
     // MARK: - Helpers
 

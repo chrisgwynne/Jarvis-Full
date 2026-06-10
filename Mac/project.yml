@@ -124,12 +124,20 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
     dependencies: []
 
+  # Daemon tests compile the REAL daemon sources into the test bundle
+  # (executable targets cannot be @testable import-ed). main.swift is
+  # excluded — top-level code cannot live in a test bundle. This is what
+  # lets ProtocolConformanceTests exercise the actual DaemonMessageEnvelope
+  # and DaemonFrameWrapper instead of hand-copied replicas that drift.
   JarvisBrainDaemonTests:
     type: bundle.unit-test
     platform: macOS
     deploymentTarget: "14.0"
     sources:
       - path: JarvisBrainDaemonTests
+      - path: JarvisBrainDaemon
+        excludes:
+          - "main.swift"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.brain.tests

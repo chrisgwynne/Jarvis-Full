@@ -48,6 +48,23 @@ jobs:
       - name: Unit tests
         run: set -o pipefail; ./gradlew --no-daemon --stacktrace testDebugUnitTest 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 
+      # Room schema export drift gate: the build above regenerates
+      # app/schemas/ from the @Database annotation. If the generated JSON
+      # differs from what is committed, the schema changed without the
+      # corresponding schema file (and migration test update) being
+      # committed — exactly the drift that bricked v18 devices (#46/MIGRATION_18_19).
+      - name: Verify committed Room schemas match the build
+        run: |
+          if ! git diff --exit-code -- app/schemas; then
+            echo "::error::Room schema changed but app/schemas/ was not committed. Run a build, review the schema diff, add a migration + test, and commit the JSON." | tee -a "$RUNNER_TEMP/ci.log"
+            exit 1
+          fi
+          UNTRACKED=$(git ls-files --others --exclude-standard app/schemas)
+          if [ -n "$UNTRACKED" ]; then
+            echo "::error::New Room schema files are not committed: $UNTRACKED" | tee -a "$RUNNER_TEMP/ci.log"
+            exit 1
+          fi
+
       - name: Lint
         run: set -o pipefail; ./gradlew --no-daemon --stacktrace lintDebug 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
 

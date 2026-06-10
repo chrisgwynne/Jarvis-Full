@@ -169,12 +169,4 @@ final class PostToolReasoningTests: XCTestCase {
 
     // MARK: - pbxproj UUID regression
 
-    func testPbxprojUUIDsUnique() throws {
-        let pbxproj = try String(contentsOfFile: "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj")
-        let prefix_ids = ["TG01", "PT01", "VP01", "TR01", "TG02", "PT02", "VP02", "TR02"]
-        for id in prefix_ids {
-            let count = pbxproj.components(separatedBy: id).count - 1
-            XCTAssertEqual(count, 1, "UUID \(id) should appear exactly once in pbxproj")
-        }
-    }
 }

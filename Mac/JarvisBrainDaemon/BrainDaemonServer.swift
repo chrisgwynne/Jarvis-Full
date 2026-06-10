@@ -840,45 +840,13 @@ final class BrainDaemonServer {
     /// it via DaemonMessageRouter. Android and Windows send flat JSON (not envelopes).
     /// Mac clients send full DaemonMessageEnvelope JSON — those are routed directly.
     private func wrapAndRoute(rawJSON: String, fromClientId: String, platform: String) {
-        guard let data = rawJSON.data(using: .utf8),
-              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        // Wrapping rules live in DaemonFrameWrapper so ProtocolConformanceTests
+        // exercises the exact same logic against shared/contracts examples.
+        switch DaemonFrameWrapper.prepare(rawJSON: rawJSON, fromClientId: fromClientId, platform: platform) {
+        case .envelope(let data), .wrappedFlat(let data):
+            DaemonMessageRouter.shared.route(rawData: data, fromClientId: fromClientId)
+        case .malformed:
             return
-        }
-
-        // If the frame is already a DaemonMessageEnvelope (Mac-sent), route directly.
-        if raw["sourceDeviceId"] != nil, raw["target"] != nil {
-            if let envelopeData = try? JSONSerialization.data(withJSONObject: raw) {
-                DaemonMessageRouter.shared.route(rawData: envelopeData, fromClientId: fromClientId)
-            }
-            return
-        }
-
-        let type = raw["type"] as? String ?? "unknown"
-        let deviceId = raw["deviceId"] as? String ?? fromClientId
-        let correlationId = raw["messageId"] as? String ?? raw["routeId"] as? String
-
-        // Route everything device → Mac except replies/orchestration (Mac → device)
-        let targetType: String
-        switch type {
-        case "reply.final", "reply.partial", "orchestrate.speak", "orchestrate.silent", "proactive.notify":
-            targetType = platform
-        default:
-            targetType = "macApp"
-        }
-
-        var envelope: [String: Any] = [
-            "id": UUID().uuidString,
-            "type": type,
-            "sourceDeviceId": deviceId,
-            "sourcePlatform": platform,
-            "target": ["type": targetType],
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
-            "payload": raw
-        ]
-        if let cid = correlationId { envelope["correlationId"] = cid }
-
-        if let envelopeData = try? JSONSerialization.data(withJSONObject: envelope) {
-            DaemonMessageRouter.shared.route(rawData: envelopeData, fromClientId: fromClientId)
         }
     }
 
