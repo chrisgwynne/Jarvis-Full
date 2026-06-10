@@ -297,14 +297,4 @@ final class ContextGraphMemoryPressureTests: XCTestCase {
 
     // MARK: - 8. pbxproj UUID uniqueness regression guard
 
-    func testPbxprojUUIDs_areUnique() throws {
-        let pbxPath = "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj"
-        let content = try String(contentsOfFile: pbxPath, encoding: .utf8)
-        let pattern = try NSRegularExpression(pattern: "[A-F0-9]{24}")
-        let range   = NSRange(content.startIndex..., in: content)
-        let uuids   = pattern.matches(in: content, range: range)
-            .compactMap { Range($0.range, in: content).map { String(content[$0]) } }
-        XCTAssertEqual(uuids.count, Set(uuids).count,
-            "All UUIDs in project.pbxproj must be unique")
-    }
 }

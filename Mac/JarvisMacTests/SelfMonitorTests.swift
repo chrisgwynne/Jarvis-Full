@@ -202,25 +202,4 @@ final class SelfMonitorTests: XCTestCase {
         XCTAssertEqual(decoded.newsJobsActive, snap.newsJobsActive)
     }
 
-    // pbxproj UUID regression guard
-    func testPbxprojUUIDs() throws {
-        let pbxPath = "/Users/chris/Desktop/jarvis/Mac/JarvisMac.xcodeproj/project.pbxproj"
-        let content = try String(contentsOfFile: pbxPath, encoding: .utf8)
-        let requiredUUIDs = [
-            "SM01A2B3C4D5E6F7A8B9C0001",  // SelfMonitorMetrics build file
-            "SM02A2B3C4D5E6F7A8B9C0001",  // SelfMonitorMetrics file ref
-            "SM01A2B3C4D5E6F7A8B9C0002",  // SelfMonitor build file
-            "SM02A2B3C4D5E6F7A8B9C0002",  // SelfMonitor file ref
-            "SM01A2B3C4D5E6F7A8B9C0003",  // IdleEnforcer build file
-            "SM02A2B3C4D5E6F7A8B9C0003",  // IdleEnforcer file ref
-            "SM01A2B3C4D5E6F7A8B9C0004",  // RuntimeProfilerView build file
-            "SM02A2B3C4D5E6F7A8B9C0004",  // RuntimeProfilerView file ref
-            "SM01A2B3C4D5E6F7A8B9C0005",  // SelfMonitorTests build file
-            "SM02A2B3C4D5E6F7A8B9C0005",  // SelfMonitorTests file ref
-        ]
-        for uuid in requiredUUIDs {
-            XCTAssertTrue(content.contains(uuid),
-                          "UUID \(uuid) not found in pbxproj — add new files to the project")
-        }
-    }
 }

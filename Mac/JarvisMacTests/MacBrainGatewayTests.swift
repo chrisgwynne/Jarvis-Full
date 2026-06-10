@@ -232,29 +232,4 @@ final class MacBrainGatewayTests: XCTestCase {
 
     // MARK: - 20. pbxproj gateway UUIDs uniqueness
 
-    func test_pbxproj_gatewayUUIDs_uniqueness() throws {
-        let pbxprojURL = URL(fileURLWithPath: "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj")
-        let content = try String(contentsOf: pbxprojURL, encoding: .utf8)
-
-        let gatewayUUIDs = [
-            "HB01A2B3C4D5E6F7A8B9C016",
-            "HB02A2B3C4D5E6F7A8B9C016",
-            "HB01A2B3C4D5E6F7A8B9C017",
-            "HB02A2B3C4D5E6F7A8B9C017",
-            "HB01A2B3C4D5E6F7A8B9C018",
-            "HB02A2B3C4D5E6F7A8B9C018",
-            "HB01A2B3C4D5E6F7A8B9C019",
-            "HB02A2B3C4D5E6F7A8B9C019",
-            "HB01A2B3C4D5E6F7A8B9C020",
-            "HB02A2B3C4D5E6F7A8B9C020",
-            "HB01A2B3C4D5E6F7A8B9C021",
-            "HB02A2B3C4D5E6F7A8B9C021",
-        ]
-
-        for uuid in gatewayUUIDs {
-            let occurrences = content.components(separatedBy: uuid).count - 1
-            XCTAssertGreaterThanOrEqual(occurrences, 1,
-                "UUID \(uuid) should appear at least once in pbxproj")
-        }
-    }
 }

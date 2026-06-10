@@ -72,6 +72,10 @@ android {
     // best practice and reduces the pre-existing failure count.
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Robolectric needs the merged Android resources/assets on the unit-test
+        // classpath (JarvisDatabaseMigrationTest reads the exported Room schemas
+        // as test assets).
+        unitTests.isIncludeAndroidResources = true
         unitTests.all {
             // Force UTF-8 in the JVM that runs unit tests so that Kotlin's
             // incremental compilation can handle Unicode characters in test
@@ -113,6 +117,28 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    sourceSets {
+        // Exported Room schemas (app/schemas/) are unit-test classpath
+        // resources so JarvisDatabaseMigrationTest can rebuild historical
+        // database versions and validate the real migration chain.
+        // (Robolectric only sees app assets, not test-sourceSet assets,
+        // so classpath resources are the reliable channel.)
+        getByName("test").resources.srcDir("$projectDir/schemas")
+        // Instrumented tests get them as assets for MigrationTestHelper.
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+        // The shared cross-device protocol contract (ws-frame-examples.json)
+        // is a test resource so BrainProtocolConformanceTest exercises the
+        // exact same examples the daemon's conformance tests use.
+        getByName("test").resources.srcDir(rootProject.file("../shared/contracts"))
+    }
+}
+
+// Room: export the schema JSON for every @Database version into app/schemas/.
+// The generated files are committed — they are the ground truth the migration
+// tests validate against.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 // AGP 9's built-in Kotlin support exposes the Kotlin DSL at the top level
@@ -242,6 +268,10 @@ dependencies {
     // the JVM unit-test classpath. Pull it in so tests that round-trip JSON
     // (e.g. ScreenObservationRepositoryTest) don't hit "Method not mocked".
     testImplementation("org.json:json:20240303")
+    // Room migration verification — MigrationTestHelper runs on the JVM under
+    // Robolectric against the exported schemas in app/schemas/.
+    testImplementation(libs.room.testing)
+    testImplementation(libs.robolectric)
 
     // Instrumented tests
     androidTestImplementation(libs.androidx.test.runner)

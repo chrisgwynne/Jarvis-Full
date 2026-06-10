@@ -158,6 +158,17 @@ final class RuntimeCoordinator {
         Log.runtime.info("[RuntimeCoordinator] attempting recovery of '\(id)' (attempt \(attempts))")
         do {
             try await subsystem.recover()
+            // Verify recovery actually restored health. A recover() that
+            // returns without fixing anything (e.g. a no-op shell) must not
+            // reset the retry budget or publish a SubsystemRecoveredEvent —
+            // that produced a false "recovered" announcement every health
+            // cycle while the subsystem stayed failed.
+            let post = await subsystem.healthCheck()
+            lastHealthSnapshot[id] = post
+            if post.isFailed {
+                Log.runtime.error("[RuntimeCoordinator] '\(id)' recover() ran but health is still failed: \(post.reason ?? "unknown") (attempt \(attempts))")
+                return
+            }
             restartCounts[id] = 0
             SystemBus.shared.publish(SubsystemRecoveredEvent(subsystemID: id, attemptCount: attempts))
             Log.runtime.info("[RuntimeCoordinator] '\(id)' recovered successfully")

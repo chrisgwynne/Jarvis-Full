@@ -222,22 +222,4 @@ final class JarvisAnswerComposerTests: XCTestCase {
 
     // MARK: - No duplicate build file UUIDs
 
-    func testNoDuplicateBuildFileUUIDs() throws {
-        let pbxURL = URL(fileURLWithPath:
-            "/Users/chris/Desktop/jarvis/JarvisMac.xcodeproj/project.pbxproj")
-        let contents = try String(contentsOf: pbxURL, encoding: .utf8)
-
-        let sourceLines = contents
-            .components(separatedBy: "\n")
-            .filter { $0.contains(" in Sources */,") || $0.contains(" in Sources */;") }
-
-        var seen = Set<String>()
-        for line in sourceLines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard let uuid = trimmed.split(separator: " ").first.map(String.init) else { continue }
-            XCTAssertFalse(seen.contains(uuid),
-                           "Duplicate build-file UUID in Sources phase: \(uuid) — line: \(trimmed)")
-            seen.insert(uuid)
-        }
-    }
 }

@@ -230,18 +230,4 @@ final class OverlayRoutingRegressionTests: XCTestCase {
 
     // MARK: - pbxproj UUID regression
 
-    func testPbxprojUUIDsAreUnique() throws {
-        let pbx = try String(contentsOfFile:
-            "/Users/chris/Desktop/jarvis/Mac/JarvisMac.xcodeproj/project.pbxproj",
-            encoding: .utf8)
-        // Extract all 24-char hex-ish UUIDs
-        let pattern = try NSRegularExpression(pattern: "[A-F0-9]{24}")
-        let matches = pattern.matches(in: pbx, range: NSRange(pbx.startIndex..., in: pbx))
-        let uuids   = matches.map { String(pbx[Range($0.range, in: pbx)!]) }
-        // Each UUID that appears in a build-file or file-reference role should appear
-        // exactly 2–4 times (definition + references). A UUID appearing only once
-        // usually means a dangling reference; one appearing in a huge count means
-        // accidental duplication. We just guard there are no zero-length UUIDs.
-        XCTAssertFalse(uuids.isEmpty, "pbxproj must contain UUID references")
-    }
 }

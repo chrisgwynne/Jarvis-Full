@@ -22,6 +22,7 @@ androidxTestCore = "1.6.1"
 androidxTestRunner = "1.6.2"
 mockitoKotlin = "5.4.0"
 coroutinesTest = "1.9.0"
+robolectric = "4.14.1"
 mwdat = "0.7.0"
 
 [libraries]
@@ -51,11 +52,13 @@ localbroadcastmanager = { group = "androidx.localbroadcastmanager", name = "loca
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-test-core = { group = "androidx.test", name = "core-ktx", version.ref = "androidxTestCore" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 mockito-kotlin = { group = "org.mockito.kotlin", name = "mockito-kotlin", version.ref = "mockitoKotlin" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesTest" }
 
 # Meta Wearables DAT — hosted on GitHub Packages (auth wired in

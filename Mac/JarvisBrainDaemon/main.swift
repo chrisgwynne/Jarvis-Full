@@ -3,6 +3,10 @@ import OSLog
 
 let logger = Logger(subsystem: "com.jarvis.brain", category: "daemon")
 
+// Crash visibility: the daemon dies headless under launchd — persist fatal
+// signals to Diagnostics/Crashes and report any previous crash on startup.
+DaemonCrashLogger.installAndReportPrevious(logger: logger)
+
 // ── Single-instance guard ──────────────────────────────────────────────────
 // Detect a healthy JarvisBrainDaemon before binding the port.
 // Prevents "Address already in use" when launchctl and Xcode both launch

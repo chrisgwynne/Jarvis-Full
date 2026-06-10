@@ -1123,7 +1123,8 @@ final class JarvisController {
         RuntimeBootstrapper.registerAndMarkReady(
             appState: state,
             conversation: conversation,
-            systemsDegraded: systemsDegraded)
+            systemsDegraded: systemsDegraded,
+            audioRecover: { [weak self] in await self?.rebuildWakeWord() })
 
         // Legacy bridge — no longer opens a card, just a no-op shell kept for
         // the ⌘⇧S shortcut compatibility.
