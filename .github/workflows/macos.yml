@@ -39,13 +39,13 @@ jobs:
       - name: List schemes
         run: xcodebuild -list 2>&1 | tee -a "$RUNNER_TEMP/ci.log" || true
 
-      - name: Build JarvisBrainDaemon
-        run: |
-          set -o pipefail
-          xcodebuild -scheme JarvisBrainDaemon -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
-
-      - name: Build JarvisMac
+      # The JarvisMac scheme's build targets include JarvisBrainDaemon and
+      # both test bundles (see Mac/project.yml schemes:), so one build covers
+      # everything. There is NO standalone "JarvisBrainDaemon" scheme — the
+      # explicit schemes: block suppresses XcodeGen's implicit per-target
+      # schemes, which is why the old per-scheme daemon step failed on every
+      # run since ec6bb76.
+      - name: Build (app + daemon + test bundles)
         run: |
           set -o pipefail
           xcodebuild -scheme JarvisMac -destination 'platform=macOS' \
