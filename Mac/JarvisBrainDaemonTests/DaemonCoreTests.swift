@@ -51,7 +51,9 @@ private struct PairedDeviceForTest: Codable, Equatable {
 /// Auth store replica — only the persistence + corruption-recovery logic.
 private final class AuthStoreForTest {
     private let storeLock = NSLock()
-    private(set) var pairedDevices: [PairedDeviceForTest] = []
+    // Settable so tests can seed the registry directly (mirrors how the real
+    // DaemonAuthStore is populated via pairing before save()).
+    var pairedDevices: [PairedDeviceForTest] = []
     let storeURL: URL
     private(set) var backupWasCreated = false
 
