@@ -130,7 +130,7 @@ class MapsNavigationFollowupTool(
             return when {
                 "walk"     in t || "walking" in t || "foot"   in t -> TravelMode.WALKING
                 "cycl"     in t || "bike"    in t || "bik"    in t -> TravelMode.BICYCLING
-                "transit"  in t || " bus "   in t || " train" in t -> TravelMode.TRANSIT
+                Regex("""\b(?:transit|bus|train)\b""").containsMatchIn(t)   -> TravelMode.TRANSIT
                 else                                                 -> TravelMode.DRIVING
             }
         }

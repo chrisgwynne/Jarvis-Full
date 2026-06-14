@@ -177,14 +177,18 @@ class ContactsPhoneLookupResolver(private val context: Context) : CallResolver {
      * Formats common US/UK patterns; returns the raw number for other formats.
      */
     private fun formatFallback(number: String): String {
-        val digits = number.filter { it.isDigit() || it == '+' }
+        // Strip '+' and any punctuation up front so E.164 inputs like
+        // "+14155552671" are classified by their digit count, not skewed by the
+        // leading '+' (which previously pushed an 11-digit US number to 12 and
+        // fell through to the raw-number branch).
+        val digits = number.filter { it.isDigit() }
         return when {
             // US 10-digit: (XXX) XXX-XXXX
             digits.length == 10 ->
                 "(${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}"
-            // US +1XXXXXXXXXX
-            digits.length == 11 && (digits.startsWith("1") || digits.startsWith("+1")) -> {
-                val d = digits.trimStart('+', '1')
+            // US +1XXXXXXXXXX → drop the country code, format the remaining 10.
+            digits.length == 11 && digits.startsWith("1") -> {
+                val d = digits.substring(1)
                 "(${d.substring(0, 3)}) ${d.substring(3, 6)}-${d.substring(6)}"
             }
             else -> number
