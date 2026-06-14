@@ -4,6 +4,7 @@ import XCTest
 /// Contract tests that prove the cross-device architecture invariants.
 /// These tests validate source-level contracts: deprecated classes are not instantiated,
 /// internal types hold correct defaults, and the daemon-centric routing is properly wired.
+@MainActor
 final class DaemonArchitectureContractTests: XCTestCase {
 
     // MARK: - 1. Windows pair endpoint path prefix
@@ -45,25 +46,25 @@ final class DaemonArchitectureContractTests: XCTestCase {
     // MARK: - 5. PreferencesStore: daemonEnabled defaults true
 
     func testDaemonEnabledDefaultsTrue() {
-        XCTAssertTrue(Preferences().daemonEnabled)
+        XCTAssertTrue(Preferences.testDefaults.daemonEnabled)
     }
 
     // MARK: - 6. PreferencesStore: legacyBrainServerEnabled defaults false
 
     func testLegacyBrainServerEnabledDefaultsFalse() {
-        XCTAssertFalse(Preferences().legacyBrainServerEnabled)
+        XCTAssertFalse(Preferences.testDefaults.legacyBrainServerEnabled)
     }
 
     // MARK: - 7. PreferencesStore: distributedBrainEnabled defaults false
 
     func testDistributedBrainEnabledDefaultsFalse() {
-        XCTAssertFalse(Preferences().distributedBrainEnabled)
+        XCTAssertFalse(Preferences.testDefaults.distributedBrainEnabled)
     }
 
     // MARK: - 8. Preferences round-trip preserves daemonEnabled
 
     func testPreferencesDaemonEnabledRoundTrip() throws {
-        var prefs = Preferences()
+        var prefs = Preferences.testDefaults
         prefs.daemonEnabled = false
         let data = try JSONEncoder().encode(prefs)
         let decoded = try JSONDecoder().decode(Preferences.self, from: data)
@@ -74,7 +75,7 @@ final class DaemonArchitectureContractTests: XCTestCase {
 
     func testPreferencesLegacyBrainServerNeverUpgradesToTrue() throws {
         // Even if someone encodes true, the field is kept for JSON compat only
-        var prefs = Preferences()
+        var prefs = Preferences.testDefaults
         prefs.legacyBrainServerEnabled = false
         let data = try JSONEncoder().encode(prefs)
         let decoded = try JSONDecoder().decode(Preferences.self, from: data)
@@ -213,13 +214,13 @@ final class DaemonArchitectureContractTests: XCTestCase {
     // MARK: - 16. PreferencesStore: default brainServerPort is 8765
 
     func testDefaultBrainServerPortIs8765() {
-        XCTAssertEqual(Preferences().brainServerPort, 8765)
+        XCTAssertEqual(Preferences.testDefaults.brainServerPort, 8765)
     }
 
     // MARK: - 17. PreferencesStore: legacyAndroidPortEnabled defaults false
 
     func testLegacyAndroidPortEnabledDefaultsFalse() {
-        XCTAssertFalse(Preferences().legacyAndroidPortEnabled)
+        XCTAssertFalse(Preferences.testDefaults.legacyAndroidPortEnabled)
     }
 }
 
@@ -229,3 +230,12 @@ final class DaemonArchitectureContractTests: XCTestCase {
 // Mac/JarvisBrainDaemonTests/DaemonCoreTests.swift (JarvisBrainDaemonTests target).
 // Those tests use source-based replicas of the daemon logic since the daemon
 // is an executable target that cannot be @testable import-ed.
+
+// MARK: - Test helper
+
+private extension Preferences {
+    /// `Preferences` has no zero-arg init; decoding empty JSON yields all defaults.
+    static var testDefaults: Preferences {
+        try! JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))
+    }
+}

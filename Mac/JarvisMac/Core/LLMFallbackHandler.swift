@@ -199,6 +199,23 @@ final class LLMFallbackHandler {
             state.log("llm", .info, "[ContextInjection] source=brainMemory")
         }
 
+        // Heartbeat — the live operational pulse (focus, active project, blockers,
+        // attention, recent wins). Grounds replies in what matters right now.
+        let heartbeatCtx = HeartbeatStore.shared.contextBlock()
+        if !heartbeatCtx.isEmpty {
+            ctx = ctx.isEmpty ? heartbeatCtx : ctx + "\n\n" + heartbeatCtx
+            state.log("llm", .info, "[ContextInjection] source=heartbeat")
+        }
+
+        // Living systems — Voice, Commands, Goals and other runtime-editable
+        // layers. Reads current live state so any edit (incl. ones made seconds
+        // ago) influences this very response. No restart, no stale cache.
+        let livingCtx = LivingSystemRegistry.shared.combinedContextBlock()
+        if !livingCtx.isEmpty {
+            ctx = ctx.isEmpty ? livingCtx : ctx + "\n\n" + livingCtx
+            state.log("llm", .info, "[ContextInjection] source=livingSystems")
+        }
+
         // Codebase self-knowledge context — ONLY for project-related queries.
         // Gated here so sport/general/opinion questions never receive camera
         // vision capability text, feature implementation status, or code graph

@@ -40,7 +40,7 @@ final class HomeAssistantIntentHandlerTests: XCTestCase {
             .homeQueryEntity(entity: "light.living_room"),
             .homeSetBrightness(entity: "light.living_room", level: 50),
             .homeSetColor(entity: "light.living_room", color: "red"),
-            .homeActivateScene(sceneName: "Movie Night"),
+            .homeActivateScene(name: "Movie Night"),
             .homeRunAutomation(name: "Good Morning"),
             .homeOpenCover(entity: "cover.garage"),
             .homeCloseCover(entity: "cover.garage"),

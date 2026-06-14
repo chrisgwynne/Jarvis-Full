@@ -522,6 +522,10 @@ final class JarvisController {
         self.personality = pers
         self.contextBuilder = PersonalityContextBuilder(store: pers)
 
+        // Live Edit Runtime — register the editable living systems against their
+        // backing stores so Jarvis can mutate/validate/hot-reload/rollback them.
+        LivingSystemRegistry.shared.configure(personality: pers)
+
         // Sprint 8.5 systems (lightweight, no async init needed)
         self.attention = AttentionEngine()
         self.activityTimeline = ActivityTimelineStore()
@@ -3201,6 +3205,16 @@ final class JarvisController {
         // Local learning: correction detection ("no I meant X", "actually X", etc.)
         if learningEngine.detectAndRecordCorrection(transcript: rawTranscript) {
             speak(renderer.render(ResponseKey.learningAcknowledge))
+            return
+        }
+
+        // === Step 2.45: Live Edit commands ===
+        // "update your soul…", "remember when I say X I mean Y", "rollback last
+        // edit", "show recent changes", etc. route to the LiveEditEngine and
+        // take effect immediately (no restart). Returns a spoken reply when handled.
+        if let liveEditReply = LiveEditCommandRouter.handle(rawText: rawTranscript, normalized: normalized) {
+            Log.intent.info("[Intent] live_edit confidence=1.0 source=live_edit_router")
+            speak(liveEditReply)
             return
         }
 

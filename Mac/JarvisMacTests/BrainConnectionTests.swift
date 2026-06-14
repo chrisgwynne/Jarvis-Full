@@ -172,7 +172,8 @@ final class BrainConnectionTests: XCTestCase {
 // MARK: - Preferences.defaults helper for tests
 
 private extension Preferences {
+    /// `Preferences` has no zero-arg init; decoding empty JSON yields all defaults.
     static var defaults: Preferences {
-        (try? JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))) ?? Preferences()
+        try! JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))
     }
 }

@@ -25,7 +25,7 @@ final class GitHubIntentHandlerTests: XCTestCase {
             .githubDashboard,
             .githubListPRs(repo: nil),
             .githubReviewPR(repo: nil, number: nil),
-            .githubOpenPR,
+            .githubOpenPR(repo: nil),
             .githubStalePRs(repo: nil),
             .githubListIssues(repo: nil),
             .githubStaleIssues(repo: nil),

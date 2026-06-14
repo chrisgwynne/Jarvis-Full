@@ -1094,3 +1094,38 @@ Step 5: LLM fallback
 - `EntityMemNode` extension: `withLastReferenced(_:)` / `withLastMentioned(_:)` for date backdating
 
 **pbxproj prefixes** — `XE` (group `XE00A2B3C4D5E6F7A8B9CGRP`, path=EntityMemory); file prefixes: `XM` (EntityMemoryModels), `ZE` (EntityMemoryGraph — XG collision → renamed ZE), `XX` (ConversationEntityExtractor), `ZH` (HybridEntityMatcher — XH collision → renamed ZH), `XS` (EntitySalienceEngine), `XL` (EntityLifecycleCoordinator), `XW` (WorkflowContextResolver), `XD` (DistributedEntityLinker), `XB` (EntityContextBlockBuilder), `XY` (EntityMemoryDiagnostics) in main app; `XT` (EntityMemoryTests) in test target.
+
+### Sprint HB1 — Heartbeat (living "current state" pulse)
+
+Implements the vision's **Heartbeat** / Situation Room concept: a continuously-updated,
+persisted, hot-reloadable snapshot of Jarvis's operational state (current focus, active
+project + confidence, attention-needed, blockers, open issues, recent wins, today's
+summary). It is a *living runtime layer* — editable on disk and reloaded without a restart.
+
+- **`Heartbeat/HeartbeatModels.swift`** ✅ — `HeartbeatItem` (id, text, source, confidence, createdAt) and `HeartbeatState` (Codable, forward-compatible `decodeIfPresent` init). `contextBlock()` emits a `[HEARTBEAT — Jarvis live state]` block (only non-empty fields) for LLM injection. `situationSummary()` returns a short spoken status line.
+- **`Heartbeat/HeartbeatStore.swift`** ✅ — `@Observable @MainActor` singleton. Persists to `~/Library/Application Support/JarvisMac/heartbeat.json` (atomic, 1.5s debounce). Hot-reloads on external edit via `DispatchSource` vnode watch (400ms debounce + 1s self-write echo guard). Bounded lists (attention 8, blockers 8, issues 12, wins 12) with case-insensitive dedup (refreshes timestamp instead of duplicating). Mutations: `setFocus`, `setActiveProject(_:confidence:)`, `setTodaySummary`, `recordInteraction`, `recordSessionStart`, `addAttention/Blocker/OpenIssue/Win`, `resolve(matching:)`, `clearAttention`, `reset`. `init(fileURL:)` for test isolation.
+- **`Heartbeat/HeartbeatCoordinator.swift`** ✅ — `@MainActor` singleton. Self-contained: subscribes to SystemBus `IntentResolvedEvent` (→ focus + interaction), `ConversationStartedEvent` (→ session count), `ProactiveSignalGeneratedEvent` (priority ≥ .high → attention), `GitHubBuildFailedEvent` (→ open issue + blocker). 30s refresh loop pulls `ProjectRelationshipIndex.shared.activeFocusContext()` (≥0.40 → active project; <0.20 → clear) and `EpisodeStore.shared.todaysSummary()`. `humanizeIntent(_:)` turns `homeTurnOff`/`show_brain_overlay` into readable focus phrases.
+- **Wiring** ✅ — `BrainRuntime.start()` calls `HeartbeatCoordinator.shared.start()` (mirrors `EntityLifecycleCoordinator`); `stop()` tears it down. `LLMFallbackHandler` injects `HeartbeatStore.shared.contextBlock()` right after the Brain-memory block (`[ContextInjection] source=heartbeat`).
+- **No pbxproj surgery** — project is XcodeGen (`sources: - path: JarvisMac`), so new files under `JarvisMac/Heartbeat/` are auto-discovered on `make build`.
+- **Tests** ✅ — `JarvisMacTests/HeartbeatTests.swift` (17 tests): item clamp, empty/populated context block, situation summary fallback + data, Codable round-trip, forward-compat partial decode, dedup, cap enforcement, cross-list resolve, confidence clamp, interaction recording, reset, intent humanization (camelCase / snake_case / associated-value strip).
+
+### Sprint LE1 — Live Edit Runtime (self-modification of living systems)
+
+The foundation that lets Jarvis mutate, validate, hot-reload, audit and roll back
+its own non-core living systems at runtime — no app restart, no rebuild, no stale
+cache. Backs onto the already-hot-reloaded `PersonalityFileStore` (Soul, Identity,
+Behaviour, Boundaries, Response, User Model) and `HeartbeatStore`, and adds new
+live-doc systems (Voice, Commands, Goals, Skills, Agents, Memory Rules, Project State).
+All files live in `JarvisMac/LiveEdit/` (XcodeGen auto-discovers — no pbxproj edits).
+
+- **`LiveEditModels.swift`** — `LivingSystemID` (14 cases), `RiskLevel`, `EditSource` (user/userApproved/jarvis/system/commandFailure), `ValidationResult` (valid/invalid/needsApproval — top-level enum, distinct from the nested structs in PiperTTS/MemoryValidationLayer), `RuntimePatch`, `AuditEntry` (top-level, distinct from nested `GitHubSafetyManager.AuditEntry`), `EditOutcome`, `LivingSystemChangedEvent` (SystemBus). `String.auditPreview()`.
+- **`LivingSystem.swift`** — descriptor abstracting a backing store via `@MainActor` read/write/validate closures + `contextBlock()`.
+- **`LiveDocStore.swift`** — generic single-document `@Observable @MainActor` store; atomic debounced persistence + `DispatchSource` file watch (hot reload) at `~/Library/Application Support/JarvisMac/LiveSystems/live_<id>.md`. `init(fileURL:)` for tests.
+- **`LiveEditValidators.swift`** — pure per-system validators: `nonEmpty`, `requiresAnchor` (soul must keep mission anchor, identity must keep "jarvis"), `commands` (trigger ⇒ action, no dup triggers).
+- **`LivingSystemRegistry.swift`** — `@Observable @MainActor` registry. `configure(personality:)` wires every system; personality-backed text systems set `injectsContext=false` (already injected by `PersonalityContextBuilder`), live-doc systems set `true`. `combinedContextBlock()` emits `[VOICE]/[COMMANDS]/[GOALS]/…` for LLM injection. Heartbeat registered read-only (edited via its own API).
+- **`LiveEditEngine.swift`** — instance-based with `.shared` (over shared registry+audit) for hermetic tests. `apply()` (protected-core guard → needsApproval; validate → reject; write→audit→publish event), `applyInstruction()` (NL→patch via `LiveEditInstruction`: append principle / remove matching rule), `rollbackLast()`/`rollback(patchID:)` (restores prior value + inverse patch), `reportFailure()` (self-fix → Heartbeat open issue + proposed audit entry). Patches persisted to `live_edit_patches.json`.
+- **`LiveEditAuditLog.swift`** — `@Observable @MainActor` persistent trail (cap 500, `live_edit_audit.json`); `recent`, `entries(for:)`, `lastChange`.
+- **`LiveEditCommandRouter.swift`** — `@MainActor` NL dispatcher → engine. Handles: update/change your soul·identity·voice·behaviour, "when I say X I mean Y" (commands), remember/forget (user model), add/disable command, rollback last edit, show living systems / recent changes, why did you change that, diagnose yourself, fix the last command (self-fix).
+- **Wiring** — `JarvisController.init` calls `LivingSystemRegistry.shared.configure(personality:)`; `handleTranscript` Step 2.45 intercepts via `LiveEditCommandRouter.handle()` (speaks reply + returns); `LLMFallbackHandler` injects `combinedContextBlock()` after the heartbeat block (`[ContextInjection] source=livingSystems`) so edits influence the very next response.
+- **`LivingSystemsView.swift`** — Situation Room SwiftUI panel (live runtime: pulse, systems list, recent edits, rollback button). Data layer is live; presenting it (a `.livingSystems` OverlayKind) is the remaining wiring.
+- **Tests** — `JarvisMacTests/LiveEditTests.swift` (28 tests): apply/reject/no-change, soul mission anchor, rollback restores, protected needs-approval, NL append/remove, context block reflects edit, protected not injected, self-fix → heartbeat issue, LiveDocStore persist+reload, command validators, instruction transforms, router parsing + end-to-end.
