@@ -7,12 +7,12 @@ import com.jarvis.assistant.core.state.JarvisStateMachine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
@@ -20,6 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -151,11 +152,14 @@ class CallCoordinatorTest {
     fun `caller hangs up during listen window — speaks call ended and recovers`() = runTest(testDispatcher) {
         whenever(resolver.resolve(any())).thenReturn(knownContact("Alice"))
 
-        // speech capture returns empty (never resolved before call ends)
+        // Speech never resolves before the call ends. The stub must *suspend*
+        // cooperatively (not block a real thread) so the coordinator's `select`
+        // can win on callEnded and cancel the listen job. The previous
+        // `thenAnswer { runBlocking { deferred.await() } }` parked the single
+        // test-scheduler thread inside runBlocking forever — a deadlock that
+        // hung the whole CI suite until the 45-min job timeout.
         val speechDeferred = kotlinx.coroutines.CompletableDeferred<String>()
-        whenever(speechCapture.listen()).thenAnswer {
-            runBlocking { speechDeferred.await() }
-        }
+        whenever(speechCapture.listen()).doSuspendableAnswer { speechDeferred.await() }
 
         val coordinator = buildCoordinator(this)
         val event = CallEvent.IncomingRinging(fakeCallInfo())
@@ -164,10 +168,14 @@ class CallCoordinatorTest {
             coordinator.handleIncomingCall(event, callEvents)
         }
 
-        // Let coordinator reach the listen window
-        advanceUntilIdle()
+        // Let the coordinator reach the listen window and subscribe its call
+        // event monitor — but use runCurrent(), not advanceUntilIdle(): the
+        // latter would advance virtual time past the 8 s listen timeout and let
+        // the timeout win the select before the caller hangs up.
+        runCurrent()
 
-        // Caller hangs up
+        // Caller hangs up — emitted while the monitor is collecting so the
+        // select resolves on callEnded (the scenario under test).
         callEvents.emit(CallEvent.CallEnded(fakeCallInfo().copy(callState = IncomingCallState.IDLE)))
         advanceUntilIdle()
         job.join()
