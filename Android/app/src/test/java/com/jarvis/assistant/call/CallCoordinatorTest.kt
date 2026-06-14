@@ -7,7 +7,6 @@ import com.jarvis.assistant.core.state.JarvisStateMachine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -20,6 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -151,11 +151,14 @@ class CallCoordinatorTest {
     fun `caller hangs up during listen window — speaks call ended and recovers`() = runTest(testDispatcher) {
         whenever(resolver.resolve(any())).thenReturn(knownContact("Alice"))
 
-        // speech capture returns empty (never resolved before call ends)
+        // Speech never resolves before the call ends. The stub must *suspend*
+        // cooperatively (not block a real thread) so the coordinator's `select`
+        // can win on callEnded and cancel the listen job. The previous
+        // `thenAnswer { runBlocking { deferred.await() } }` parked the single
+        // test-scheduler thread inside runBlocking forever — a deadlock that
+        // hung the whole CI suite until the 45-min job timeout.
         val speechDeferred = kotlinx.coroutines.CompletableDeferred<String>()
-        whenever(speechCapture.listen()).thenAnswer {
-            runBlocking { speechDeferred.await() }
-        }
+        whenever(speechCapture.listen()).doSuspendableAnswer { speechDeferred.await() }
 
         val coordinator = buildCoordinator(this)
         val event = CallEvent.IncomingRinging(fakeCallInfo())
