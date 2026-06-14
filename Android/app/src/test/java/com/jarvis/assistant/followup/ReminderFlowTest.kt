@@ -55,7 +55,8 @@ class ReminderFlowTest {
         verify(reminderRepo).create(
             label       = eq("check printer"),
             triggerAtMs = any(),
-            type        = eq(ScheduledItemType.REMINDER)
+            type        = eq(ScheduledItemType.REMINDER),
+            deliveryMode = any()
         )
     }
 
@@ -67,7 +68,8 @@ class ReminderFlowTest {
         verify(reminderRepo).create(
             label       = any(),
             triggerAtMs = any(),
-            type        = eq(ScheduledItemType.REMINDER)
+            type        = eq(ScheduledItemType.REMINDER),
+            deliveryMode = any()
         )
     }
 
@@ -95,7 +97,8 @@ class ReminderFlowTest {
         verify(reminderRepo).create(
             label       = eq("check the printer"),
             triggerAtMs = any(),
-            type        = eq(ScheduledItemType.REMINDER)
+            type        = eq(ScheduledItemType.REMINDER),
+            deliveryMode = any()
         )
     }
 
@@ -107,7 +110,8 @@ class ReminderFlowTest {
         verify(reminderRepo).create(
             label       = eq("take medication"),
             triggerAtMs = any(),
-            type        = eq(ScheduledItemType.REMINDER)
+            type        = eq(ScheduledItemType.REMINDER),
+            deliveryMode = any()
         )
     }
 
@@ -141,7 +145,8 @@ class ReminderFlowTest {
         verify(reminderRepo).create(
             label       = any(),
             triggerAtMs = any(),
-            type        = eq(ScheduledItemType.REMINDER)
+            type        = eq(ScheduledItemType.REMINDER),
+            deliveryMode = any()
         )
     }
 
@@ -152,7 +157,7 @@ class ReminderFlowTest {
         coordinator.process("remind me to check printer")
         val result = coordinator.process("cancel that")
         assertTrue(result is FlowResult.Cancelled)
-        verify(reminderRepo, never()).create(any(), any(), any())
+        verify(reminderRepo, never()).create(any(), any(), any(), any())
     }
 
     @Test
