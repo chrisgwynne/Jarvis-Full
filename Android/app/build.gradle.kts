@@ -81,19 +81,6 @@ android {
             // incremental compilation can handle Unicode characters in test
             // names (e.g. em-dashes in backtick test names).
             it.jvmArgs("-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US")
-
-            // ── Temporary diagnostic (PR #85) ───────────────────────────────
-            // Print full assertion details (expected vs actual) for failing
-            // tests so the pre-existing failures can be diagnosed from the CI
-            // log without a local Android test runner. Remove once the suite
-            // is green.
-            it.testLogging {
-                events("failed")
-                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
-                showExceptions = true
-                showCauses = true
-                showStackTraces = true
-            }
         }
     }
 
