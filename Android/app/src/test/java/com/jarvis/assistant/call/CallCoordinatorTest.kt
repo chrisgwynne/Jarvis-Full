@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
@@ -167,10 +168,14 @@ class CallCoordinatorTest {
             coordinator.handleIncomingCall(event, callEvents)
         }
 
-        // Let coordinator reach the listen window
-        advanceUntilIdle()
+        // Let the coordinator reach the listen window and subscribe its call
+        // event monitor — but use runCurrent(), not advanceUntilIdle(): the
+        // latter would advance virtual time past the 8 s listen timeout and let
+        // the timeout win the select before the caller hangs up.
+        runCurrent()
 
-        // Caller hangs up
+        // Caller hangs up — emitted while the monitor is collecting so the
+        // select resolves on callEnded (the scenario under test).
         callEvents.emit(CallEvent.CallEnded(fakeCallInfo().copy(callState = IncomingCallState.IDLE)))
         advanceUntilIdle()
         job.join()
