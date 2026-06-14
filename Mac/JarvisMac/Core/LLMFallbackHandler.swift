@@ -199,6 +199,14 @@ final class LLMFallbackHandler {
             state.log("llm", .info, "[ContextInjection] source=brainMemory")
         }
 
+        // Heartbeat — the live operational pulse (focus, active project, blockers,
+        // attention, recent wins). Grounds replies in what matters right now.
+        let heartbeatCtx = HeartbeatStore.shared.contextBlock()
+        if !heartbeatCtx.isEmpty {
+            ctx = ctx.isEmpty ? heartbeatCtx : ctx + "\n\n" + heartbeatCtx
+            state.log("llm", .info, "[ContextInjection] source=heartbeat")
+        }
+
         // Codebase self-knowledge context — ONLY for project-related queries.
         // Gated here so sport/general/opinion questions never receive camera
         // vision capability text, feature implementation status, or code graph

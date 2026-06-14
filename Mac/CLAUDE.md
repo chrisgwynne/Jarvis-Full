@@ -1094,3 +1094,17 @@ Step 5: LLM fallback
 - `EntityMemNode` extension: `withLastReferenced(_:)` / `withLastMentioned(_:)` for date backdating
 
 **pbxproj prefixes** — `XE` (group `XE00A2B3C4D5E6F7A8B9CGRP`, path=EntityMemory); file prefixes: `XM` (EntityMemoryModels), `ZE` (EntityMemoryGraph — XG collision → renamed ZE), `XX` (ConversationEntityExtractor), `ZH` (HybridEntityMatcher — XH collision → renamed ZH), `XS` (EntitySalienceEngine), `XL` (EntityLifecycleCoordinator), `XW` (WorkflowContextResolver), `XD` (DistributedEntityLinker), `XB` (EntityContextBlockBuilder), `XY` (EntityMemoryDiagnostics) in main app; `XT` (EntityMemoryTests) in test target.
+
+### Sprint HB1 — Heartbeat (living "current state" pulse)
+
+Implements the vision's **Heartbeat** / Situation Room concept: a continuously-updated,
+persisted, hot-reloadable snapshot of Jarvis's operational state (current focus, active
+project + confidence, attention-needed, blockers, open issues, recent wins, today's
+summary). It is a *living runtime layer* — editable on disk and reloaded without a restart.
+
+- **`Heartbeat/HeartbeatModels.swift`** ✅ — `HeartbeatItem` (id, text, source, confidence, createdAt) and `HeartbeatState` (Codable, forward-compatible `decodeIfPresent` init). `contextBlock()` emits a `[HEARTBEAT — Jarvis live state]` block (only non-empty fields) for LLM injection. `situationSummary()` returns a short spoken status line.
+- **`Heartbeat/HeartbeatStore.swift`** ✅ — `@Observable @MainActor` singleton. Persists to `~/Library/Application Support/JarvisMac/heartbeat.json` (atomic, 1.5s debounce). Hot-reloads on external edit via `DispatchSource` vnode watch (400ms debounce + 1s self-write echo guard). Bounded lists (attention 8, blockers 8, issues 12, wins 12) with case-insensitive dedup (refreshes timestamp instead of duplicating). Mutations: `setFocus`, `setActiveProject(_:confidence:)`, `setTodaySummary`, `recordInteraction`, `recordSessionStart`, `addAttention/Blocker/OpenIssue/Win`, `resolve(matching:)`, `clearAttention`, `reset`. `init(fileURL:)` for test isolation.
+- **`Heartbeat/HeartbeatCoordinator.swift`** ✅ — `@MainActor` singleton. Self-contained: subscribes to SystemBus `IntentResolvedEvent` (→ focus + interaction), `ConversationStartedEvent` (→ session count), `ProactiveSignalGeneratedEvent` (priority ≥ .high → attention), `GitHubBuildFailedEvent` (→ open issue + blocker). 30s refresh loop pulls `ProjectRelationshipIndex.shared.activeFocusContext()` (≥0.40 → active project; <0.20 → clear) and `EpisodeStore.shared.todaysSummary()`. `humanizeIntent(_:)` turns `homeTurnOff`/`show_brain_overlay` into readable focus phrases.
+- **Wiring** ✅ — `BrainRuntime.start()` calls `HeartbeatCoordinator.shared.start()` (mirrors `EntityLifecycleCoordinator`); `stop()` tears it down. `LLMFallbackHandler` injects `HeartbeatStore.shared.contextBlock()` right after the Brain-memory block (`[ContextInjection] source=heartbeat`).
+- **No pbxproj surgery** — project is XcodeGen (`sources: - path: JarvisMac`), so new files under `JarvisMac/Heartbeat/` are auto-discovered on `make build`.
+- **Tests** ✅ — `JarvisMacTests/HeartbeatTests.swift` (17 tests): item clamp, empty/populated context block, situation summary fallback + data, Codable round-trip, forward-compat partial decode, dedup, cap enforcement, cross-list resolve, confidence clamp, interaction recording, reset, intent humanization (camelCase / snake_case / associated-value strip).

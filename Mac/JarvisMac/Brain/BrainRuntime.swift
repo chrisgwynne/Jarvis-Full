@@ -31,6 +31,7 @@ final class BrainRuntime: RuntimeSubsystem {
     private var haBridge:         HABrainBridge?
     private var dreamCycle:       BrainDreamCycle?
     private var entityLifecycle:  EntityLifecycleCoordinator?
+    private var heartbeat:        HeartbeatCoordinator?
 
     // MARK: - Start / Stop
 
@@ -69,6 +70,11 @@ final class BrainRuntime: RuntimeSubsystem {
             let entityLC = EntityLifecycleCoordinator.shared; entityLC.start()
             self.entityLifecycle = entityLC
 
+            // Start heartbeat coordinator (live "current state" pulse).
+            // HeartbeatStore loads from disk in its initializer.
+            HeartbeatCoordinator.shared.start()
+            self.heartbeat = HeartbeatCoordinator.shared
+
             state = .running
             log.info("BrainRuntime started")
         } catch {
@@ -84,6 +90,7 @@ final class BrainRuntime: RuntimeSubsystem {
         haBridge?.stop();        haBridge        = nil
         dreamCycle?.stop();      dreamCycle      = nil
         entityLifecycle?.stop(); entityLifecycle = nil
+        heartbeat?.stop();       heartbeat       = nil
         db = nil
         state = .stopped
         log.info("BrainRuntime stopped")
