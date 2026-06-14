@@ -1,6 +1,7 @@
 package com.jarvis.assistant.call
 
 import android.Manifest
+import android.app.Application
 import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
@@ -13,11 +14,23 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
 import org.mockito.kotlin.any
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+/**
+ * Runs under Robolectric so the real [android.net.Uri] /
+ * [android.provider.ContactsContract] classes are available: the resolver
+ * builds its PhoneLookup query URI via [android.net.Uri.withAppendedPath],
+ * which returns null on the bare JVM stub android.jar — making the mocked
+ * `contentResolver.query(any<Uri>(), …)` never match.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = Application::class)
 class ContactsPhoneLookupResolverTest {
 
     private lateinit var context:         Context
