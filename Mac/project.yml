@@ -205,6 +205,11 @@ targets:
           - "ResponseRendererTests.swift"
           - "SprintNTests.swift"
           - "TodoistIntentHandlerTests.swift"
+          # Round 2 (different non-deterministic set surfaced once the above were
+          # excluded; failures dropped ~50→5, so the host instability eases with
+          # fewer hosted tests). Quarantined per request.
+          - "BrainConnectionTests.swift"
+          - "ContextGraphPersistenceTests.swift"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.mac.tests
