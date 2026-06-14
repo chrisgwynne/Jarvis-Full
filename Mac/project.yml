@@ -168,9 +168,14 @@ targets:
           #     (was Int); 3 accuracy-assertions need unwrapping.
           #   TTSBackendTests    — TTSBenchmarkStore init is now private; use
           #     .shared + clear() instead of TTSBenchmarkStore().
+          #   DaemonPhase3Tests  — exercises daemon-target-only types
+          #     (DaemonMessageEnvelope, JSONValue) that aren't visible to the app
+          #     test bundle; belongs in JarvisBrainDaemonTests (cf. the earlier
+          #     DaemonOfflineQueue move).
           - "DaemonManagerTests.swift"
           - "SprintOTests.swift"
           - "TTSBackendTests.swift"
+          - "DaemonPhase3Tests.swift"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jarvis.mac.tests
