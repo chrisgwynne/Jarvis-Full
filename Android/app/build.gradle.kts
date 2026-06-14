@@ -1,5 +1,8 @@
 import java.util.Properties
 import java.io.FileInputStream
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestResult
+import org.gradle.kotlin.dsl.KotlinClosure2
 
 plugins {
     // AGP 9+ ships built-in Kotlin support — the standalone
@@ -81,6 +84,24 @@ android {
             // incremental compilation can handle Unicode characters in test
             // names (e.g. em-dashes in backtick test names).
             it.jvmArgs("-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US")
+
+            // ── Temporary CI diagnostic (PR #84) ────────────────────────────
+            // The unit-test job is hitting the 45-min CI wall and getting
+            // cancelled mid-suite. Log every test's start/finish so the CI log
+            // reveals (a) per-test durations for completed tests and (b) the
+            // last STARTED test with no matching result — i.e. whatever is
+            // hanging or pathologically slow. Remove once the culprit is fixed.
+            it.testLogging {
+                events("started", "passed", "skipped", "failed")
+            }
+            it.afterTest(
+                KotlinClosure2<TestDescriptor, TestResult, Unit>({ desc, result ->
+                    val ms = result.endTime - result.startTime
+                    if (ms >= 1000L) {
+                        println("[SLOW_TEST] ${ms}ms ${desc.className} > ${desc.name}")
+                    }
+                })
+            )
         }
     }
 
