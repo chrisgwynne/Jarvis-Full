@@ -72,9 +72,13 @@ class CallIntentParserTest {
 
     @Test
     fun `looksLikeCallCommand catches all verbs`() {
-        listOf("call X", "phone Mike", "ring Sam", "dial 999", "facetime Joe", "video call Dad")
+        listOf("call X", "ring Sam", "dial 999", "facetime Joe", "video call Dad")
             .forEach { assertEquals("'$it' should be a call cmd", true,
                 CallIntentParser.looksLikeCallCommand(it)) }
         assertEquals(false, CallIntentParser.looksLikeCallCommand("what time is it"))
+        // "phone" is intentionally NOT a call verb — as a bare word it more
+        // often refers to the device ("check my phone") than placing a call.
+        // See CallIntentParser.CALL_VERBS. Lock that deliberate behaviour.
+        assertEquals(false, CallIntentParser.looksLikeCallCommand("phone Mike"))
     }
 }

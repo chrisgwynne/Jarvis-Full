@@ -16,6 +16,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
@@ -159,7 +160,7 @@ class ContactsPhoneLookupResolverTest {
         whenever(cursor.getString(0)).thenReturn(displayName)
         whenever(cursor.close()).then { }
         whenever(
-            contentResolver.query(any<Uri>(), any(), any(), any(), any())
+            contentResolver.query(any<Uri>(), any(), anyOrNull(), anyOrNull(), anyOrNull())
         ).thenReturn(cursor)
     }
 
@@ -168,7 +169,7 @@ class ContactsPhoneLookupResolverTest {
         whenever(cursor.moveToFirst()).thenReturn(false)
         whenever(cursor.close()).then { }
         whenever(
-            contentResolver.query(any<Uri>(), any(), any(), any(), any())
+            contentResolver.query(any<Uri>(), any(), anyOrNull(), anyOrNull(), anyOrNull())
         ).thenReturn(cursor)
     }
 }
