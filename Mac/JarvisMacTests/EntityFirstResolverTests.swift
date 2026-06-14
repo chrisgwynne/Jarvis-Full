@@ -152,7 +152,7 @@ final class EntityFirstResolverTests: XCTestCase {
 
     // MARK: - CustomEntityAliasStore
 
-    func testCustomAliasStoreRoundTrip() throws {
+    func testCustomAliasStoreRoundTrip() async throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("test_aliases_\(UUID().uuidString).json")
         let store = await MainActor.run { CustomEntityAliasStore(fileURL: tmp) }

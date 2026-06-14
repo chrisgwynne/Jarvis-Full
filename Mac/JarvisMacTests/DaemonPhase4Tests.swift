@@ -108,7 +108,7 @@ final class DaemonPhase4Tests: XCTestCase {
     func testDaemonAppBridgeCallbackSignatureIncludesPlatform() {
         let bridge = DaemonAppBridge()
         var capturedPlatform: String? = nil
-        bridge.onTranscript = { _, _, platform in
+        bridge.onTranscript = { _, _, platform, _ in
             capturedPlatform = platform
         }
         // Verify closure compiles with (String, String, String) -> Void
