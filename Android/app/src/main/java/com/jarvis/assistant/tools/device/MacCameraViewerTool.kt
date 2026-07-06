@@ -6,6 +6,7 @@ import android.util.Log
 import com.jarvis.assistant.tools.framework.Tool
 import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolResult
+import com.jarvis.assistant.tools.framework.ToolSchema
 import com.jarvis.assistant.ui.camera.MacCameraViewerActivity
 import com.jarvis.assistant.util.SettingsStore
 
@@ -24,6 +25,7 @@ class MacCameraViewerTool(
     override val name        = "mac_camera_viewer"
     override val description = "Opens the live Mac webcam viewer"
     override val requiresNetwork = true
+    override fun schema(): ToolSchema? = null
 
     companion object {
         private const val TAG = "MacCameraViewerTool"

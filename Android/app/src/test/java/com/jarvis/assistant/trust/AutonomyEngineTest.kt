@@ -163,7 +163,7 @@ class AutonomyEngineTest {
             )
         )
         val result = e.evaluate(
-            "send_sms", input("contact" to "Tom"),
+            "call_contact", input("contact" to "Tom"),
             TrustContext(isCarMode = true)
         )
         assertTrue(result is AutonomyDecision.Confirm)
@@ -220,7 +220,7 @@ class AutonomyEngineTest {
     fun `CONSERVATIVE preset always confirms MEDIUM risk despite high trust`() {
         val e = buildEngine(settings = AutonomySettings(preset = AutonomyPreset.CONSERVATIVE))
         val result = e.evaluate(
-            "send_sms", input("contact" to "Kate"),
+            "call_contact", input("contact" to "Kate"),
             TrustContext(voiceTrust = VoiceTrustState.VOICE_MATCHED)
         )
         assertTrue(result is AutonomyDecision.Confirm)
@@ -240,11 +240,11 @@ class AutonomyEngineTest {
     // ── Confirmation prompt content ───────────────────────────────────────────
 
     @Test
-    fun `confirm prompt for send_sms includes contact name`() {
+    fun `confirm prompt for email_send includes contact name`() {
         val e = buildEngine()
         val result = e.evaluate(
-            "send_sms", input("contact" to "Mike"),
-            TrustContext()
+            "email_send", input("contact" to "Mike"),
+            TrustContext(voiceTrust = VoiceTrustState.VOICE_UNKNOWN)
         ) as? AutonomyDecision.Confirm
         assertTrue(result?.prompt?.contains("Mike", ignoreCase = true) == true)
     }
@@ -254,7 +254,7 @@ class AutonomyEngineTest {
         val e = buildEngine()
         val result = e.evaluate(
             "call_contact", input("contact" to "Mum"),
-            TrustContext()
+            TrustContext(voiceTrust = VoiceTrustState.VOICE_UNKNOWN)
         ) as? AutonomyDecision.Confirm
         assertTrue(result?.prompt?.contains("Mum", ignoreCase = true) == true)
     }

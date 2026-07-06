@@ -101,6 +101,13 @@ class SherpaPiperPhonemizer(private val context: Context) : PiperPhonemizer {
             else ((mapped.toLong() * 100L) / processedCount.toLong()).toInt()
 
         val aborted = processedCount > 0 && successPercent < MIN_MAPPING_SUCCESS_PERCENT
+        PiperDiagnostics.update { snap ->
+            snap.copy(
+                phonemeMappingSuccessPercent       = successPercent,
+                phonemeMappingAbortedLowCoverage   = aborted,
+                lastPhonemeIdSkips                 = skipped,
+            )
+        }
         if (aborted) {
             return emptyList()
         }

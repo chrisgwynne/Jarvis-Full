@@ -9,6 +9,7 @@ import android.telephony.SmsManager
 import android.util.Log
 import com.jarvis.assistant.reminders.ReminderParser
 import com.jarvis.assistant.reminders.ReminderRepository
+import com.jarvis.assistant.reminders.db.entity.DeliveryMode
 import com.jarvis.assistant.reminders.db.entity.ScheduledItemType
 import com.jarvis.assistant.tools.ContactLookup
 import com.jarvis.assistant.tools.device.AppAliasStore
@@ -485,9 +486,10 @@ class FollowUpCoordinator(
             ?: return FlowResult.AwaitingInput("I didn't catch the time. When?")
 
         reminderRepository.create(
-            label       = content,
-            triggerAtMs = triggerMs,
-            type        = ScheduledItemType.REMINDER
+            label        = content,
+            triggerAtMs  = triggerMs,
+            type         = ScheduledItemType.REMINDER,
+            deliveryMode = DeliveryMode.SPEAK_IF_IDLE,
         )
 
         flow.markCompleted()

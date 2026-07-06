@@ -116,8 +116,7 @@ class EntityTracker {
     // ── Private helpers ────────────────────────────────────────────────────────
 
     private val CONTACT_PREFIXES = Regex(
-        """(?:message|text|call|ring|phone|dial|whatsapp|contact|send\s+(?:a\s+)?(?:message|text)\s+to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)""",
-        RegexOption.IGNORE_CASE
+        """(?:message|text|call|ring|phone|dial|whatsapp|contact|send\s+(?:a\s+)?(?:message|text)\s+to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"""
     )
 
     // "open spotify", "close youtube", "launch chrome", "switch to maps"

@@ -86,11 +86,12 @@ class ToolRegistryTest {
 
         val toolFiles = toolsDir.walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
-            .filter {
-                val src = it.readText()
+            .filter { file ->
+                val src = file.readText()
                 // Matches both ": Tool {" and ": Tool,\n" (multi-interface)
                 Regex("""[:,]\s*Tool\b""").containsMatchIn(src) &&
-                    !src.contains("interface Tool")   // skip the Tool interface itself
+                    !src.contains("interface Tool") &&    // skip the Tool interface itself
+                    !file.name.equals("ToolRegistry.kt") // ToolRegistry uses Tool as param, not supertype
             }
             .toList()
 

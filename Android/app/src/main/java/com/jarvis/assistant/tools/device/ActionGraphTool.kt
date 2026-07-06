@@ -9,6 +9,7 @@ import com.jarvis.assistant.graph.templates.GraphTemplates
 import com.jarvis.assistant.tools.framework.Tool
 import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolResult
+import com.jarvis.assistant.tools.framework.ToolSchema
 
 /**
  * ActionGraphTool — [Tool] adapter bridging the voice pipeline to the
@@ -40,6 +41,7 @@ class ActionGraphTool(
 
     override val name        = "run_graph"
     override val description = "Execute a multi-step action plan (routine)"
+    override fun schema(): ToolSchema? = null
 
     companion object {
         private const val TAG = "ActionGraphTool"

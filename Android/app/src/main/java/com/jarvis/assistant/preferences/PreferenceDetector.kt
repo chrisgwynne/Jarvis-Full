@@ -24,6 +24,10 @@ object PreferenceDetector {
             """(?:just|only|always|never|the\s+(?:brief|short|detailed|full|complete))\b""",
             RegexOption.IGNORE_CASE,
         ),
+        // Leading qualifier variant: "just tell me X" / "only show me X"
+        // The verb comes after the qualifier — safe because "just" anchored at ^ is
+        // an explicit preference signal, not a navigation request.
+        Regex("""^(?:just|only)\s+(?:tell|give|show)\s+me\b""", RegexOption.IGNORE_CASE),
         Regex("""^don'?t (?:tell|give|show|include|mention|read out)\b""", RegexOption.IGNORE_CASE),
         Regex("""^(?:stop|quit) (?:telling|giving|showing|including|mentioning)\b""", RegexOption.IGNORE_CASE),
         Regex("""^(?:always |never )?(?:keep it|make it|be)\b.{0,30}(?:brief|short|concise|quick|simple)\b""", RegexOption.IGNORE_CASE),

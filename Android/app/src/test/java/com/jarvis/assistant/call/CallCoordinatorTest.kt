@@ -104,14 +104,21 @@ class CallCoordinatorTest {
         val coordinator = buildCoordinator(this)
         val event = CallEvent.IncomingRinging(fakeCallInfo())
 
-        // Launch coordinator and then emit call-ended so it can complete
         val job = launch {
             coordinator.handleIncomingCall(event, callEvents)
         }
-        advanceUntilIdle()
+        // Advance without moving virtual time — let the coordinator reach
+        // the withTimeoutOrNull(ANSWER_VERIFY_MS) suspension point.
+        runCurrent()
 
-        // After answer is called, the coordinator waits for call to end.
-        // Emit CallEnded to unblock.
+        // The coordinator has called executor.answer() and is now waiting for
+        // CallAnswered within ANSWER_VERIFY_MS.  Emit it before time advances.
+        callEvents.emit(CallEvent.CallAnswered(fakeCallInfo()))
+        // Process the event: monitorJob receives it, completes callAnsweredDeferred,
+        // coordinator transitions to CallActive and speaks "Answered."
+        runCurrent()
+
+        // Coordinator is now suspended at callEndedDeferred.await(). Unblock it.
         callEvents.emit(CallEvent.CallEnded(fakeCallInfo().copy(callState = IncomingCallState.IDLE)))
         advanceUntilIdle()
         job.join()

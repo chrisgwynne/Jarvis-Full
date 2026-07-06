@@ -114,11 +114,22 @@ object SpeakerEmbeddingEngine {
         var bestId  = -1L
         var bestSim = 0f
         for ((personId, embeddings) in profiles) {
-            for (stored in embeddings) {
-                if (stored.size != probe.size) continue  // skip dimension mismatch (model transition)
-                val sim = similarity(probe, stored)
-                if (sim > bestSim) { bestSim = sim; bestId = personId }
-            }
+            val compatible = embeddings.filter { it.size == probe.size }
+            if (compatible.isEmpty()) continue
+
+            // Mean-centroid: average all stored embeddings then re-normalise.
+            // A single embedding is its own centroid (no change in behaviour).
+            // Multiple embeddings: divergent clusters produce a near-zero centroid
+            // (sim ≈ 0) so a person with one clean match beats a person whose
+            // stored samples are spread across the embedding space.
+            val centroid = FloatArray(probe.size)
+            for (emb in compatible) for (i in emb.indices) centroid[i] += emb[i]
+            val norm = sqrt(centroid.sumOf { (it * it).toDouble() }.toFloat())
+            if (norm < 1e-8f) continue  // degenerate / cancelling embeddings → skip
+            val normCentroid = FloatArray(probe.size) { centroid[it] / norm }
+
+            val sim = similarity(probe, normCentroid)
+            if (sim > bestSim) { bestSim = sim; bestId = personId }
         }
         return if (bestId >= 0L) Pair(bestId, bestSim) else null
     }

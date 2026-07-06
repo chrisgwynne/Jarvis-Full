@@ -95,10 +95,10 @@ class CameraCapturePolicyTest {
     }
 
     @Test
-    fun `'selfie' alone matches front camera`() {
-        val input = CameraCaptureTool(ctx, capture).matches("selfie")
-        assertNotNull(input)
-        assertEquals("front", input!!.param("facing"))
+    fun `bare 'selfie' does NOT match camera tool (verb required)`() {
+        // FRONT_TRIGGERS requires an explicit capture verb to prevent "show me the selfie"
+        // from accidentally triggering camera capture instead of ViewMediaTool.
+        assertNull(CameraCaptureTool(ctx, capture).matches("selfie"))
     }
 
     @Test
