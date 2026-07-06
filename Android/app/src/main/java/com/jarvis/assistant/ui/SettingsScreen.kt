@@ -118,6 +118,15 @@ fun SettingsScreen(
         // ── Permissions — one consolidated status screen ──────────────────
         composable(SettingsCategory.Permissions.route) {
             com.jarvis.assistant.ui.settings.screens.PermissionsScreen(
+                onBack = popToRoot,
+                onClose = onBack,
+                onOpenBackgroundLocationDisclosure = {
+                    settingsNav.navigate(SettingsCategory.BackgroundLocationDisclosure.route)
+                },
+            )
+        }
+        composable(SettingsCategory.BackgroundLocationDisclosure.route) {
+            com.jarvis.assistant.ui.settings.screens.BackgroundLocationDisclosureScreen(
                 onBack = popToRoot, onClose = onBack
             )
         }

@@ -58,6 +58,7 @@ import com.jarvis.assistant.ui.theme.jarvisExtras
 internal fun PermissionsScreen(
     onBack: () -> Unit,
     onClose: () -> Unit,
+    onOpenBackgroundLocationDisclosure: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -100,7 +101,13 @@ internal fun PermissionsScreen(
             SectionHeader(title = "Optional")
             JarvisSettingsGroup {
                 optional.forEachIndexed { i, perm ->
-                    PermissionRow(perm) { PermissionUtils.openPermissionSettings(context, perm) }
+                    val clickAction: () -> Unit =
+                        if (perm.id == "background_location" && onOpenBackgroundLocationDisclosure != null) {
+                            onOpenBackgroundLocationDisclosure
+                        } else {
+                            { PermissionUtils.openPermissionSettings(context, perm) }
+                        }
+                    PermissionRow(perm, clickAction)
                     if (i < optional.lastIndex) JarvisRowDivider()
                 }
             }

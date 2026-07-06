@@ -22,6 +22,11 @@ internal object PermissionUtils {
     fun isCalendarGranted(ctx: Context)    = isGranted(ctx, Manifest.permission.READ_CALENDAR)
     fun isLocationGranted(ctx: Context)    = isGranted(ctx, Manifest.permission.ACCESS_FINE_LOCATION)
 
+    fun isBackgroundLocationGranted(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return isLocationGranted(ctx)
+        return isGranted(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    }
+
     // ── Special permission checkers ───────────────────────────────────────
 
     fun isNotificationListenerEnabled(ctx: Context): Boolean {
@@ -120,6 +125,13 @@ internal object PermissionUtils {
             name     = "Camera",
             detail   = "Vision analysis and OCR scan",
             granted  = isCameraGranted(ctx),
+            required = false,
+        ),
+        PermissionHealth(
+            id       = "background_location",
+            name     = "Background Location",
+            detail   = "Location-triggered reminders (e.g. remind me when I get home)",
+            granted  = isBackgroundLocationGranted(ctx),
             required = false,
         ),
     )
