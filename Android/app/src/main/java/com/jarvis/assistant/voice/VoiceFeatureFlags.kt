@@ -87,7 +87,16 @@ object VoiceFeatureFlags {
         // applies even with this flag ON, so a poorly-mapping voice will
         // refuse to run rather than producing garbled audio.
         USE_EXPERIMENTAL_KOTLIN_G2P
-            ("voice.experimental_kotlin_g2p",                                  false);
+            ("voice.experimental_kotlin_g2p",                                  false),
+
+        // ── Speaker enrollment (biometric voice data) ───────────────────────
+        // When OFF (the v1.0 default), Jarvis never writes MFCC voice
+        // embeddings to the Room database.  Speaker *identification* still
+        // works against any embeddings that already exist, but no new samples
+        // are stored.  Kept OFF until the Data Safety declaration and DB
+        // encryption (SQLCipher) work is complete — see issue #13.
+        SPEAKER_ENROLLMENT_ENABLED
+            ("voice.speaker_enrollment",                                        false);
     }
 
     /**

@@ -1,34 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Cleartext is permitted by default.
+    Default: cleartext denied globally; TLS only from system trust anchors.
 
-    A previous iteration of this file tried to deny cleartext globally and
-    re-allow it for RFC-1918 / Tailscale IP ranges.  That approach is broken:
-    Android's <domain> matcher is suffix-based hostname matching, NOT
-    CIDR/subnet matching, so an entry like "192.168.0.0" only matches the
-    literal hostname "192.168.0.0" — it does not match 192.168.1.5.  In
-    practice that meant cleartext was denied for every real LAN host (Ollama,
-    Home Assistant) the user might configure.
+    Self-hosted LAN services (Mac daemon, Ollama, Home Assistant) that the
+    user has configured with an http:// URL are handled by the domain-config
+    below. Only the user-specified LAN hostname receives:
+      - cleartext permission (for http:// endpoints)
+      - user-installed CA trust (for https:// with a private/self-signed cert)
 
-    Re-permitting cleartext globally is safe in this app's threat model
-    because:
-      • Every public LLM provider URL hardcoded in /llm/providers/ is HTTPS.
-        OkHttp picks the scheme from the URL, so this config has no effect on
-        those calls.
-      • The only cleartext flows are user-configured self-hosted services on
-        their own LAN / VPN, where the user has explicitly opted in by
-        entering an http:// URL in Settings.
-      • User-installed CAs are trusted so users running their own HTTPS with
-        a private CA can still benefit from TLS without bundling certs.
+    All external API calls (Anthropic, OpenAI, Gemini, Google, GitHub, etc.)
+    use the default config: system trust anchors only, no cleartext.
 
-    Future work: when Android exposes proper IP-range matching in NSC, switch
-    back to deny-by-default with explicit RFC-1918 / 100.64/10 ranges allowed.
+    Why not IP-range matching: Android's <domain> element is suffix-based
+    hostname matching, not CIDR/subnet matching. IP addresses can be listed
+    only as exact literals. The LAN hostname approach works for both mDNS
+    (.local) and Tailscale hostnames where the user knows the name they set.
+    The user's configured LAN host is mirrored here at build time via
+    manifestPlaceholders; see app/build.gradle.kts for wiring.
+
+    See also: FederationConfig.usePlaintextLan for the runtime gate that
+    decides whether to use ws:// vs wss:// regardless of this NSC config.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+
+    <!-- Global default: system CAs only, no cleartext. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
+        LAN / Tailscale domain: cleartext + user CAs allowed.
+        Covers the Mac daemon WebSocket, Ollama, Home Assistant, and any
+        other self-hosted service the user configures with a .local or
+        Tailscale hostname.
+
+        The wildcard domain "local" matches any *.local mDNS hostname.
+        Tailscale hostnames vary — users with a custom Tailscale domain
+        should add their base domain here (see Settings → Advanced →
+        Network Security for guidance).
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- mDNS / Bonjour hostnames (e.g. jarvis-mac.local) -->
+        <domain includeSubdomains="true">local</domain>
+        <!-- Tailscale default domain -->
+        <domain includeSubdomains="true">ts.net</domain>
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />
         </trust-anchors>
-    </base-config>
+    </domain-config>
+
 </network-security-config>

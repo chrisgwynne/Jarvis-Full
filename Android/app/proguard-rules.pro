@@ -4,9 +4,13 @@
 # Base rules (pre-existing)
 # ============================================================
 
-# Keep Jarvis service and receiver
--keep class com.jarvis.assistant.service.** { *; }
--keep class com.jarvis.assistant.llm.** { *; }
+# Keep only the specific service/receiver classes that need to survive R8.
+# Broad service.** was removed — it prevented tree-shaking across the whole package.
+-keep class com.jarvis.assistant.service.JarvisService { *; }
+-keep class com.jarvis.assistant.service.BootReceiver { *; }
+-keep class com.jarvis.assistant.service.JarvisNotificationService { *; }
+# LLM providers kept for runtime class-loading by LlmRouter.
+-keep class com.jarvis.assistant.llm.providers.** { *; }
 
 # OkHttp — Retrofit is no longer a dependency; keep-rule removed.
 -dontwarn okhttp3.**
@@ -103,10 +107,13 @@
 -keep class com.jarvis.assistant.voice.piper.** { *; }
 
 # ============================================================
-# 10. Remove verbose debug/trace logging in release builds
-#    (Log.i / Log.w / Log.e are kept for production visibility)
+# 10. Remove verbose logging in release builds.
+#     Log.i is stripped because several call sites log sensitive data
+#     (WebSocket URLs, device IDs) at info level. Log.w and Log.e are
+#     kept for genuine production error visibility.
 # ============================================================
 -assumenosideeffects class android.util.Log {
     public static *** d(...);
     public static *** v(...);
+    public static *** i(...);
 }

@@ -3,6 +3,7 @@ package com.jarvis.assistant.speaker
 import android.util.Log
 import com.jarvis.assistant.speaker.audio.SpeakerEmbeddingEngine
 import com.jarvis.assistant.speaker.db.PersonRecord
+import com.jarvis.assistant.voice.VoiceFeatureFlags
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -130,7 +131,8 @@ class SpeakerRecognitionCoordinator(
         val person   = store.getPersonById(personId)
             ?: error("createPerson($displayName) returned id=$personId but getPersonById came back null")
 
-        if (introductionPcm != null) {
+        if (introductionPcm != null &&
+                VoiceFeatureFlags.isEnabled(VoiceFeatureFlags.Flag.SPEAKER_ENROLLMENT_ENABLED)) {
             withContext(Dispatchers.Default) { enrollment.maybeEnroll(person, introductionPcm) }
         }
         person
@@ -142,6 +144,7 @@ class SpeakerRecognitionCoordinator(
      * the profile fresh.  Fire-and-forget — never blocks a pipeline response.
      */
     suspend fun enrollUtterance(personId: Long, pcm: ShortArray) {
+        if (!VoiceFeatureFlags.isEnabled(VoiceFeatureFlags.Flag.SPEAKER_ENROLLMENT_ENABLED)) return
         val person = withContext(Dispatchers.IO) { store.getPersonById(personId) }
             ?: return
         enrollment.maybeEnroll(person, pcm)

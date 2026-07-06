@@ -205,6 +205,19 @@ internal enum class SettingsCategory(
     ),
 
     // ────────────────────────────────────────────────────────────────────────
+    // INTERNAL — reached from inside Permissions screen
+    // ────────────────────────────────────────────────────────────────────────
+
+    BackgroundLocationDisclosure(
+        title         = "Background Location",
+        description   = "Why Jarvis needs location access when not in use",
+        icon          = Icons.Filled.Place,
+        route         = "settings/background_location_disclosure",
+        section       = SettingsSection.SystemDiagnostics,
+        developerOnly = true,
+    ),
+
+    // ────────────────────────────────────────────────────────────────────────
     // INTERNAL — reached from inside MacIntegration, not from root
     // ────────────────────────────────────────────────────────────────────────
 

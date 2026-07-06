@@ -14,6 +14,9 @@ data class FederationConfig(
     val heartbeatIntervalMs: Long = 30_000L,
     val queueMaxSize: Int = 200,
     val queueFlushTimeoutMs: Long = 5_000L,
+    // When true, connect over ws:// instead of wss://. Only enable if the Mac
+    // daemon is not serving TLS. A warning is shown in Settings when this is on.
+    val usePlaintextLan: Boolean = false,
 )
 
 enum class ConnectionPreference { LAN_FIRST, TAILSCALE_FIRST, LAN_ONLY, TAILSCALE_ONLY }
