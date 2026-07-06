@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -66,7 +67,6 @@ class FederationManager(
     private val wsLock = Any() // guards webSocket reference for okhttp callbacks (non-coroutine context)
 
     private var connectJob: Job? = null
-    private var heartbeatJob: Job? = null
     private var reconnectAttempt = 0
 
     private val inboundHandlers = CopyOnWriteArrayList<(FederationMessage) -> Unit>()
@@ -157,7 +157,7 @@ class FederationManager(
             Log.d(TAG, "start: already active")
             return
         }
-        Log.i(TAG, "start: federation manager starting (deviceId=${resolveDeviceId()})")
+        Log.w(TAG, "start: federation manager starting")
         reconnectAttempt = 0
         connectJob = scope.launch { connectLoop() }
     }
@@ -171,9 +171,7 @@ class FederationManager(
             Log.d(TAG, "stop: already stopped")
             return
         }
-        Log.i(TAG, "stop: shutting down federation manager")
-        heartbeatJob?.cancel()
-        heartbeatJob = null
+        Log.w(TAG, "stop: shutting down federation manager")
         connectJob?.cancel()
         connectJob = null
         synchronized(wsLock) {
@@ -197,7 +195,7 @@ class FederationManager(
             stateMutex.withLock {
                 _connectionState.value = ConnectionState.CONNECTING
             }
-            Log.i(TAG, "connectLoop: connecting to $url (attempt $reconnectAttempt)")
+            Log.w(TAG, "connectLoop: attempting connection (attempt $reconnectAttempt)")
 
             val connected = openWebSocket(url)
             if (connected) {
@@ -207,15 +205,13 @@ class FederationManager(
                 // Wait here — the coroutine blocks until the WS closes or we stop.
                 // OkHttp manages the socket on its own thread; we wait for state change.
                 awaitDisconnect()
-                heartbeatJob?.cancel()
-                heartbeatJob = null
             }
 
             if (!active.get()) break
 
             val backoff = backoffDelay(reconnectAttempt)
             reconnectAttempt++
-            Log.i(TAG, "connectLoop: reconnecting in ${backoff}ms (attempt $reconnectAttempt)")
+            Log.w(TAG, "connectLoop: reconnecting in ${backoff}ms (attempt $reconnectAttempt)")
             stateMutex.withLock {
                 _connectionState.value = ConnectionState.DISCONNECTED
             }
@@ -239,40 +235,18 @@ class FederationManager(
 
     /**
      * Suspend until the connection transitions away from CONNECTED (or we stop).
-     * Polls state every 500 ms; low overhead because disconnects are infrequent.
+     * Uses StateFlow.first { } — zero polling overhead vs. the previous 500 ms
+     * busy-wait, which caused ~7,200 unnecessary coroutine resumes per hour.
      */
     private suspend fun awaitDisconnect() {
-        while (active.get() && _connectionState.value == ConnectionState.CONNECTED && scope.isActive) {
-            delay(500)
-        }
-        // Also check CONNECTING — if we never reached CONNECTED we should fall through
-        // immediately so the reconnect loop can fire.
+        _connectionState.first { it != ConnectionState.CONNECTED }
     }
 
     private fun startHeartbeat() {
-        heartbeatJob?.cancel()
-        heartbeatJob = scope.launch {
-            while (active.get() && isActive) {
-                delay(config.heartbeatIntervalMs)
-                if (isConnected()) {
-                    sendPing()
-                }
-            }
-        }
-    }
-
-    private fun sendPing() {
-        val ping = JSONObject().apply {
-            put("envelope", "ping")
-            put("deviceId", resolveDeviceId())
-            put("timestampMs", System.currentTimeMillis())
-        }
-        val sent = synchronized(wsLock) {
-            webSocket?.send(ping.toString())
-        }
-        if (sent != true) {
-            Log.w(TAG, "sendPing: failed — socket unavailable")
-        }
+        // OkHttp's built-in pingInterval (set on the client) sends WebSocket
+        // protocol PING frames automatically. A separate application-level
+        // heartbeat loop was removed to eliminate double wakeups — one
+        // protocol PING per heartbeatIntervalMs is sufficient.
     }
 
     private suspend fun flushQueue() {
@@ -331,7 +305,11 @@ class FederationManager(
             config.lanHost.isNotBlank() -> config.lanHost
             else -> return null
         }
-        return "ws://$host:${config.lanPort}/federation"
+        // Default to WSS (encrypted). Only degrade to WS when the user has
+        // explicitly opted into plaintext LAN mode in settings — this flag
+        // should be accompanied by a UI warning that traffic is unencrypted.
+        val scheme = if (config.usePlaintextLan) "ws" else "wss"
+        return "$scheme://$host:${config.lanPort}/federation"
     }
 
     private fun backoffDelay(attempt: Int): Long {

@@ -5,5 +5,5 @@
     <string name="notification_channel_desc">Persistent notification while Jarvis is active</string>
     <string name="notification_title">Jarvis is listening</string>
     <string name="notification_text">Tap to open</string>
-    <string name="accessibility_service_description">Allows Jarvis to tap the Send button in WhatsApp after composing a message by voice.</string>
+    <string name="accessibility_service_description">Jarvis uses the accessibility service to help you control your phone by voice.\n\nCapabilities used:\n\n• Read screen content from any app when you ask (for example: \"what does this say?\" or \"summarise this page\")\n• Take a screenshot and send it to your AI model when you ask\n• Tap buttons on your behalf — for example, sending a WhatsApp message you composed by voice\n• Perform gestures such as scrolling or navigating\n\nJarvis only acts when you speak a command that triggers these features. It does not run in the background silently, does not log or store screen content, and does not transmit your screen to any AI model without your explicit spoken request.</string>
 </resources>

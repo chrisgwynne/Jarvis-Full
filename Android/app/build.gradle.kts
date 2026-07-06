@@ -85,6 +85,35 @@ android {
     }
 
 
+    // ── Release signing ───────────────────────────────────────────────────
+    // Credentials are read from local.properties (gitignored) or environment
+    // variables for CI. Never hardcode keystore credentials here.
+    // Required keys in local.properties:
+    //   signing.keyStore=../keystore/jarvis-release.jks
+    //   signing.keyAlias=jarvis
+    //   signing.keyPassword=CHANGE_ME
+    //   signing.storePassword=CHANGE_ME
+    val signingProps = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) FileInputStream(f).use { load(it) }
+    }
+    val releaseKeyAlias    = signingProps["signing.keyAlias"]     as String? ?: System.getenv("SIGNING_KEY_ALIAS")
+    val releaseKeyPwd      = signingProps["signing.keyPassword"]  as String? ?: System.getenv("SIGNING_KEY_PASSWORD")
+    val releaseStoreFile   = (signingProps["signing.keyStore"]    as String? ?: System.getenv("SIGNING_STORE_PATH"))
+                                 ?.let { file(it) }
+    val releaseStorePwd    = signingProps["signing.storePassword"] as String? ?: System.getenv("SIGNING_STORE_PASSWORD")
+
+    signingConfigs {
+        if (releaseStoreFile != null && releaseKeyAlias != null) {
+            create("release") {
+                keyAlias      = releaseKeyAlias
+                keyPassword   = releaseKeyPwd ?: ""
+                storeFile     = releaseStoreFile
+                storePassword = releaseStorePwd ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -93,6 +122,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("release")
         }
         debug {
             isMinifyEnabled = false
