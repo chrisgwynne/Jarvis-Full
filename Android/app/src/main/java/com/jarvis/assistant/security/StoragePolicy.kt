@@ -16,7 +16,12 @@ object StoragePolicy {
      */
     fun isSafeImageUrl(url: String): Boolean {
         return try {
-            val scheme = Uri.parse(url).scheme?.lowercase()
+            val schemePart = url.substringBefore("://")
+            val scheme = if (schemePart.isNotBlank() && !schemePart.contains("/")) {
+                schemePart.lowercase()
+            } else {
+                null
+            }
             val allowed = scheme in ALLOWED_URL_SCHEMES
             if (!allowed) Log.w(TAG, "Blocked unsafe image URL scheme='$scheme' url=${url.take(80)}")
             allowed
@@ -35,8 +40,8 @@ object StoragePolicy {
     fun isApprovedImageWriteUri(context: Context, uri: Uri): Boolean {
         val uriString = uri.toString()
         val allowed = uriString.startsWith("content://media/") ||
-                      uriString.startsWith(context.filesDir.absolutePath) ||
-                      uriString.startsWith(context.cacheDir.absolutePath) ||
+                      (context.filesDir?.absolutePath?.let { uriString.startsWith(it) } == true) ||
+                      (context.cacheDir?.absolutePath?.let { uriString.startsWith(it) } == true) ||
                       (context.getExternalFilesDir(null)?.absolutePath
                           ?.let { uriString.startsWith(it) } == true)
         logAccess("WRITE", uriString, allowed)
@@ -66,8 +71,8 @@ object StoragePolicy {
      */
     fun isAppOwnedPath(path: String, context: Context): Boolean {
         val appRoots = listOfNotNull(
-            context.filesDir.absolutePath,
-            context.cacheDir.absolutePath,
+            context.filesDir?.absolutePath,
+            context.cacheDir?.absolutePath,
             context.getExternalFilesDir(null)?.absolutePath,
             context.externalCacheDir?.absolutePath
         )

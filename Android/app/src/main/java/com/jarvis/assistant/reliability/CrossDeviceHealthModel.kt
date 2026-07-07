@@ -35,7 +35,8 @@ object CrossDeviceHealthModel {
         val gatewayConnected = macBrainOnline
         val degradedMode     = !macBrainOnline &&
                                gatewayStatus != MacBrainStatus.NotPaired &&
-                               gatewayStatus != MacBrainStatus.Unauthorized
+                               gatewayStatus != MacBrainStatus.Unauthorized &&
+                               gatewayStatus != MacBrainStatus.Disconnected
 
         val wakeReady        = diag.activeWakeDetectorCount > 0
         val listenReady      = diag.activeSpeechRecognizerCount > 0

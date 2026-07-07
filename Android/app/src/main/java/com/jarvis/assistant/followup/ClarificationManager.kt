@@ -73,7 +73,7 @@ object ClarificationManager {
     fun initialMissingSlots(type: FlowType): ArrayDeque<SlotKey> = when (type) {
         FlowType.MESSAGE_DRAFT    -> ArrayDeque(listOf(SlotKey.TARGET_CONTACT, SlotKey.MESSAGE_BODY))
         FlowType.EMAIL_DRAFT      -> ArrayDeque(listOf(SlotKey.EMAIL_ADDRESS, SlotKey.EMAIL_SUBJECT, SlotKey.MESSAGE_BODY))
-        FlowType.CALL_CONTACT     -> ArrayDeque(listOf(SlotKey.TARGET_CONTACT))
+        FlowType.CALL_CONTACT     -> ArrayDeque(listOf(SlotKey.TARGET_CONTACT, SlotKey.PHONE_TYPE))
         FlowType.REMINDER_CREATION -> ArrayDeque(listOf(SlotKey.REMINDER_CONTENT, SlotKey.TRIGGER_TIME))
         FlowType.TIMER_CREATION   -> ArrayDeque(listOf(SlotKey.TRIGGER_TIME))
         FlowType.APP_LAUNCH       -> ArrayDeque(listOf(SlotKey.APP_NAME))

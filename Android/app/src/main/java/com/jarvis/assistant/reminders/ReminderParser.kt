@@ -146,13 +146,13 @@ object ReminderParser {
             }
 
         // Strip the time expression (relative or clock)
-        label = IN_RELATIVE.replace(label, "")
-        label = AT_CLOCK.replace(label, "")
-        label = AT_24H.replace(label, "")
-        label = TOMORROW.replace(label, "")
+        label = IN_RELATIVE.replace(label, "").trim()
+        label = AT_CLOCK.replace(label, "").trim()
+        label = AT_24H.replace(label, "").trim()
+        label = TOMORROW.replace(label, "").trim()
 
         // Strip residual connecting words
-        label = Regex("""^(to |about |that |at |in |for |on )+""").replace(label, "")
+        label = Regex("""^\s*(to |about |that |at |in |for |on )+""").replace(label, "")
         label = label.trim().trimEnd(',', '.')
 
         return label.ifBlank { "reminder" }

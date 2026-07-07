@@ -108,8 +108,8 @@ object FollowUpResolver {
 
         SlotKey.REMINDER_CONTENT -> {
             val lower = utterance.lowercase().trim()
-            // Accept as content only if it doesn't look like a time expression
-            if (lower.length > 2 && !isTimeExpression(lower)) utterance.trim() else null
+            // Accept as content only if it doesn't look like a time expression or a new request
+            if (lower.length > 2 && !isTimeExpression(lower) && !looksLikeNewRequest(lower)) utterance.trim() else null
         }
 
         SlotKey.TRIGGER_TIME -> {
@@ -171,7 +171,7 @@ object FollowUpResolver {
         lower.matches(Regex(""".*\d{1,2}:\d{2}.*""")) ||
         lower.matches(Regex("""in \d+.*"""))
 
-    private fun looksLikeNewRequest(lower: String): Boolean {
+    internal fun looksLikeNewRequest(lower: String): Boolean {
         // Clearly off-topic questions
         val offTopic = listOf(
             Regex("""^what(?:'s| is) the (?:time|date|weather|temperature)"""),

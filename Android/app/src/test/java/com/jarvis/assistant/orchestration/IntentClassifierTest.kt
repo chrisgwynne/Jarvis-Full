@@ -18,10 +18,11 @@ class IntentClassifierTest {
     }
 
     @Test
-    fun `I am Sam — extracts name`() {
+    fun `I am Sam — passes through (I am X excluded from name capture)`() {
+        // "I am X" is intentionally excluded from NAME_PATTERN to avoid capturing
+        // transient state ("I'm home", "I'm tired"). Falls through to PassThrough.
         val result = IntentClassifier.classify("I am Sam")
-        assertTrue(result is ConversationAction.RememberFact)
-        assertEquals("Sam", (result as ConversationAction.RememberFact).value)
+        assertEquals(ConversationAction.PassThrough, result)
     }
 
     @Test
@@ -49,7 +50,8 @@ class IntentClassifierTest {
         val result = IntentClassifier.classify("remember that I prefer concise answers")
         assertTrue(result is ConversationAction.RememberFact)
         val action = result as ConversationAction.RememberFact
-        assertTrue(action.key.startsWith("pref."))
+        // Explicit "remember that" prefix → stored under timestamped "fact." key, not "pref."
+        assertTrue(action.key.startsWith("fact."))
     }
 
     @Test

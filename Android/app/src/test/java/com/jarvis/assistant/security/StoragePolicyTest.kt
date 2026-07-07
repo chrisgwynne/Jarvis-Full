@@ -95,7 +95,7 @@ class StoragePolicyTest {
         // Using Mockito-kotlin mock for safety — it returns sensible defaults and
         // avoids a NullPointerException if the implementation does dereference context.
         val context = org.mockito.kotlin.mock<android.content.Context>()
-        val uri = Uri.parse("content://media/external/images/media/123")
+        val uri: Uri = org.mockito.kotlin.mock { on { toString() }.thenReturn("content://media/external/images/media/123") }
 
         assertTrue(
             "content:// URIs should be accepted as valid image read URIs",
@@ -106,7 +106,7 @@ class StoragePolicyTest {
     @Test
     fun `isValidImageReadUri — file scheme raw storage path blocked`() {
         val context = org.mockito.kotlin.mock<android.content.Context>()
-        val uri = Uri.parse("file:///sdcard/DCIM/photo.jpg")
+        val uri: Uri = org.mockito.kotlin.mock { on { toString() }.thenReturn("file:///sdcard/DCIM/photo.jpg") }
 
         assertFalse(
             "file:// URIs pointing to raw external storage must be blocked",
@@ -117,7 +117,7 @@ class StoragePolicyTest {
     @Test
     fun `isValidImageReadUri — content URI for downloads accepted`() {
         val context = org.mockito.kotlin.mock<android.content.Context>()
-        val uri = Uri.parse("content://downloads/public/1234")
+        val uri: Uri = org.mockito.kotlin.mock { on { toString() }.thenReturn("content://downloads/public/1234") }
 
         assertTrue(
             "content:// downloads URIs should be accepted",

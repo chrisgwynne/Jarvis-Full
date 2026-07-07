@@ -5,10 +5,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.AlarmClock
-import android.telephony.SmsManager
 import android.util.Log
 import com.jarvis.assistant.reminders.ReminderParser
 import com.jarvis.assistant.reminders.ReminderRepository
+import com.jarvis.assistant.reminders.db.entity.DeliveryMode
 import com.jarvis.assistant.reminders.db.entity.ScheduledItemType
 import com.jarvis.assistant.tools.ContactLookup
 import com.jarvis.assistant.tools.device.AppAliasStore
@@ -179,16 +179,23 @@ class FollowUpCoordinator(
             }
 
             is FollowUpResolver.Classification.Unrelated -> {
-                // If the flow still needs slots, re-ask rather than pass through.
-                // This prevents STT artifacts (e.g. "whats up" → "whatsapp") from
-                // escaping the slot-fill loop and starting a new competing flow.
-                val question = ClarificationManager.nextQuestion(flow)
-                if (question != null) {
-                    Log.d(TAG, "Utterance unrelated but flow has missing slots — re-asking")
-                    FlowResult.AwaitingInput(question)
-                } else {
-                    Log.d(TAG, "Utterance is unrelated to active flow — passing through")
+                val lower = utterance.lowercase().trim()
+                if (FollowUpResolver.looksLikeNewRequest(lower)) {
+                    Log.d(TAG, "Clearly off-topic utterance — clearing flow and passing through")
+                    flowContext.setActiveFlow(null)
                     FlowResult.PassThrough
+                } else {
+                    // If the flow still needs slots, re-ask rather than pass through.
+                    // This prevents STT artifacts (e.g. "whats up" → "whatsapp") from
+                    // escaping the slot-fill loop and starting a new competing flow.
+                    val question = ClarificationManager.nextQuestion(flow)
+                    if (question != null) {
+                        Log.d(TAG, "Utterance unrelated but flow has missing slots — re-asking")
+                        FlowResult.AwaitingInput(question)
+                    } else {
+                        Log.d(TAG, "Utterance is unrelated to active flow — passing through")
+                        FlowResult.PassThrough
+                    }
                 }
             }
         }
@@ -284,7 +291,7 @@ class FollowUpCoordinator(
         // "WhatsApp Chris" always means WhatsApp regardless of the default setting.
         // Otherwise honour the user's preferred default channel (sms / whatsapp / ask).
         val explicitWhatsApp = lower.contains("whatsapp") || lower.startsWith("wa ")
-        val defaultChannel   = settings?.defaultMsgChannel ?: "ask"
+        val defaultChannel   = settings?.defaultMsgChannel ?: "sms"
         val channel = when {
             explicitWhatsApp         -> "whatsapp"
             defaultChannel == "ask"  -> null   // will be asked below
@@ -406,7 +413,6 @@ class FollowUpCoordinator(
 
     // ── SMS / WhatsApp execution ───────────────────────────────────────────────
 
-    @Suppress("DEPRECATION")
     private suspend fun executeSms(flow: ActiveFlow): FlowResult {
         val contactName = flow.slot(SlotKey.TARGET_CONTACT)
             ?: return FlowResult.AwaitingInput("Who should I message?")
@@ -417,7 +423,7 @@ class FollowUpCoordinator(
         val contact = contactLookup.find(contactName) ?: run {
             flow.markCompleted()
             flowContext.setActiveFlow(null)
-            return FlowResult.Complete("No $contactName in your contacts that I can see.")
+            return FlowResult.Complete("I couldn't find $contactName in your contacts.")
         }
 
         return try {
@@ -432,11 +438,15 @@ class FollowUpCoordinator(
                 }
                 FlowResult.Complete(feedback)
             } else {
-                val sms = SmsManager.getDefault()
-                sms.sendMultipartTextMessage(contact.number, null, sms.divideMessage(body), null, null)
+                context.startActivity(
+                    Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${contact.number}")).apply {
+                        putExtra("sms_body", body)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
                 flow.markCompleted("SMS → ${contact.displayName}")
                 flowContext.setActiveFlow(null)
-                FlowResult.Complete("Message sent to ${contact.displayName}.")
+                FlowResult.Complete("Message ready for ${contact.displayName}.")
             }
         } catch (e: Exception) {
             Log.e(TAG, "SMS execution failed: ${e.message}", e)
@@ -455,7 +465,7 @@ class FollowUpCoordinator(
         val contact = contactLookup.find(contactName) ?: run {
             flow.markCompleted()
             flowContext.setActiveFlow(null)
-            return FlowResult.Complete("No $contactName in your contacts that I can see.")
+            return FlowResult.Complete("I couldn't find $contactName in your contacts.")
         }
 
         return try {
@@ -485,9 +495,10 @@ class FollowUpCoordinator(
             ?: return FlowResult.AwaitingInput("I didn't catch the time. When?")
 
         reminderRepository.create(
-            label       = content,
-            triggerAtMs = triggerMs,
-            type        = ScheduledItemType.REMINDER
+            label        = content,
+            triggerAtMs  = triggerMs,
+            type         = ScheduledItemType.REMINDER,
+            deliveryMode = DeliveryMode.SPEAK_IF_IDLE,
         )
 
         flow.markCompleted()

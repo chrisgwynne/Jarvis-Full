@@ -40,6 +40,11 @@ object SlotExtractor {
     private val THAT_RE   = Regex("""^(?:just\s+)?that\s+(.+)$""", RegexOption.IGNORE_CASE)
     private val WRITE_RE  = Regex("""^(?:write|type)\s+(.+)$""", RegexOption.IGNORE_CASE)
 
+    private val OFF_TOPIC_BODY_RE = Regex(
+        """^(?:what(?:'s| is) the (?:time|date|weather)|what time is it|how (?:are you|do you do))""",
+        RegexOption.IGNORE_CASE
+    )
+
     /**
      * Extract a message body from an utterance, resolving pronouns via [entityTracker].
      * Returns null if the utterance looks like a command rather than a message body.
@@ -52,6 +57,8 @@ object SlotExtractor {
         SAY_RE.find(resolved)?.let   { return it.groupValues[1].trim() }
         THAT_RE.find(resolved)?.let  { return it.groupValues[1].trim() }
         WRITE_RE.find(resolved)?.let { return it.groupValues[1].trim() }
+
+        if (OFF_TOPIC_BODY_RE.containsMatchIn(lower)) return null
 
         // Recipient is already known when this is called — anything non-empty is the body.
         return if (lower.isNotBlank()) resolved.trim() else null

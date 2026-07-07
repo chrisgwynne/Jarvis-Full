@@ -78,20 +78,22 @@ class SherpaPiperPhonemizer(private val context: Context) : PiperPhonemizer {
                     continue
                 }
 
+                var anyMapped = false
                 var cpIdx = 0
                 while (cpIdx < nfd.length) {
                     val cp = nfd.codePointAt(cpIdx)
                     val token = String(Character.toChars(cp))
-                    processedCount++
                     val mapped = idMap[token]
-                    if (mapped == null) {
-                        skipped++
-                        unknownSamples.add(token)
-                    } else {
+                    if (mapped != null) {
                         ids.addAll(mapped)
+                        anyMapped = true
+                    } else {
+                        unknownSamples.add(token)
                     }
                     cpIdx += Character.charCount(cp)
                 }
+                processedCount++
+                if (!anyMapped) skipped++
             }
             ids
         }.filter { it.isNotEmpty() }
@@ -101,6 +103,13 @@ class SherpaPiperPhonemizer(private val context: Context) : PiperPhonemizer {
             else ((mapped.toLong() * 100L) / processedCount.toLong()).toInt()
 
         val aborted = processedCount > 0 && successPercent < MIN_MAPPING_SUCCESS_PERCENT
+        PiperDiagnostics.update { snap ->
+            snap.copy(
+                phonemeMappingSuccessPercent       = successPercent,
+                phonemeMappingAbortedLowCoverage   = aborted,
+                lastPhonemeIdSkips                 = skipped,
+            )
+        }
         if (aborted) {
             return emptyList()
         }

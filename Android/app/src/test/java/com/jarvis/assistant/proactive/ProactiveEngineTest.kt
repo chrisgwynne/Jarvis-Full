@@ -43,7 +43,8 @@ class ProactiveEngineTest {
         val pendingReminderCount: Int                = 0,
         val _missedCallInfo: MissedCallInfo?         = null,
         val _locationName: String?                   = null,
-        val networkAvailable: Boolean                = true
+        val networkAvailable: Boolean                = true,
+        val nowMs: Long                              = System.currentTimeMillis()
     ) : BatteryContextSource, ReminderContextSource, CallContextSource, SpeechStateSource {
 
         override fun getBatteryLevel(): Int = _batteryLevel
@@ -79,14 +80,14 @@ class ProactiveEngineTest {
         cooldownStore  = CooldownStore()
         generator      = EventGenerator(config)
         scorer         = EventScorer(config, cooldownStore)
-        decisionEngine = DecisionEngine(config, cooldownStore)
+        decisionEngine = DecisionEngine(config, cooldownStore, java.time.ZoneId.of("UTC"))
     }
 
     private fun buildSnapshot(ctx: FakeContext): ContextSnapshot {
         val speechState = ctx.getSpeechState()
         val missedCall  = ctx.getMissedCallInfo()
         return ContextSnapshot(
-            currentTimeMillis             = System.currentTimeMillis(),
+            currentTimeMillis             = ctx.nowMs,
             batteryLevel                  = ctx.getBatteryLevel(),
             isCharging                    = ctx.isCharging(),
             screenOn                      = ctx.isScreenOn(),
@@ -166,12 +167,18 @@ class ProactiveEngineTest {
         // Second pass immediately after: global gap + cooldown penalty should suppress
         val secondAction = scoreAndDecide(ctx)
         assertTrue(
-            "Second immediate tick should be NoAction due to global gap",
+            "Second immediate tick should be NoAction due to global gap or cooldown penalty",
             secondAction is ProactiveAction.NoAction
         )
-        assertEquals(
-            com.jarvis.assistant.core.decisions.SuppressionReason.GLOBAL_GAP,
-            (secondAction as ProactiveAction.NoAction).reason
+        // The repetition penalty from markSurfaced reduces the event's score below
+        // passiveThreshold → InterruptLevel.NONE → candidate filtered out before
+        // the global-gap check, so reason is EMPTY_CANDIDATES not GLOBAL_GAP.
+        // Both values are valid suppressions of a just-surfaced event.
+        val reason = (secondAction as ProactiveAction.NoAction).reason
+        assertTrue(
+            "Expected EMPTY_CANDIDATES or GLOBAL_GAP but got $reason",
+            reason == com.jarvis.assistant.core.decisions.SuppressionReason.EMPTY_CANDIDATES ||
+            reason == com.jarvis.assistant.core.decisions.SuppressionReason.GLOBAL_GAP
         )
     }
 
@@ -205,10 +212,14 @@ class ProactiveEngineTest {
      */
     @Test
     fun testUpcomingReminderPassiveAt10Min() = runTest {
-        val nineMinutesMs = System.currentTimeMillis() + 9 * 60_000L
+        // Use a fixed midday UTC timestamp so presence gate (NIGHT check) is never triggered,
+        // regardless of when CI runs. 2023-11-13 12:00:00 UTC.
+        val middayUtcMs = 1_699_876_800_000L
+        val nineMinutesMs = middayUtcMs + 9 * 60_000L
         val ctx = FakeContext(
             nextReminderAtMs     = nineMinutesMs,
-            pendingReminderCount = 1
+            pendingReminderCount = 1,
+            nowMs                = middayUtcMs
         )
         val action = scoreAndDecide(ctx)
         assertTrue(

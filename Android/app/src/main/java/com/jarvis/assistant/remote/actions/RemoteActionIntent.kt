@@ -80,7 +80,7 @@ object RemoteActionIntent {
         }
 
         // "create a note [called X] [on the mac]"
-        val notePattern = Regex("""create (?:a )?note(?: called (.+?))?(?:on (?:the|my) mac)?""")
+        val notePattern = Regex("""create (?:a )?note(?: called (.+))?(?:on (?:the|my) mac)?""")
         val noteMatch = notePattern.find(lower)
         if (noteMatch != null && (hasMacPhrase || !lower.contains("on (?:android|my phone|phone)".toRegex()))) {
             val rawTitle = noteMatch.groupValues.getOrNull(1)?.trim()?.ifBlank { null }

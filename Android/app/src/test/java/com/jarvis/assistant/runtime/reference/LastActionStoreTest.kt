@@ -43,7 +43,7 @@ class LastActionStoreTest {
         val store = LastActionStore(capacity = 8, ttlMs = 1_000L, nowMsProvider = { now })
         now = 100; store.recordToolCall("old", "", "t", "old", false)
         now = 200; store.recordToolCall("fresh", "", "t", "fresh", false)
-        now = 1_300 // old (100) is now 1200 ms old, past ttl=1000
+        now = 1_200 // old (100) is now 1100 ms old, past ttl=1000; fresh (200) is exactly at cutoff
         val snap = store.snapshot()
         assertEquals(1, snap.size)
         assertEquals("fresh", (snap[0] as LastAction.ToolCall).toolName)

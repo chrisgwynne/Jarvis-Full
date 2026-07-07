@@ -14,8 +14,13 @@ class OutcomeRecorderTest {
     @Test
     fun `ignored outcome marks ledger ignored and persists row`() = runBlocking {
         val dao = FakeOutcomeDao()
-        val ledger = ActionLedger(CooldownStore(), nowMs = { nowMs })
+        val cooldownStore = CooldownStore()
+        val ledger = ActionLedger(cooldownStore, nowMs = { nowMs })
         val recorder = OutcomeRecorder(dao, ledger) { nowMs }
+
+        // CooldownStore.markIgnored has a guard: it requires markSurfaced first,
+        // so the dedupeKey must be surfaced before a verdict can be recorded.
+        cooldownStore.markSurfaced("low_battery:once")
 
         recorder.resolveProactiveVerdict(
             dedupeKey = "low_battery:once",

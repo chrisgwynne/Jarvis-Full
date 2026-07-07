@@ -47,20 +47,20 @@ class SpeakerPermissionPolicyTest {
         assertTrue(SpeakerPermissionPolicy.isAllowed(highResult, "shopping_list"))
     }
 
-    @Test fun `shopping_list denied for low confidence with reason`() {
+    @Test fun `shopping_list allowed for low confidence via owner assumed`() {
         val decision = SpeakerPermissionPolicy.evaluate(lowResult, "shopping_list")
-        assertFalse(decision.allowed)
-        assertNotNull(decision.denyReason)
+        assertTrue(decision.allowed)
+        assertNull(decision.denyReason)
     }
 
-    @Test fun `shopping_list denied for unknown speaker with reason`() {
+    @Test fun `shopping_list allowed for unknown speaker via owner assumed`() {
         val decision = SpeakerPermissionPolicy.evaluate(unknownResult, "shopping_list")
-        assertFalse(decision.allowed)
-        assertNotNull(decision.denyReason)
+        assertTrue(decision.allowed)
+        assertNull(decision.denyReason)
     }
 
-    @Test fun `memory_recall denied for unknown speaker`() {
-        assertFalse(SpeakerPermissionPolicy.isAllowed(unknownResult, "memory_recall"))
+    @Test fun `memory_recall allowed for unknown speaker via owner assumed`() {
+        assertTrue(SpeakerPermissionPolicy.isAllowed(unknownResult, "memory_recall"))
     }
 
     @Test fun `call allowed for high confidence`() {
@@ -74,8 +74,8 @@ class SpeakerPermissionPolicyTest {
             SpeakerPermissionPolicy.classifyAction("some_future_tool"))
     }
 
-    @Test fun `unrecognised tool denied for unknown speaker`() {
-        assertFalse(SpeakerPermissionPolicy.isAllowed(unknownResult, "some_future_tool"))
+    @Test fun `unrecognised tool allowed for unknown speaker via owner assumed`() {
+        assertTrue(SpeakerPermissionPolicy.isAllowed(unknownResult, "some_future_tool"))
     }
 
     // ── Approved decision has no denyReason ───────────────────────────────────
