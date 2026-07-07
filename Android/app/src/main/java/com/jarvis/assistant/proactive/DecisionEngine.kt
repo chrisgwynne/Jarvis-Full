@@ -35,7 +35,8 @@ import java.time.ZoneId
  */
 class DecisionEngine(
     private val config: ProactiveConfig,
-    private val cooldownStore: CooldownStore
+    private val cooldownStore: CooldownStore,
+    private val zone: ZoneId = ZoneId.systemDefault()
 ) {
 
     companion object {
@@ -137,7 +138,8 @@ class DecisionEngine(
                 lastInteractionMs = snapshot.lastUserInteractionTimeMillis,
                 isJarvisSpeaking  = snapshot.isJarvisSpeaking,
                 isJarvisListening = snapshot.isJarvisListening,
-                isDriving         = snapshot.isDriving
+                isDriving         = snapshot.isDriving,
+                zone              = zone
             )
             if (!presence.allowsSoftSuggestions()) {
                 Log.d(
@@ -212,7 +214,7 @@ class DecisionEngine(
         val start = config.quietHoursStartHour ?: return false
         val end   = config.quietHoursEndHour   ?: return false
         if (start == end) return false
-        val hour = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()).hour
+        val hour = Instant.ofEpochMilli(nowMs).atZone(zone).hour
         return if (start < end) {
             hour in start until end
         } else {

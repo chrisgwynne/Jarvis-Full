@@ -11,6 +11,7 @@ import com.jarvis.assistant.audio.recording.RecordingState
 import com.jarvis.assistant.audio.recording.RecordingTranscriber
 import com.jarvis.assistant.runtime.FailurePhrases
 import com.jarvis.assistant.tools.framework.Tool
+import com.jarvis.assistant.util.SettingsStore
 import com.jarvis.assistant.tools.framework.ToolInput
 import com.jarvis.assistant.tools.framework.ToolResult
 import com.jarvis.assistant.tools.framework.ToolSchema
@@ -43,7 +44,8 @@ import kotlinx.coroutines.withContext
 class AudioRecordingTool(
     private val context: Context,
     private val recordingManager: AudioRecordingManager,
-    private val transcriber: RecordingTranscriber
+    private val transcriber: RecordingTranscriber,
+    private val settings: SettingsStore? = null
 ) : Tool {
 
     override val name        = "audio_recording"
@@ -138,7 +140,7 @@ class AudioRecordingTool(
      * recording is never silent/undisclosed. Persisted so it's said only once.
      */
     private fun startedMessage(): String {
-        val store = com.jarvis.assistant.util.SettingsStore(context)
+        val store = settings ?: return "Recording started."
         return if (!store.recordingDisclosureShown) {
             store.recordingDisclosureShown = true
             "Recording. I'll keep this on the device, auto-delete it after a week, " +
